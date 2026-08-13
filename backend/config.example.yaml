@@ -1,0 +1,62 @@
+﻿# 视频工作台 - 配置模板
+# 复制此文件为 config.yaml 并根据实际环境修改
+
+nas:
+  # 制作部 NAS 根目录（N 盘）
+  production_roots:
+    - N:\AI漫剧二部中转
+    - N:\AI漫剧一部中转\AI漫剧一部海外
+    - N:\AI漫剧九部中转\海外
+    - N:\AI漫剧六部中转
+  # 部门显示名映射
+  production_labels:
+    N:\AI漫剧二部中转: AI漫剧二部
+    N:\AI漫剧一部中转\AI漫剧一部海外: AI漫剧一部海外
+    N:\AI漫剧九部中转\海外: AI漫剧九部海外
+    N:\AI漫剧六部中转: AI漫剧六部中转
+  # 组内 NAS 根目录（O 盘）
+  group_root: O:\AI漫剧剪辑一组
+  # UNC 路径映射（用于本地/服务器迁移）
+  unc_map:
+    'N:': \\192.168.8.234\ai漫剧中转盘
+    'O:': \\192.168.8.93\ai漫剧后期
+
+sync:
+  mode: full
+  exclude_patterns:
+    - '*.tmp'
+    - '*.bak'
+    - Thumbs.db
+    - .DS_Store
+    - ~$*
+
+# 成片输出目录名（相对每个项目根）
+output_dir_name: 01上映单集版
+# 交付导出目录
+delivery_folder: C:\Users\Admin\Desktop\000交付
+
+watcher:
+  enabled: true
+  stable_seconds: 30
+  extensions:
+    - .mp4
+    - .mov
+    - .mxf
+    - .avi
+    - .wav
+    - .aiff
+
+special_projects: {}
+
+web:
+  host: 0.0.0.0
+  port: 8089
+
+# 数据库路径（相对 main.py 或绝对路径均可）
+database: data/workbench.db
+
+logging:
+  level: INFO
+  file: nas_bridge.log
+  max_mb: 10
+  backups: 5
