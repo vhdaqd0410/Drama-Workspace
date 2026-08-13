@@ -64,6 +64,41 @@ app = Flask(__name__,
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 _start_time = time.time()
 
+# ========= 安全加固 =========
+_API_SECRET = config.get("web", {}).get("api_secret")
+if not _API_SECRET:
+    _API_SECRET = secrets.token_urlsafe(24)
+    config.setdefault("web", {})["api_secret"] = _API_SECRET
+    try:
+        save_config()
+        logger.warning("首次启动，已自动生成 API_SECRET 并存入 config.yaml")
+    except Exception:
+        logger.warning("生成的 API_SECRET 未能写入 config.yaml（不影响运行）")
+
+# 免鉴权白名单：页面 + 静态资源 + 内部轮询 + 文件流式端点
+# video/img 原生请求不走 fetch，无法自动带 key；服务已绑 127.0.0.1，外部无法直连
+_PUBLIC_ROUTES = {"/", "/health", "/api/health", "/api/status", "/favicon.ico"}
+_PUBLIC_PREFIXES = ("/static/", "/api/_self/", "/api/preview/", "/api/thumbnail/", "/api/frame/", "/api/file_stream/")
+
+@app.before_request
+def _auth_gate():
+    path = request.path
+    if path in _PUBLIC_ROUTES or path.startswith(_PUBLIC_PREFIXES):
+        return None
+    # 页面本身放行（index.html 直接访问）
+    if request.endpoint == "index":
+        return None
+    # API 请求校验 header 或 query param（兼容 fetch）
+    provided = request.headers.get("X-API-KEY", "") or request.args.get("key", "")
+    if provided != _API_SECRET:
+        return jsonify({"ok": False, "message": "Unauthorized"}), 401
+
+@app.after_request
+def _add_security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    return resp
+
 
 def _bg(fn, *args, **kwargs):
     """把 fn 放到后台 daemon 线程执行"""
@@ -103,7 +138,7 @@ def index():
     except Exception as e:
         app.logger.error('boot_data failed: %s', e)
         boot_data = 'null'
-    return render_template('index.html', boot_data=boot_data)
+    return render_template('index.html', boot_data=boot_data, api_key=_API_SECRET)
 
 
 
@@ -414,18 +449,7 @@ def api_project_custom_status(project_name):
     return jsonify({"ok": False, "message": msg}), 400
 
 
-@app.route("/api/debug/sort")
-def api_debug_sort():
-    """调试端点：验证自然排序是否生效"""
-    from sync_engine import _natural_key
-    test = ["60.mp4", "10.mp4", "2.mp4", "1.mp4", "11.mp4"]
-    sorted_list = sorted(test, key=_natural_key)
-    return jsonify({
-        "natural_key_available": True,
-        "input": test,
-        "sorted": sorted_list,
-        "expected": ["1.mp4", "2.mp4", "10.mp4", "11.mp4", "60.mp4"],
-    })
+
 
 
 # ==================== NAS 路径管理 ====================
@@ -701,37 +725,50 @@ except (AttributeError, ValueError):
 @app.route("/api/_exec_cmd", methods=["POST"])
 def api_exec_cmd():
     """安全受限的命令执行接口：仅允许启动白名单内的程序。
-    body: {"cmd": "pythonw ...video_qa_tool.py ..."}
+    body: {"cmd": ["pythonw", "...video_qa_tool.py", "..."]}  或 {"cmd": "pythonw ..."}
     """
     import subprocess as _sp
+    import shlex as _shlex
     data = request.get_json(silent=True) or {}
-    cmd = (data.get("cmd") or "").strip()
-    if not cmd:
+    raw_cmd = data.get("cmd")
+
+    # 强制要求 token（比全局鉴权更严格）
+    require_auth = data.get("_auth_required", True)
+    actual_key = request.headers.get("X-API-KEY", "")
+    if require_auth and actual_key != API_SECRET_KEY:
+        return jsonify({"ok": False, "message": "鉴权失败"}), 401
+
+    if isinstance(raw_cmd, list):
+        cmd_parts = [str(p) for p in raw_cmd if str(p).strip()]
+    elif isinstance(raw_cmd, str) and raw_cmd.strip():
+        try:
+            cmd_parts = _shlex.split(raw_cmd)
+        except ValueError:
+            return jsonify({"ok": False, "message": "命令格式错误"}), 400
+    else:
+        return jsonify({"ok": False, "message": "cmd 不能为空"}), 400
+
+    if not cmd_parts:
         return jsonify({"ok": False, "message": "cmd 不能为空"}), 400
 
     # 白名单安全检查：只允许启动质检工具
-    ALLOWED_KEYWORDS = [
-        "video_qa_tool",
-        "pythonw",
-        "python",
-    ]
-    cmd_lower = cmd.lower()
-    if not any(kw.lower() in cmd_lower for kw in ALLOWED_KEYWORDS):
+    ALLOWED_KEYWORDS = ("video_qa_tool", "pythonw", "python")
+    first_part_lower = cmd_parts[0].lower()
+    if not any(kw in first_part_lower for kw in ALLOWED_KEYWORDS):
         return jsonify({"ok": False, "message": "命令不在白名单中"}), 403
 
-    # 进一步禁止危险字符
-    forbidden = ["&", "|", ";", "`", "..", "$("]
-    for ch in forbidden:
-        if ch in cmd:
-            return jsonify({"ok": False, "message": f"命令包含禁止字符: {ch}"}), 403
+    # 简单路径穿越检测：任意参数包含 ".." 就拒绝
+    for part in cmd_parts:
+        if ".." in part:
+            return jsonify({"ok": False, "message": "禁止路径穿越"}), 403
 
     try:
         _sp.Popen(
-            cmd,
-            shell=True,
+            cmd_parts,
+            shell=False,
             creationflags=_sp.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-        logger.info("已启动外部进程: %s", cmd[:200])
+        logger.info("已启动外部进程: %s", " ".join(cmd_parts)[:200])
         return jsonify({"ok": True, "message": "已启动"})
     except Exception as e:
         logger.error("启动进程失败: %s", e)
@@ -743,6 +780,7 @@ def api_exec_cmd():
 
 QA_RESULT_CACHE = {}  # {project_name: {"ok": True, "data": {...}, "file": "...", "mtime": float}}
 QA_CACHE_TTL = 30     # 缓存 30 秒
+_QA_CACHE_LOCK = threading.Lock()
 
 @app.route("/api/project/<path:project_name>/qa_result", methods=["GET"])
 def api_project_qa_result(project_name):
@@ -752,9 +790,10 @@ def api_project_qa_result(project_name):
     import time as _time
 
     # 检查缓存是否还热
-    cached = QA_RESULT_CACHE.get(project_name)
-    if cached and (_time.time() - cached.get("mtime", 0) < QA_CACHE_TTL):
-        return jsonify(cached["data"])
+    with _QA_CACHE_LOCK:
+        cached = QA_RESULT_CACHE.get(project_name)
+        if cached and (_time.time() - cached.get("mtime", 0) < QA_CACHE_TTL):
+            return jsonify(cached["data"])
 
     project_path = request.args.get("dir", "").strip()
 
@@ -785,7 +824,8 @@ def api_project_qa_result(project_name):
             "message": "未找到质检结果（尚未运行过质检工具）",
             "qa_found": False,
         }
-        QA_RESULT_CACHE[project_name] = {"ok": True, "data": data, "mtime": _time.time()}
+        with _QA_CACHE_LOCK:
+            QA_RESULT_CACHE[project_name] = {"ok": True, "data": data, "mtime": _time.time()}
         return jsonify(data)
 
     # 读取最新的那个
@@ -800,7 +840,8 @@ def api_project_qa_result(project_name):
             "qa_found": True,
             "qa_file": os.path.basename(latest_file),
         }
-        QA_RESULT_CACHE[project_name] = {"ok": True, "data": data, "mtime": _time.time()}
+        with _QA_CACHE_LOCK:
+            QA_RESULT_CACHE[project_name] = {"ok": True, "data": data, "mtime": _time.time()}
         return jsonify(data)
 
     # 汇总状态
@@ -851,11 +892,13 @@ def api_project_qa_result(project_name):
         "issues": issues_summary,
     }
 
-    QA_RESULT_CACHE[project_name] = {"ok": True, "data": data, "mtime": _time.time()}
+    with _QA_CACHE_LOCK:
+        QA_RESULT_CACHE[project_name] = {"ok": True, "data": data, "mtime": _time.time()}
     return jsonify(data)
 
 # 让 /api/projects 也带上轻量 QA 状态（扫描每个项目最新的 qa_result 文件）
 _qa_status_cache = {}
+_QA_STATUS_LOCK = threading.Lock()
 
 def _scan_qa_status(project_name):
     """快速扫描一个项目的 QA 状态，不读完整 JSON"""
@@ -863,9 +906,10 @@ def _scan_qa_status(project_name):
     import tempfile as _tf
     import time as _time
 
-    cached = _qa_status_cache.get(project_name)
-    if cached and (_time.time() - cached.get("mtime", 0) < QA_CACHE_TTL):
-        return cached.get("data")
+    with _QA_STATUS_LOCK:
+        cached = _qa_status_cache.get(project_name)
+        if cached and (_time.time() - cached.get("mtime", 0) < QA_CACHE_TTL):
+            return cached.get("data")
 
     temp_dir = _tf.gettempdir()
     candidates = []
@@ -876,7 +920,8 @@ def _scan_qa_status(project_name):
         candidates.extend(_glob.glob(os.path.join(temp_dir, pattern)))
 
     if not candidates:
-        _qa_status_cache[project_name] = {"mtime": _time.time(), "data": None}
+        with _QA_STATUS_LOCK:
+            _qa_status_cache[project_name] = {"mtime": _time.time(), "data": None}
         return None
 
     latest = sorted(set(candidates), key=os.path.getmtime, reverse=True)[0]
@@ -884,7 +929,8 @@ def _scan_qa_status(project_name):
         with open(latest, "r", encoding="utf-8") as f:
             qa = json.load(f)
     except:
-        _qa_status_cache[project_name] = {"mtime": _time.time(), "data": None}
+        with _QA_STATUS_LOCK:
+            _qa_status_cache[project_name] = {"mtime": _time.time(), "data": None}
         return None
 
     failed = qa.get("failed", 0)
@@ -907,7 +953,8 @@ def _scan_qa_status(project_name):
         "total": total,
         "generated_at": qa.get("generated_at", ""),
     }
-    _qa_status_cache[project_name] = {"mtime": _time.time(), "data": result}
+    with _QA_STATUS_LOCK:
+        _qa_status_cache[project_name] = {"mtime": _time.time(), "data": result}
     return result
 
 
