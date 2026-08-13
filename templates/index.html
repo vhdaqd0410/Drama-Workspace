@@ -196,7 +196,6 @@ a{color:var(--blue);text-decoration:none}
 .episode-alert-item button{color:var(--blue);font-size:12px;cursor:pointer;padding:2px 8px;border-radius:4px}
 .episode-alert-item button:hover{background:var(--blue-light)}
 
-
 .section-block{margin-bottom:24px;background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden}
 .section-header{display:flex;align-items:center;gap:10px;padding:14px 20px;background:linear-gradient(135deg,#fafbfc,#f0f2f5);cursor:pointer;user-select:none;border-bottom:1px solid var(--border);transition:background .15s}
 .section-header:hover{background:linear-gradient(135deg,#f0f2f5,#e8ebf0)}
@@ -376,7 +375,20 @@ a{color:var(--blue);text-decoration:none}
 </style>
 <style>
 .card-title-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
-.dept-badge{font-size:10px;padding:2px 8px;border-radius:10px;margin-left:6px;font-weight:600;letter-spacing:.3px;white-space:nowrap;vertical-align:middle;display:inline-block}</style><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/></head>
+.dept-badge{font-size:10px;padding:2px 8px;border-radius:10px;margin-left:6px;font-weight:600;letter-spacing:.3px;white-space:nowrap;vertical-align:middle;display:inline-block}
+.fm-main + .btn {
+  margin-left: -1px !important;
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  padding: 2px 7px !important;
+  font-size: 11px;
+  line-height: 1.3;
+  border-left: 1px solid rgba(0,0,0,0.12);
+}
+.fm-main + .btn:hover {
+  background: #e7e7e7;
+}
+</style><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/></head>
 <body>
 <div class="header">
   <div class="header-left"><div class="logo"><span class="logo-icon">🎬</span>视频工作台</div></div>
@@ -760,9 +772,16 @@ function renderActions(p){
     if(needSync)btns.push(['📦 同步素材',`syncMaterial('${pname}')`,'btn-primary']);
   }
   if(syncStatus === 'syncing')btns.push(['⏳ 同步中...','void(0)','']);
+    // 分秒帧按钮：仅一部海外 / 九部海外 的项目显示
+  const _fmDepts = (window._fmConfig&&window._fmConfig.enabled_departments)||['AI漫剧一部海外','AI漫剧九部海外'];
+  const _dept = p.department||'';
+  if(_fmDepts.some(d => _dept.includes(d))){
+    btns.push(['🔗 分秒帧',`openFenmiaozhen('${pname}')`,'fm-main','']);
+    btns.push(['✏️',`editFenmiaozhenLink('${pname}')`,'','title="修改分秒帧链接"']);
+  }
   if(btns.length===0)btns.push(['🔍 质检',`qaStartFor('${pname}')`,'']);
   btns.push(['📋 详情',`openProjectDetail('${pname}')`,'']);
-  return btns.map(([label,fn,cls])=>`<button class="btn btn-sm ${cls||''}" onclick="${fn}">${label}</button>`).join('');
+  return btns.map(([label,fn,cls,extra])=>`<button class="btn btn-sm ${cls||''}" ${extra||''} onclick="${fn}">${label}</button>`).join('');
 }
 function renderStats(){
   const list = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
@@ -807,8 +826,11 @@ function getDeptStyle(dept){
 
 function projectCardHTML(p){
   const badge=getBadge(p.custom_status);
-  const m=p.material_sync===true?'<span class="sr-val">✅ 已同步</span>':p.material_sync===false?'<span class="sr-val">⏳ 待同步</span>':'<span class="sr-val">—</span>';
-  const d=p.delivered===true?'<span class="sr-val">✅ 已交付</span>':p.delivered===false?'<span class="sr-val">⏳ 待交付</span>':'<span class="sr-val">—</span>';
+  const _st=p.custom_status||'';
+  const _hasEdit=_st==='剪辑中'||_st==='审核中'||_st==='修改中'||_st==='待质检'||_st==='质检中'||_st==='待交付'||_st==='交付中';
+  const _hasDeliver=_st==='审核中'||_st==='修改中'||_st==='待质检'||_st==='质检中'||_st==='待交付'||_st==='交付中'||_st==='已交付'||_st==='已完成';
+  const m=p.material_sync===true?'<span class="sr-val">✅ 已同步</span>':p.material_sync===false?'<span class="sr-val">⏳ 待同步</span>':_hasEdit?'<span class="sr-val">✅ 已同步</span>':'<span class="sr-val">—</span>';
+  const d=p.delivered===true?'<span class="sr-val">✅ 已交付</span>':p.delivered===false?'<span class="sr-val">⏳ 待交付</span>':_hasDeliver?'<span class="sr-val">✅ 已交付</span>':'<span class="sr-val">—</span>';
   const qa=qaBadgeHTML(p.qa_status);
     const dept=p.department?`<span class="dept-badge" style="${getDeptStyle(p.department)}">${p.department}</span>`:'';
 
@@ -844,6 +866,10 @@ function projectCardHTML(p){
   }
   openBtns += `<button class="btn btn-sm" onclick="toggleEpisodesPanel('${pname}', this)">📺 分集</button>`;
   openBtns += `<button class="btn btn-sm" onclick="refreshProjectStatus('${pname}', this)" title="扫描目录刷新进度">🔄 刷新</button>`;
+
+  if (status === '修改中') {
+  
+  }
 
   const epPanel = `<div class="card-episodes-panel" id="ep-panel-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>`;
   const epSummaryBox = `<div class="ep-missing-summary" data-ep-summary="${p.name.replace(/"/g,'&quot;')}"></div>`;
@@ -1139,8 +1165,65 @@ if(!confirm(`确认要将 "${name}" 从制作部NAS同步到组内NAS吗？\n（
     toast('同步请求失败: '+e.message,'error');
   }
 }
+async function openFenmiaozhen(name){
+  const enc = encodeURIComponent(name);
+  const setBtn = (txt, disabled) => {
+    const b = document.querySelector(`button[onclick*="openFenmiaozhen('${name.replace(/'/g,'\\')}')"]`);
+    if(b){ b.textContent = txt; b.disabled = disabled; }
+  };
+  setBtn('⏳ 读取中...', true);
+  try {
+    let d = await fetch(`/api/fenmiaozhen/link/${enc}`).then(r => r.json());
+    if (d.ok && d.has_link) {
+      window.open(d.url, '_blank');
+      setBtn('🔗 分秒帧', false);
+      toast('✅ 已打开分秒帧链接', 'success');
+      return;
+    }
+    const entered = prompt('🔗 请输入该项目的分秒帧审核链接：', 'https://www.mediatrack.cn/');
+    if (!entered) { setBtn('🔗 分秒帧', false); return; }
+    setBtn('⏳ 保存中...', true);
+    const saved = await fetch(`/api/fenmiaozhen/link/${enc}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: entered})
+    }).then(r => r.json());
+    if (saved.ok) {
+      window.open(saved.url, '_blank');
+      setBtn('🔗 分秒帧', false);
+      toast('✅ 链接已保存，已打开分秒帧', 'success', 4000);
+    } else {
+      setBtn('🔗 分秒帧', false);
+      toast('❌ 保存失败: ' + (saved.msg || ''), 'error');
+    }
+  } catch (e) {
+    setBtn('🔗 分秒帧', false);
+    toast('❌ 操作失败: ' + e.message, 'error');
+  }
+}
+
 async function openFenjiFor(name){switchTab('fenji');await loadFenjiProjects();$('fjProject').value=name;readFromProject()}
 async function qaStartFor(name){switchTab('qa');await loadQAProjects();$('qaProject').value=name;qaStart()}
+async function editFenmiaozhenLink(name){
+  const enc = encodeURIComponent(name);
+  try {
+    const d = await fetch(`/api/fenmiaozhen/link/${enc}`).then(r => r.json());
+    const curUrl = (d.ok && d.url) ? d.url : '';
+    const entered = prompt('🔗 修改分秒帧审核链接：', curUrl || 'https://www.mediatrack.cn/');
+    if(!entered) return;
+    const saved = await fetch(`/api/fenmiaozhen/link/${enc}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url: entered})
+    }).then(r => r.json());
+    if(saved.ok){
+      toast('✅ 链接已更新', 'success');
+    } else {
+      toast('❌ 保存失败: '+(saved.msg||''), 'error');
+    }
+  } catch(e){
+    toast('❌ 操作失败: '+e.message, 'error');
+  }
+}
 
 function updateLightLists(){
   const fj=$('fjProject'),qa=$('qaProject');
@@ -1216,6 +1299,13 @@ async function openProjectDetail(name){
       <div style="padding:0 20px 20px;text-align:right"><button class="btn" onclick="$('detailModal').classList.remove('active')">关闭</button></div>`;
   }
 }
+function openSmart(name, which){
+  api('POST', '/api/project/' + encodeURIComponent(name) + '/open_folder', { which: which }).then(function(data){
+    if(data.ok) toast('已打开: ' + (data.message || '成功'), 'success');
+    else toast(data.message || '打开失败', 'error');
+  }).catch(function(e){ toast('打开失败: ' + e.message, 'error'); });
+}
+
 async function openFolder(type,name){
   try{
     // 直接调统一的 open_folder，让后端决定开哪个
@@ -1236,7 +1326,6 @@ function openFolderByPath(name, path){
     }).catch(function(e){ toast('打开失败: ' + e.message, 'error'); });
   }catch(e){ toast('打开失败', 'error'); }
 }
-
 
 /* ============ Episode Alert Banner ============ */
 var _episodeStatusCache = {};
@@ -1261,7 +1350,7 @@ function _compactRange(nums) {
     return parts.join(', ');
   }
 
-function buildEpSummaryHtml(data, projectName, dbFallback) {
+function buildEpSummaryHtml(data, projectName, dbFallback, customStatus) {
     if (!data || !data.ok) {
       if (dbFallback) {
         var total = dbFallback.total_episodes || 0;
@@ -1288,7 +1377,7 @@ function buildEpSummaryHtml(data, projectName, dbFallback) {
           }
           var html = '<b>' + cur + '/' + total + ' 集</b> · 正在扫描文件确认输出情况...';
           if (personRows.length > 0) html += '<div class="ep-person-grid">' + personRows.join('') + '</div>';
-          html += '<button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>';
+          html += '<div style="margin-top:8px"><button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>' + (customStatus === '修改中' ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-revising" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#ff9500;color:#fff">📝 修改预览</button>' : '') + '</div>';
           return { className: 'ep-missing-summary', html: html };
         }
       }
@@ -1304,7 +1393,7 @@ function buildEpSummaryHtml(data, projectName, dbFallback) {
       return { className: 'ep-missing-summary', html: '请先设置「总集数」，再点「统计」识别文件' };
     }
     if (missing.length === 0) {
-      var detailHint = ' <button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>';
+      var detailHint = ' <div style="margin-top:8px"><button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>' + (customStatus === '修改中' ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-revising" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#ff9500;color:#fff">📝 修改预览</button>' : '') + '</div>';
       return {
         className: 'ep-missing-summary ok',
         html: '✅ ' + curCount + '/' + total + ' 集 全部输出完成' + detailHint
@@ -1341,7 +1430,7 @@ function buildEpSummaryHtml(data, projectName, dbFallback) {
     if (unnamed && unnamed.length > 0) {
       unnamedHtml = '<div class="ep-unnamed-tip">另有 ' + unnamed.length + ' 个文件未识别集号</div>';
     }
-    var detailBtn = '<button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>';
+    var detailBtn = '<div style="margin-top:8px"><button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>' + (customStatus === '修改中' ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-revising" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#ff9500;color:#fff">📝 修改预览</button>' : '') + '</div>';
 
     return {
       className: 'ep-missing-summary has-missing',
@@ -1374,7 +1463,9 @@ function updateCardEpisodeSummary(projectName, data) {
     // 1. 更新文字摘要
     var selector = document.querySelector('.ep-missing-summary[data-ep-summary="' + projectName.replace(/"/g,'&quot;') + '"]');
     if (selector) {
-        var result = buildEpSummaryHtml(data, projectName, null);
+        var _p = (projects||[]).find(function(x){ return x.name===projectName; });
+        var _cs = _p ? (_p.custom_status||'') : '';
+        var result = buildEpSummaryHtml(data, projectName, null, _cs);
         if (result) {
             selector.className = result.className || selector.className;
             selector.innerHTML = result.html || '';
@@ -1617,7 +1708,6 @@ function applyBatchEditorPlan(plan) {
     if (grid) grid.scrollTop = 0;
   }
 
-
 async function loadAllEpisodeSummary(){
   await loadInitialEpisodeSummary();
 }
@@ -1677,8 +1767,6 @@ async function runRefreshAllProgress(btn, isAuto){
   toast(('✅ 进度扫描完成：' + ok + '/' + targets.length + ' 成功') + (fail>0 ? ('，' + fail + ' 失败') : ''),
         fail>0 ? 'warning' : 'success');
 }
-
-
 
 function toggleAlertDetail(){
   const el=$('episodeAlertDetail');
@@ -2429,13 +2517,20 @@ function renderTeamList(members){
   const roleMap = {editor:'剪辑师', reviewer:'审核师', pm:'项目经理'};
   const roleColor = {editor:'#0071e3', reviewer:'#af52de', pm:'#ff9f0a'};
 
+  const titleOrder = {'组长':0,'小组长':1,'卡前':2,'卡后':3,'助理':4};
+  const sorted = [...members].sort((a,b) => {
+    const ta = titleOrder[a.title] !== undefined ? titleOrder[a.title] : 99;
+    const tb = titleOrder[b.title] !== undefined ? titleOrder[b.title] : 99;
+    if(ta !== tb) return ta - tb;
+    return (a.name||'').localeCompare(b.name||'', 'zh-Hans-CN');
+  });
   body.innerHTML = `
     <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
       <input type="text" id="teamSearch" placeholder="🔍 搜索姓名/称号..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px" oninput="teamFilterMembers(this.value)">
       <button class="btn btn-sm btn-primary" onclick="teamOpenAdd()">＋ 添加</button>
     </div>
     <div id="teamGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
-      ${members.map(m => teamCardHTML(m, roleMap, roleColor)).join('')}
+      ${sorted.map(m => teamCardHTML(m, roleMap, roleColor)).join('')}
     </div>
   `;
   window._teamMembers = members;
@@ -2477,10 +2572,17 @@ function teamFilterMembers(q){
   const roleColor = {editor:'#0071e3', reviewer:'#af52de', pm:'#ff9f0a'};
   const grid = body.querySelector('#teamGrid');
   if(grid){
-    if(filtered.length === 0){
+    const titleOrder = {'组长':0,'小组长':1,'卡前':2,'卡后':3,'助理':4};
+    const sortedF = [...filtered].sort((a,b) => {
+      const ta = titleOrder[a.title] !== undefined ? titleOrder[a.title] : 99;
+      const tb = titleOrder[b.title] !== undefined ? titleOrder[b.title] : 99;
+      if(ta !== tb) return ta - tb;
+      return (a.name||'').localeCompare(b.name||'', 'zh-Hans-CN');
+    });
+    if(sortedF.length === 0){
       grid.innerHTML = '<div style="grid-column:span 2;text-align:center;padding:30px;color:var(--text-sec)">没有匹配的成员</div>';
     } else {
-      grid.innerHTML = filtered.map(m => teamCardHTML(m, roleMap, roleColor)).join('');
+      grid.innerHTML = sortedF.map(m => teamCardHTML(m, roleMap, roleColor)).join('');
     }
   }
 }
@@ -2511,7 +2613,14 @@ function teamOpenEdit(id){
             <option value="pm" ${m&&m.role==='pm'?'selected':''}>📋 项目经理</option>
           </select>
           <label style="font-size:13px;color:var(--text-sec)">称号</label>
-          <input type="text" id="te_title" value="${m?(m.title||'').replace(/"/g,'&quot;'):''}" placeholder="如：金牌剪辑师 / 资深 / 新人" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+          <select id="te_title" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff">
+            <option value="" ${(!m||!m.title)?'selected':''}>— 请选择 —</option>
+            <option value="组长" ${m&&m.title==='组长'?'selected':''}>组长</option>
+            <option value="小组长" ${m&&m.title==='小组长'?'selected':''}>小组长</option>
+            <option value="卡前" ${m&&m.title==='卡前'?'selected':''}>卡前</option>
+            <option value="卡后" ${m&&m.title==='卡后'?'selected':''}>卡后</option>
+            <option value="助理" ${m&&m.title==='助理'?'selected':''}>助理</option>
+          </select>
           <label style="font-size:13px;color:var(--text-sec)">部门</label>
           <input type="text" id="te_dept" value="${m?(m.department||'').replace(/"/g,'&quot;'):''}" placeholder="如：AI漫剧一部 / 海外组" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
         </div>
@@ -2562,10 +2671,12 @@ async function teamDeleteMember(id){
   }
 }
 
-
 /* ============ Init ============ */
 document.addEventListener('DOMContentLoaded',async ()=>{
   try{
+    // ===== 分秒帧配置初始化 =====
+    try { window._fmConfig = await fetch('/api/fenmiaozhen/config').then(r => r.json()); } catch(_) { window._fmConfig = null; }
+
     // 0. 先显示页面框架（statsRow 去掉 spinner）
     $('statsRow').innerHTML = '<div class="stat-card"><div class="stat-icon blue">📁</div><div><div class="stat-num">...</div><div class="stat-label">加载中</div></div></div>';
 
@@ -2603,69 +2714,97 @@ window.onerror = function(msg, url, line, col, err){
 </script>
 
 <script>
-// 调试面板（开发用，看到红色错误才会弹出）
-window.addEventListener('load', function(){
-  setTimeout(function(){
-    const panel = document.createElement('div');
-    panel.id = 'debugPanel';
-    panel.style.cssText = 'position:fixed;bottom:10px;right:10px;background:#1e1e2e;color:#cdd6f4;font-size:11px;padding:10px;border-radius:8px;max-width:500px;max-height:350px;overflow-y:auto;z-index:9999;font-family:monospace;box-shadow:0 4px 20px rgba(0,0,0,.3)';
-    document.body.appendChild(panel);
-    setInterval(function(){
-      panel.textContent = logs.join('\\n') || '(waiting...)';
-      panel.style.display = panel.textContent.includes('❌') || logs.length > 3 ? 'block' : 'none';
-    }, 300);
-  }, 1500);
-});
-// 事件委托：ep-refresh 按钮（卡片上的 🔄 刷新进度）
-document.addEventListener('click', function(e){
-  var btn = e.target.closest('[data-action="ep-refresh"]');
-  if(btn){
-    var name = btn.getAttribute('data-project');
-    var oldText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '⏳ 扫描中...';
-    fetchEpisodeStatus(name).then(function(data){
-      updateCardEpisodeSummary(name, data);
-      toast('✅ ' + name + ' 进度已刷新', 'success');
-    }).catch(function(err){
-      toast('❌ 刷新失败: ' + err.message, 'error');
-    }).finally(function(){
-      btn.disabled = false;
-      btn.textContent = oldText || '🔄 刷新进度';
-    });
-    e.preventDefault();
-    return;
-  }
-  var delivBtn = e.target.closest('[data-action="ep-deliverables"]');
-  if(delivBtn){
-    var pname = delivBtn.getAttribute('data-project');
-    if(pname) openDeliverablesModal(pname);
-    e.preventDefault();
-    return;
-  }
-});
+// ===== 成片预览状态 =====
+var _deliverablesState = {
+    projectName: null,
+    mode: 'auto',
+    subpath: '',
+    files: [],
+    folders: [],
+    breadcrumbs: [],
+    selected: {},
+    selectedFolders: {},
+    running: false
+};
 
-// modal 关闭
-document.addEventListener('DOMContentLoaded', function(){
-  var overlay = document.getElementById('modal-overlay');
-  if(overlay){
-    overlay.addEventListener('click', function(e){
-      if(e.target === overlay) overlay.style.display = 'none';
-    });
-    var closeBtn = document.getElementById('modal-close');
-    if(closeBtn) closeBtn.addEventListener('click', function(){ overlay.style.display = 'none'; });
-  }
-});
+function openDeliverablesModal(projectName, forceMode){
+    _deliverablesState.projectName = projectName;
+    _deliverablesState.mode = forceMode || 'auto';
+    _deliverablesState.subpath = '';
+    _deliverablesState.selected = {};
+    _deliverablesState.selectedFolders = {};
+    var modal = document.getElementById('detailModal');
+    if(modal){ modal.classList.add('active'); }
+    refreshDeliverablesList();
+}
 
+async function refreshDeliverablesList(){
+    var name = _deliverablesState.projectName;
+    var content = document.getElementById('detailContent');
+    if(content){
+        content.innerHTML = '<div style="padding:40px;text-align:center;color:#86868b">⏳ 扫描成片目录...</div>';
+    }
+    try{
+        var mode = _deliverablesState.mode;
+        if(mode === 'auto'){
+            try{
+                var pinfo = await api('GET', '/api/project/' + encodeURIComponent(name));
+                var proj = pinfo.project || pinfo;
+                var st = proj.custom_status || '';
+                mode = (st === '修改中') ? 'revising' : 'editing';
+            }catch(_){ mode = 'editing'; }
+        }
+        _deliverablesState.mode = mode;
 
+        var url = '/api/output_files/' + encodeURIComponent(name) + '?mode=' + encodeURIComponent(mode);
+        if(_deliverablesState.subpath) url += '&subpath=' + encodeURIComponent(_deliverablesState.subpath);
 
-// === 智能打开文件夹 ===
-function openSmart(name, which){
-  api('POST', '/api/project/' + encodeURIComponent(name) + '/open_folder', { which: which }).then(function(data){
-    if(data.ok) toast('已打开: ' + (data.message || '成功'), 'success');
-    else toast(data.message || '打开失败', 'error');
-  }).catch(function(e){ toast('打开失败: ' + e.message, 'error'); });
-}// === 提取文件名里的集号（复用后端同逻辑的简化版）===
+        var resp = await api('GET', url);
+
+        if(Array.isArray(resp)){
+            _deliverablesState.files = resp;
+            _deliverablesState.folders = [];
+            _deliverablesState.breadcrumbs = [];
+        } else {
+            _deliverablesState.files = resp.files || [];
+            _deliverablesState.folders = resp.folders || [];
+            _deliverablesState.breadcrumbs = resp.breadcrumbs || [];
+
+        }
+        renderDeliverablesModal();
+    }catch(e){
+        console.error("[deliverables]", e);
+        var c2 = document.getElementById('detailContent');
+        if(c2) c2.innerHTML = '<div style="padding:40px;text-align:center;color:#ff3b30">❌ 加载失败: ' + e.message + '</div>';
+    }
+}
+
+// === 进入修改子文件夹 ===
+function navDelivFolder(subpath){
+  var cur = _deliverablesState.subpath ? _deliverablesState.subpath + '/' + subpath : subpath;
+  _deliverablesState.subpath = cur;
+  refreshDeliverablesList();
+}
+
+// === 导航到指定面包屑层级 ===
+function navDelivTo(subpath){
+  _deliverablesState.subpath = subpath || '';
+  refreshDeliverablesList();
+}
+
+function switchDelivMode(projectName, newMode){
+  _deliverablesState.mode = newMode;
+  _deliverablesState.subpath = '';
+  refreshDeliverablesList();
+}
+
+function _fmtSize(bytes){
+  if(bytes < 1024) return bytes + ' B';
+  if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  if(bytes < 1024*1024*1024) return (bytes/1024/1024).toFixed(1) + ' MB';
+  return (bytes/1024/1024/1024).toFixed(2) + ' GB';
+}
+
 function _extractEpNum(filename){
   var m;
   // 1.mp4 / 01.mp4
@@ -2683,53 +2822,31 @@ function _extractEpNum(filename){
   return null;
 }
 
-// === 格式化文件大小 ===
-function _fmtSize(bytes){
-  if(bytes < 1024) return bytes + ' B';
-  if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
-  if(bytes < 1024*1024*1024) return (bytes/1024/1024).toFixed(1) + ' MB';
-  return (bytes/1024/1024/1024).toFixed(2) + ' GB';
-}
-
-// === 成片输出详情 Modal ===
-var _deliverablesState = { projectName: '', files: [], selected: {}, running: false };
-
-function openDeliverablesModal(projectName){
-  _deliverablesState = { projectName: projectName, files: [], selected: {}, running: false };
-  var modal = $('detailModal');
-  var content = $('detailContent');
-  modal.classList.add('active');
-  content.innerHTML = '<div style="padding:40px;text-align:center;color:#86868b">⏳ 正在加载成片文件列表...</div>';
-  refreshDeliverablesList();
-}
-
-async function refreshDeliverablesList(){
-  var name = _deliverablesState.projectName;
-  var content = $('detailContent');
-  content.innerHTML = '<div style="padding:40px;text-align:center;color:#86868b">⏳ 扫描成片目录...</div>';
-  try{
-    var files = await api('GET', '/api/output_files/' + encodeURIComponent(name));
-    _deliverablesState.files = files;
-    renderDeliverablesModal();
-  }catch(e){
-    content.innerHTML = '<div style="padding:40px;text-align:center;color:#c5221f">❌ 加载失败: ' + htm(String(e.message||e)) + '</div>';
-  }
-}
-
 function renderDeliverablesModal(){
   var content = $('detailContent');
   var name = _deliverablesState.projectName;
   var files = _deliverablesState.files || [];
+  var folders = _deliverablesState.folders || [];
 
-  if(files.length === 0){
+  if(files.length === 0 && folders.length === 0){
+    var curMode = _deliverablesState.mode || 'editing';
+    var isRevising = curMode === 'revising';
+    var title = isRevising ? '📝 修改文件夹' : '🎬 成片输出详情';
+    var emptyText = isRevising
+      ? '📭 该项目还没有修改文件夹<br><span style="font-size:12px;color:#a1a1a6">请先设状态为「修改中」，或点下方按钮切成片模式</span>'
+      : '📭 组内NAS 01上映单集版 目录中暂时没有找到视频文件';
+    var switchBtn = isRevising
+      ? '<button class="btn btn-sm" style="background:#0071e3;color:#fff" onclick="switchDelivMode(\'' + htm(name) + '\', \'editing\')">🎬 看成片</button>'
+      : '';
     content.innerHTML =
       '<div style="padding:24px">'
-        + '<div style="font-size:15px;font-weight:600;margin-bottom:16px">🎬 成片输出详情</div>'
+        + '<div style="font-size:15px;font-weight:600;margin-bottom:16px">' + title + '</div>'
         + '<div style="padding:40px;text-align:center;color:#86868b;border:2px dashed #e5e5ea;border-radius:12px">'
-          + '📭 组内NAS 01上映单集版 目录中暂时没有找到视频文件'
-          + '<div style="margin-top:10px">'
+          + emptyText
+          + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center">'
+            + switchBtn
             + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name) + '\', \'dest\')">📁 打开成片目录</button>'
-            + '<button class="btn btn-sm" style="margin-left:8px" onclick="$(' + "'" + 'detailModal' + "'" + ').classList.remove(' + "'" + 'active' + "'" + ')">关闭</button>'
+            + '<button class="btn btn-sm" onclick="$(' + "'" + 'detailModal' + "'" + ').classList.remove(' + "'" + 'active' + "'" + ')">关闭</button>'
           + '</div>'
         + '</div>'
       + '</div>';
@@ -2783,7 +2900,60 @@ function renderDeliverablesModal(){
         + '<span class="deliv-close" onclick="$(' + "'" + 'detailModal' + "'" + ').classList.remove(' + "'" + 'active' + "'" + ')">×</span>'
       + '</div>'
 
-      // Stats banner
+            // Breadcrumbs (revising 模式)
+      + (_deliverablesState.mode === 'revising' && _deliverablesState.breadcrumbs.length > 0 ? (function(){
+          var crumbs = _deliverablesState.breadcrumbs.map(function(b, idx){
+            var clickable = idx < _deliverablesState.breadcrumbs.length - 1;
+            var sp = _deliverablesState.breadcrumbs.slice(0, idx+1).map(function(x){ return x.path; }).filter(Boolean).join('/');
+            var safeSp = sp.replace(/'/g, "\\'");
+            return (clickable
+              ? '<a href="javascript:void(0)" onclick="navDelivTo(\'' + safeSp + '\')" style="color:#0071e3;text-decoration:none">' + htm(b.name) + '</a>'
+              : '<span style="color:#1d1d1f;font-weight:600">' + htm(b.name) + '</span>');
+          }).join(' <span style="color:#86868b">/</span> ');
+          return '<div style="padding:10px 16px;background:#f5f5f7;border-bottom:1px solid #e5e5ea;font-size:12px">' + crumbs + '</div>';
+        })() : '')
+
+// 修改模式提示 banner
+      + (_deliverablesState.mode === 'revising'
+        ? '<div style="padding:8px 16px;background:#fff3cd;color:#856404;border-bottom:1px solid #ffeaa7;font-size:12px">📝 当前是 <b>修改中</b> 状态，正在查看修改文件夹里的视频</div>'
+        : '')
+
+        // Folders 列表 (revising 模式根目录，带 checkbox 勾选整文件夹回传)
+      + (_deliverablesState.folders.length > 0 ? (function(){
+          var mode = _deliverablesState.mode;
+          var selFolders = _deliverablesState.selectedFolders || {};
+          var folderSelectable = (mode === 'revising' && !_deliverablesState.subpath);
+          var allFoldersSel = folderSelectable && _deliverablesState.folders.length > 0 && _deliverablesState.folders.every(function(f){ return selFolders[f.name]; });
+          var folderRows = _deliverablesState.folders.map(function(f){
+            var checked = selFolders[f.name] ? 'checked' : '';
+            var cbHtml = folderSelectable
+              ? '<input type="checkbox" ' + checked + ' onclick="event.stopPropagation();toggleDelivFolderSel(\'' + htm(f.name).replace(/'/g,"\\'") + '\')" style="width:16px;height:16px">'
+              : '';
+            var selBg = selFolders[f.name] ? 'background:#e8f4fd;' : '';
+            return '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f0f0f0;cursor:pointer;' + selBg + '" onclick="navDelivFolder(\'' + htm(f.path).replace(/'/g,"\\'") + '\')">'
+              + cbHtml
+              + '<span style="font-size:24px">📁</span>'
+              + '<div style="flex:1">'
+                + '<div style="font-weight:600;font-size:14px">' + htm(f.name) + '</div>'
+                + '<div style="font-size:11px;color:#86868b">' + (folderSelectable ? '点击进入 · 勾选整文件夹回传' : '点击进入查看修改文件') + '</div>'
+              + '</div>'
+              + '<span style="color:#86868b">▶</span>'
+            + '</div>';
+          }).join('');
+          var selFolderCount = Object.values(selFolders).filter(Boolean).length;
+          var headerHtml = folderSelectable
+            ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:#fafafa;border-bottom:1px solid #e5e5ea;font-size:12px">'
+                + '<input type="checkbox" ' + (allFoldersSel?'checked':'') + ' onchange="toggleAllDelivFolders(this.checked)" style="width:14px;height:14px">'
+                + '<b>全选文件夹</b>'
+                + '<span style="color:#86868b">已选文件夹 ' + selFolderCount + ' / ' + _deliverablesState.folders.length + '</span>'
+                + '<span style="flex:1"></span>'
+                + '<button class="btn btn-sm btn-primary" onclick="deliverFolders()" style="padding:2px 10px;font-size:11px"' + (selFolderCount===0?' disabled':'') + '>⚡ 回传选中文件夹</button>'
+              + '</div>'
+            : '';
+          return '<div style="border:1px solid #e5e5ea;border-radius:8px;margin:12px 16px;overflow:hidden">' + headerHtml + folderRows + '</div>';
+        })() : '')
+
+// Stats banner
       + '<div class="deliv-stats">'
         + '<div class="deliv-stat-item"><b>' + files.length + '</b> 个文件</div>'
         + '<div class="deliv-stat-item"><b>' + _fmtSize(totalBytes) + '</b> 总大小</div>'
@@ -2831,13 +3001,67 @@ function toggleAllDeliv(checked){
   renderDeliverablesModal();
 }
 
-function previewDelivFile(projectName, fileName, fileList){
-  var files = fileList || (window._deliverablesState && window._deliverablesState.files) || [{name: fileName}];
-  if(!window.__previewList || window.__previewListProject !== projectName){
-    window.__previewList = files;
-    window.__previewListProject = projectName;
+function toggleDelivFolderSel(folderName){
+  _deliverablesState.selectedFolders = _deliverablesState.selectedFolders || {};
+  _deliverablesState.selectedFolders[folderName] = !_deliverablesState.selectedFolders[folderName];
+  renderDeliverablesModal();
+}
+
+function toggleAllDelivFolders(checked){
+  _deliverablesState.selectedFolders = {};
+  if(checked){
+    (_deliverablesState.folders||[]).forEach(function(f){ _deliverablesState.selectedFolders[f.name] = true; });
   }
-  window.__previewMode = 'dest';
+  renderDeliverablesModal();
+}
+
+// ===== 事件委托：ep-refresh / ep-deliverables / ep-revising 按钮 =====
+document.addEventListener('click', function(e){
+  var refreshBtn = e.target.closest('[data-action="ep-refresh"]');
+  if(refreshBtn){
+    var pname = refreshBtn.getAttribute('data-project');
+    var btn = refreshBtn.getAttribute('data-btn');
+    if(pname) refreshProjectStatus(pname, btn==='null'?null:undefined);
+    e.preventDefault();
+    return;
+  }
+
+  var delivBtn = e.target.closest('[data-action="ep-deliverables"]');
+  if(delivBtn){
+    var pname2 = delivBtn.getAttribute('data-project');
+    if(pname2) openDeliverablesModal(pname2, 'editing');
+    e.preventDefault();
+    return;
+  }
+
+  var revBtn = e.target.closest('[data-action="ep-revising"]');
+  if(revBtn){
+    var pname3 = revBtn.getAttribute('data-project');
+    if(pname3) openDeliverablesModal(pname3, 'revising');
+    e.preventDefault();
+    return;
+  }
+});
+
+async function deliverFolders(){
+  var name = _deliverablesState.projectName;
+  var sel = Object.keys(_deliverablesState.selectedFolders||{}).filter(function(k){ return _deliverablesState.selectedFolders[k]; });
+  if(sel.length === 0){ toast('请先选择文件夹','warning'); return; }
+  toast('⚡ 文件夹回传已启动 ' + sel.length + ' 个...', 'info');
+  try{
+    var r = await api('POST', '/api/deliver_folder/' + encodeURIComponent(name), { folder_names: sel });
+    toast(r.message || '文件夹回传任务已提交', 'success');
+    _deliverablesState.selectedFolders = {};
+    _deliverablesState.selected = {};
+  }catch(e){
+    toast('❌ 文件夹回传失败: ' + e.message, 'error');
+  }
+  renderDeliverablesModal();
+}
+
+function previewDelivFile(projectName, fileName){
+  window.__previewMode = _deliverablesState.mode || 'source';
+  window.__previewSubpath = _deliverablesState.subpath || '';
   _openPreview(projectName, fileName);
 }
 
@@ -2849,7 +3073,7 @@ async function deliverOne(projectName, fileName, rowIdx){
     rowEl.querySelector('.deliv-td-actions').innerHTML = '<span style="color:#0071e3">⏳ 回传中...</span>';
   }
   try{
-    var r = await api('POST', '/api/deliver/' + encodeURIComponent(projectName), { file_path: fileName });
+    var r = await api('POST', '/api/deliver/' + encodeURIComponent(projectName), { file_path: fileName, mode: _deliverablesState.mode, subpath: _deliverablesState.subpath });
     if(r.ok){
       toast('✅ 已回传: ' + fileName, 'success');
       if(rowEl){
@@ -2877,18 +3101,16 @@ async function deliverBatch(){
   renderDeliverablesModal();
   toast('⚡ 批量回传已启动 ' + sel.length + ' 个文件...', 'info');
   try{
-    var r = await api('POST', '/api/deliver_batch/' + encodeURIComponent(name), { file_names: sel });
+    var r = await api('POST', '/api/deliver_batch/' + encodeURIComponent(name), { file_names: sel, mode: _deliverablesState.mode, subpath: _deliverablesState.subpath });
     toast(r.message || '批量回传任务已提交', 'success');
-    // 清空已选中，等下用户可手动刷新
     _deliverablesState.selected = {};
+    _deliverablesState.selectedFolders = {};
   }catch(e){
     toast('❌ 批量回传失败: ' + e.message, 'error');
   }
   _deliverablesState.running = false;
   renderDeliverablesModal();
 }
-
-
 
 // === 分集面板展开/收起 ===
 function toggleEpisodesPanel(projectName, btn){
@@ -2921,6 +3143,154 @@ function toggleEpisodesPanel(projectName, btn){
 }
 
 // === 渲染分集 grid（常驻展开用）===
+
+// === 粘贴分集文本 → 解析为 assign ===
+function parsePasteEpisodes(text){
+  const assign = {};
+  const lines = text.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    // 匹配 "姓名：集数范围"  — 冒号支持中英文
+    const m = line.match(/^([^\s:：,，\-]+(?:\s+[^\s:：,，\-]+)*)\s*[:：]\s*(.+)$/);
+    if (!m) continue;
+    const name = m[1].trim();
+    const ranges = m[2];
+    if (!name || !ranges) continue;
+
+    // 解析集数部分：支持 "1-3, 68-70" 或 "1,3,5-7" 等
+    const parts = ranges.split(/[,，;；\s]+/).map(s => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      const range = part.match(/^(\d+)\s*[-~到]\s*(\d+)$/);
+      if (range) {
+        const a = parseInt(range[1], 10);
+        const b = parseInt(range[2], 10);
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        for (let ep = lo; ep <= hi; ep++) assign[String(ep)] = name;
+      } else {
+        const single = part.match(/^(\d+)$/);
+        if (single) assign[String(single[1])] = name;
+      }
+    }
+  }
+  return assign;
+}
+
+// === 打开粘贴分集 modal ===
+function openPasteEpisodesModal(projectName, currentTotal){
+  const modalId = 'pasteEpModal';
+  const existing = document.getElementById(modalId);
+  if (existing) existing.remove();
+
+  const defaultText = `陈陆杰：1-3, 68-70
+陈春阳：4-8, 66-67
+张靖杰：9-15
+袁绍杰：16-25
+王傲雪：26-35
+张淯升：36-45
+李钊琦：46-55
+陈浩博：56-65`;
+
+  const modal = document.createElement('div');
+  modal.id = modalId;
+  modal.className = 'modal-overlay active';
+  modal.innerHTML = `
+    <div class="modal" style="min-width:520px;max-width:600px">
+      <div class="modal-head">
+        <h3>📋 粘贴分集数据</h3>
+        <span class="modal-close" onclick="document.getElementById('${modalId}').remove()">×</span>
+      </div>
+      <div class="modal-body" style="padding:16px">
+        <div style="font-size:12px;color:var(--text-sec);margin-bottom:8px">
+          格式：<code>姓名：集数范围</code>，每行一个人。支持范围写法：<code>1-3</code>、<code>1,5</code>、<code>1-3, 6-8</code>
+        </div>
+        <textarea id="pasteEpInput" rows="10" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:monospace;font-size:13px;resize:vertical" placeholder="粘贴分集数据...">${defaultText}</textarea>
+        <div id="pasteEpPreview" style="margin-top:10px;padding:10px;background:#f5f5f7;border-radius:6px;font-size:12px;color:#333;max-height:180px;overflow-y:auto"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:var(--text-sec)">总集数:</label>
+          <input type="number" id="pasteEpTotal" value="${currentTotal || ''}" style="width:80px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" placeholder="必填">
+          <button class="btn btn-sm" onclick="pasteEpPreview()" style="margin-left:auto">👀 预览</button>
+        </div>
+      </div>
+      <div class="modal-foot" style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-sm" onclick="document.getElementById('${modalId}').remove()">取消</button>
+        <button class="btn btn-sm btn-primary" onclick="pasteEpSave('${htm(projectName)}', '${modalId}')">💾 保存并应用</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // 实时预览
+  const ta = modal.querySelector('#pasteEpInput');
+  if (ta) ta.addEventListener('input', pasteEpPreview);
+  pasteEpPreview();
+}
+
+function pasteEpPreview(){
+  const el = document.getElementById('pasteEpInput');
+  const pv = document.getElementById('pasteEpPreview');
+  if (!el || !pv) return;
+  const assign = parsePasteEpisodes(el.value);
+  const total = Object.keys(assign).length;
+  if (total === 0) {
+    pv.innerHTML = '<span style="color:#86868b">⚠️ 暂未解析到有效分集</span>';
+    return;
+  }
+  // 按人名分组展示
+  const byName = {};
+  for (const [ep, name] of Object.entries(assign)) {
+    if (!byName[name]) byName[name] = [];
+    byName[name].push(parseInt(ep, 10));
+  }
+  const lines = Object.entries(byName).map(([name, eps]) => {
+    eps.sort((a, b) => a - b);
+    // 合并连续集数
+    const ranges = [];
+    let start = eps[0], prev = eps[0];
+    for (let i = 1; i < eps.length; i++) {
+      if (eps[i] === prev + 1) prev = eps[i];
+      else { ranges.push(start === prev ? `${start}` : `${start}-${prev}`); start = prev = eps[i]; }
+    }
+    ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+    return `<div style="margin:2px 0"><b>${htm(name)}</b>：${ranges.join(', ')} <span style="color:#86868b">(${eps.length}集)</span></div>`;
+  });
+  pv.innerHTML = `<div style="margin-bottom:4px;color:#34c759">✅ 共解析 ${total} 集，分配给 ${Object.keys(byName).length} 人</div>` + lines.join('');
+}
+
+async function pasteEpSave(projectName, modalId){
+  const el = document.getElementById('pasteEpInput');
+  const totalEl = document.getElementById('pasteEpTotal');
+  if (!el) return;
+  const assign = parsePasteEpisodes(el.value);
+  if (Object.keys(assign).length === 0) {
+    toast('❌ 未解析到有效分集数据', 'error');
+    return;
+  }
+  let total = parseInt((totalEl && totalEl.value) || '0', 10) || 0;
+  if (!total) {
+    total = Math.max(...Object.keys(assign).map(k => parseInt(k, 10)));
+    if (confirm(`未填写总集数，自动设为 ${total}，是否继续？`)) {
+      // ok
+    } else { return; }
+  }
+
+  try {
+    toast('⏳ 正在保存分集...', 'info');
+    await api('POST', '/api/bulk/import_episodes', {
+      project_name: projectName,
+      total_episodes: total,
+      assign: assign,
+    });
+    toast(`✅ 已保存 ${Object.keys(assign).length} 集分集数据`, 'success');
+    document.getElementById(modalId).remove();
+    // 刷新分集面板
+    delete _episodeStatusCache[projectName];
+    refreshProjectStatus(projectName, null);
+  } catch(e) {
+    toast('❌ 保存失败: ' + (e.message || e), 'error');
+  }
+}
+
 function renderEpisodesGrid(projectName, data){
   const total = data.total || 0;
   const present = data.present || [];
@@ -2944,9 +3314,12 @@ function renderEpisodesGrid(projectName, data){
   }
   
   const missingCount = missing.length;
-  const header = `<div style="font-size:11px;color:#86868b;margin-bottom:6px;display:flex;justify-content:space-between">
+  const header = `<div style="font-size:11px;color:#86868b;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
     <span>📺 ${total} 集 · 已输出 <b style="color:#34c759">${present.length}</b> · 缺 <b style="color:#ff3b30">${missingCount}</b></span>
-    <span style="cursor:pointer;color:#007aff" onclick="refreshProjectStatus('${htm(projectName)}', null)">🔄 刷新进度</span>
+    <span style="display:flex;gap:6px;align-items:center">
+      <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#f0f7ff;border:1px solid #007aff;color:#007aff;border-radius:4px;cursor:pointer" onclick="openPasteEpisodesModal('${htm(projectName)}', ${total})">📋 粘贴分集</button>
+      <span style="cursor:pointer;color:#007aff" onclick="refreshProjectStatus('${htm(projectName)}', null)">🔄 刷新进度</span>
+    </span>
   </div>`;
   
   return header + '<div class="card-episodes-grid">' + cells.join('') + '</div>';
@@ -2976,6 +3349,8 @@ function _openPreview(projectName, fileName){
   const proj = projectName || (window.currentProject || '');
   const mode = window.__previewMode || window.currentMode || 'source';
   let url = '/api/preview/' + encodeURIComponent(proj) + '/' + encodeURIComponent(fileName) + '?mode=' + mode;
+  var subpath = window.__previewSubpath || '';
+  if(subpath) url += '&subpath=' + encodeURIComponent(subpath);
   
   // Update navigation index
   if (window.__previewList && window.__previewList.length > 0) {
@@ -3050,7 +3425,6 @@ document.addEventListener('keydown', function(e){
 
 // === 扩展 fetchEpisodeStatus — 拿到数据后也更新展开面板 ===
 const _origFetchEpisodeStatus = typeof fetchEpisodeStatus !== 'undefined' ? fetchEpisodeStatus : null;
-
 
 </script>
 <div class="preview-overlay" id="preview-overlay">

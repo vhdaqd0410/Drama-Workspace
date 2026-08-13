@@ -1664,15 +1664,16 @@ class SyncEngine:
 
         present = sorted(present_set)
 
-        # 如果 DB 里没设 total，但我们识别到了集号范围，用 max(present) 自动回填
-        if total == 0 and present:
-            auto_total = max(present)
-            logger.info("项目 %s 未设总集数，用文件名识别到的最大集号 %d 自动回填", project_name, auto_total)
-            self.db.update_project_status(
-                project_name,
-                total_episodes=auto_total,
-                current_episodes=current_count)
-            total = auto_total
+        # 如果 DB 里没设 total 或 total 小于扫描到的最大集号，用 max(present) 自动回填
+        if present:
+            max_present = max(present)
+            if total < max_present:
+                logger.info("项目 %s 总集数 DB=%d < 磁盘集数 %d，自动修正并回写", project_name, total, max_present)
+                self.db.update_project_status(
+                    project_name,
+                    total_episodes=max_present,
+                    current_episodes=current_count)
+                total = max_present
 
         missing = []
         if total > 0:

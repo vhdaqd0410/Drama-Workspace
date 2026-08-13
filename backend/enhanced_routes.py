@@ -284,7 +284,63 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             sz = per + (1 if i < rem else 0)
             ranges.append({"start": cur, "end": cur + sz - 1})
             cur += sz
-        return jsonify({"ok": True, "ranges": ranges})
+
+    # ===========================
+    # 分秒帧上传相关路由
+    # ===========================
+    _FM_LINKS_FILE = _os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+        'data', 'fenmiaozhen_links.json'
+    )
+
+    def _fm_load_links():
+        import json as _j
+        try:
+            with open(_FM_LINKS_FILE, 'r', encoding='utf-8') as _f:
+                return _j.load(_f)
+        except (FileNotFoundError, Exception):
+            return {}
+
+    def _fm_save_links(data):
+        import json as _j
+        import os as _os
+        _os.makedirs(_os.path.dirname(_FM_LINKS_FILE), exist_ok=True)
+        with open(_FM_LINKS_FILE, 'w', encoding='utf-8') as _f:
+            _j.dump(data, _f, ensure_ascii=False, indent=2)
+
+    @app.route('/api/fenmiaozhen/config', methods=['GET'])
+    def fenmiaozhen_config():
+        import yaml as _y
+        _cp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'config.yaml')
+        with open(_cp, 'r', encoding='utf-8') as _f:
+            _cfg = _y.safe_load(_f) or {}
+        fm = _cfg.get('fenmiaozhen', {}) or {}
+        return jsonify(
+            ok=True,
+            enabled_departments=fm.get('enabled_departments', []),
+            web_url=fm.get('web_url', 'https://www.mediatrack.cn/project/new'),
+        )
+
+    @app.route('/api/fenmiaozhen/link/<path:name>', methods=['GET'])
+    def fenmiaozhen_get_link(name):
+        links = _fm_load_links()
+        url = links.get(name, '')
+        return jsonify(ok=True, url=url, has_link=bool(url))
+
+    @app.route('/api/fenmiaozhen/link/<path:name>', methods=['POST'])
+    def fenmiaozhen_save_link(name):
+        import json as _j
+        try:
+            body = request.get_json(force=True, silent=True) or {}
+            url = (body.get('url') or '').strip()
+        except Exception:
+            url = ''
+        if not url:
+            return jsonify(ok=False, msg='链接不能为空'), 400
+        links = _fm_load_links()
+        links[name] = url
+        _fm_save_links(links)
+        return jsonify(ok=True, url=url)
 
 
 def _scan_dir(path, skip_names=None, recursive_depth=0):
