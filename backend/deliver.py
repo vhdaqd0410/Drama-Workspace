@@ -705,29 +705,41 @@ class DeliverMixin:
             message="源: " + src + " -> 目标: " + dst)
 
         try:
-            # 注意：不能用 /MIR 镜像模式！这里用 /E 纯增量复制
-            cmd = ["robocopy", src, dst] + ROBOCOPY_BASE
-            dst_unc = self._to_unc(dst)
-            unc_alt = None
-            if dst_unc != dst:
-                unc_alt = ["robocopy", src, dst_unc] + ROBOCOPY_BASE
-            ok, msg, rc = _exec(cmd, TIMEOUT_XCOPY_BIG,
-                                label="copy_delivery_folder", unc_alt=unc_alt)
-            if ok:
-                self.db.add_sync_log(
-                    project_name, "交付文件夹复制完成", "delivery_folder->group",
-                    file_path=src, status="success", message="已复制到: " + dst)
-                return True, "复制完成"
-            else:
+            # 方案1：Python shutil.copytree（Windows本地路径最快）
+            import shutil as _shutil
+            if os.path.isdir(dst):
+                _shutil.rmtree(dst, ignore_errors=True)
+            _shutil.copytree(src, dst)
+            self.db.add_sync_log(
+                project_name, "交付文件夹复制完成", "delivery_folder->group",
+                file_path=src, status="success", message="已复制到: " + dst)
+            return True, "已复制到: " + dst
+        except Exception as e1:
+            logger.warning("shutil 复制失败，尝试 robocopy 兜底: %s", e1)
+            try:
+                import subprocess as _sp
+                dst_unc = dst
+                if hasattr(self, '_to_unc'):
+                    dst_unc = self._to_unc(dst) or dst
+                # /E 递归复制所有子目录（包括空的），不删除目标原有文件
+                cmd = ["robocopy", src, dst_unc, "/E", "/R:1", "/W:1", "/NP"]
+                _sp.run(cmd, capture_output=True, timeout=60)
+                if os.path.isdir(dst):
+                    self.db.add_sync_log(
+                        project_name, "交付文件夹复制完成(robocopy兜底)", "delivery_folder->group",
+                        file_path=src, status="success", message="已复制到: " + dst)
+                    return True, "已复制到: " + dst + " (robocopy)"
                 self.db.add_sync_log(
                     project_name, "交付文件夹复制失败", "delivery_folder->group",
-                    file_path=src, status="error", message=msg)
-                return False, "robocopy 返回码 %d: %s" % (rc, msg)
-        except Exception as e:
-            self.db.add_sync_log(
-                project_name, "交付文件夹复制异常", "delivery_folder->group",
-                file_path=src, status="error", message=str(e))
-            return False, str(e)
+                    file_path=src, status="error",
+                    message="shutil: %s | robocopy 后目标目录不存在" % e1)
+                return False, "复制失败: " + str(e1)
+            except Exception as e2:
+                self.db.add_sync_log(
+                    project_name, "交付文件夹复制异常", "delivery_folder->group",
+                    file_path=src, status="error",
+                    message="shutil: %s | robocopy: %s" % (e1, e2))
+                return False, "复制失败: shutil=%s, robocopy=%s" % (e1, e2)
 
     def deliver_to_production(self, project_name):
         """一键交付：把组内NAS项目下的 000交付 整个复制到制作部NAS对应项目的 000交付 目录。
