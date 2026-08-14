@@ -255,11 +255,12 @@ function renderDeliverablesModal(){
         + '<label class="deliv-all-label"><input type="checkbox" ' + (allSelected?'checked':'') + ' onchange="toggleAllDeliv(this.checked)"> 全选</label>'
         + '<span style="margin-left:16px;color:#6b6b70;font-size:12px">已选 <b style="color:#0071e3">' + selCount + '</b> / ' + files.length + '</span>'
         + '<div style="flex:1"></div>'
+        + '<button class="btn btn-sm btn-primary" onclick="openBothDirs()" style="background:#2E7D32">📂 源→交付 (拖文件)</button>'
         + (_deliverablesState.mode === 'revising'
-          ? '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'revising\')">📁 打开修改目录</button>'
-          : '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'group_output\')">📁 打开成片目录</button>')
-        + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'delivery\')">📦 打开交付目录</button>'
-        + '<button class="btn btn-sm" onclick="refreshDeliverablesList()">🔄 刷新列表</button>'
+          ? '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'revising\')">📁 修改目录</button>'
+          : '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'group_output\')">📁 成片目录</button>')
+        + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'delivery\')">📦 交付目录</button>'
+        + '<button class="btn btn-sm" onclick="refreshDeliverablesList()">🔄 刷新</button>'
         + '<button class="btn btn-sm btn-primary" onclick="deliverBatch()" ' + (selCount===0||_deliverablesState.running?'disabled':'') + '>⚡ 批量回传 (' + selCount + ')</button>'
       + '</div>'
 

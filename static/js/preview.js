@@ -9,7 +9,8 @@ function _openPreview(projectName, fileName){
   if (!overlay) { toast('预览组件未加载', 'error'); return; }
 
   const proj = projectName || (window.currentProject || '');
-  const mode = window.__previewMode || window.currentMode || 'source';
+  let mode = window.__previewMode || window.currentMode || 'editing';
+  if(mode === 'source' || mode === 'auto') mode = 'editing';
   const subpath = window.__previewSubpath || '';
   let url = '/api/preview/' + encodeURIComponent(proj) + '/' + encodeURIComponent(fileName) + '?mode=' + mode;
   if(subpath) url += '&subpath=' + encodeURIComponent(subpath);
