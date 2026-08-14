@@ -470,6 +470,16 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             _logger.exception('export_excel 失败')
             return jsonify(ok=False, msg=f'导出失败: {e}'), 500
 
+        # 4. 把追加后的结果写回模板文件 —— 这样下次再导出时旧数据还在
+        #    只有从磁盘模板读取时才写回（前端传 template_b64 的临时情况跳过）
+        if tpl_name and not tpl_b64:
+            try:
+                with open(tpl_path, 'wb') as f:
+                    f.write(new_bytes)
+                _logger.info('已写回模板 %s (大小 %d 字节)', tpl_name, len(new_bytes))
+            except Exception as e:
+                _logger.warning('写回模板失败: %s', e)
+
         out_name = _re.sub(r'\.[^.]+$', '', original_name) + '_已分集.xlsx'
         return jsonify({
             'ok': True,
