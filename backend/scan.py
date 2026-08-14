@@ -303,17 +303,6 @@ class ScanMixin:
                     entry["created_at"] = db_proj.get("created_at") or ""
                     entry["total_episodes"] = db_proj.get("total_episodes", 0) or 0
                     entry["current_episodes"] = db_proj.get("current_episodes", 0) or 0
-                # group_all 项目已经在磁盘上，DB 误标 syncing 自动纠正
-                if entry.get("sync_status") == "syncing":
-                    try:
-                        self.db.update_project_status(
-                            entry["name"], sync_status="synced",
-                            sync_progress="",
-                            last_synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                        entry["sync_status"] = "synced"
-                        entry["sync_progress"] = ""
-                    except Exception:
-                        pass
 
                 group_all.append(entry)
 
@@ -326,18 +315,6 @@ class ScanMixin:
             proj["need_sync"] = bool(proj.get("production_path")) and not proj["on_group"]
             if proj["need_sync"] and not (proj.get("custom_status") or "").strip():
                 proj["custom_status"] = "待同步"
-            # 自动纠正：DB 显示 syncing 但磁盘已存在 → 手动拷完/robocopy 已完成
-            if proj.get("sync_status") == "syncing" and proj.get("on_group"):
-                try:
-                    self.db.update_project_status(
-                        proj["name"], sync_status="synced",
-                        sync_progress="",
-                        last_synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                    proj["sync_status"] = "synced"
-                    proj["sync_progress"] = ""
-                    logger.info("sync_status auto-correct syncing->synced: %s", proj["name"])
-                except Exception as _e:
-                    logger.warning("auto-correct failed for %s: %s", proj["name"], _e)
 
         # 同步 group_all 条目的交付状态（从 production 数据读取）
         prod_status_map = {p["name"]: p for p in production}
@@ -412,17 +389,6 @@ class ScanMixin:
                     entry["created_at"] = db_proj.get("created_at") or ""
                     entry["total_episodes"] = db_proj.get("total_episodes", 0) or 0
                     entry["current_episodes"] = db_proj.get("current_episodes", 0) or 0
-                    # 已完成项目也纠正 syncing
-                    if entry.get("sync_status") == "syncing":
-                        try:
-                            self.db.update_project_status(
-                                entry["name"], sync_status="synced",
-                                sync_progress="",
-                                last_synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                            entry["sync_status"] = "synced"
-                            entry["sync_progress"] = ""
-                        except Exception:
-                            pass
                     source_dept = db_proj.get("department", "") or ""
                     if source_dept:
                         entry["source_department"] = source_dept
