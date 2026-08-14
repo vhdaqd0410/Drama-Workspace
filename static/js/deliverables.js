@@ -274,8 +274,10 @@ function renderDeliverablesModal(){
           return '<div style="border:1px solid #e5e5ea;border-radius:8px;margin:12px 16px;overflow:hidden">' + headerHtml + folderRows + '</div>';
         })() : '')
 
-// Stats banner
-      + '<div class="deliv-stats">'
+// delivery 根目录 — 隐藏文件表格相关
+      + (_deliverablesState.mode === 'delivery' && !_deliverablesState.subpath ? '' : (
+        // Stats banner
+      '<div class="deliv-stats">'
         + '<div class="deliv-stat-item"><b>' + files.length + '</b> 个文件</div>'
         + '<div class="deliv-stat-item"><b>' + _fmtSize(totalBytes) + '</b> 总大小</div>'
         + '<div class="deliv-stat-item"><b>' + vids.length + '</b> 个视频</div>'
@@ -326,6 +328,8 @@ function renderDeliverablesModal(){
           + '<tbody>' + rows + '</tbody>'
         + '</table>'
       + '</div>'
+      )
+    )
     + '</div>';
 }
 
