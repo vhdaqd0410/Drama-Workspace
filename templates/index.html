@@ -417,6 +417,8 @@ a{color:var(--blue);text-decoration:none}
   <div class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📋 项目看板</div>
   <div class="tab" data-tab="fenji" onclick="switchTab('fenji')">📑 分集管理</div>
   <div class="tab" data-tab="qa" onclick="switchTab('qa')">🔍 质检中心</div>
+  <div class="tab" data-tab="activity" onclick="switchTab('activity');loadActivityTab()">📜 任务中心</div>
+  <div class="tab" data-tab="report" onclick="switchTab('report');loadReportTab()">📊 月度报告</div>
   <div class="tab" data-tab="settings" onclick="switchTab('settings')">⚙️ 设置</div>
 </div>
 <div class="main">
@@ -599,7 +601,13 @@ a{color:var(--blue);text-decoration:none}
     </div>
   </div>
 </div>
-<div class="tab-panel" id="tab-settings">
+<div class="tab-panel" id="tab-activity">
+    <div id="activityContent">加载中...</div>
+  </div>
+  <div class="tab-panel" id="tab-report">
+    <div id="reportContent">加载中...</div>
+  </div>
+  <div class="tab-panel" id="tab-settings">
   <div class="settings-grid">
     <div class="panel settings-section"><h3>🏢 NAS 路径</h3>
       <div class="form-group"><label>group_root</label><input type="text" id="cfgGroupRoot"></div>
