@@ -807,6 +807,111 @@ class DeliverMixin:
 
         return True, "交付已启动，共 %d 个文件" % total_files
 
+
+    def deliver_delivery_folder(self, project_name, folder_name):
+        """交付文件夹回传：把组内NAS项目下的 000交付/[folder_name] 整个 Shell 复制到制作部。
+        完成后自动把项目状态变为"待质检"。
+        folder_name 示例: "00成片"、"1.有音乐无字幕版本"、"3.字幕文件" 等。
+        """
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return False, "项目不存在"
+
+        group_path = proj.get("group_path", "") or ""
+        prod_path = proj.get("production_path", "") or ""
+        if not prod_path:
+            return False, "该项目无制作部NAS路径"
+
+        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/"))
+        src_parent = os.path.join(group_path, delivery_folder_name)
+        src_folder = os.path.join(src_parent, folder_name)
+        if not os.path.isdir(src_folder):
+            return False, "组内NAS 000交付 下不存在文件夹: " + folder_name
+
+        dst_parent = os.path.join(prod_path, delivery_folder_name)
+
+        try:
+            os.makedirs(dst_parent, exist_ok=True)
+        except (PermissionError, OSError):
+            try:
+                dst_parent_unc = self._to_unc(dst_parent)
+                subprocess.run(["cmd", "/c", "mkdir", dst_parent_unc], capture_output=True, timeout=30)
+            except Exception:
+                pass
+
+        logger.info("交付文件夹回传: %s -> %s", src_folder, dst_parent)
+        self.db.add_sync_log(
+            project_name, "交付文件夹回传启动", "group_delivery->prod_delivery",
+            file_path=src_folder, status="info",
+            message="源: " + src_folder + " -> 目标父目录: " + dst_parent)
+
+        try:
+            _shell_copy_folder(src_folder, dst_parent)
+
+            file_count = 0
+            total_size = 0
+            for root, _, files in os.walk(src_folder):
+                for fn in files:
+                    file_count += 1
+                    try:
+                        total_size += os.path.getsize(os.path.join(root, fn))
+                    except OSError:
+                        pass
+
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            dst_folder = os.path.join(dst_parent, folder_name)
+            self.db.add_delivery_log(
+                project_name, folder_name + "/(整个交付文件夹)",
+                src_folder, dst_folder, total_size,
+                "success", "交付文件夹回传成功: " + folder_name + " (" + str(file_count) + " 个文件)")
+
+            # 关键：回传完成后自动变状态为"待质检"
+            self.set_custom_status(project_name, "待质检")
+
+            self.db.update_project_status(
+                project_name, delivery_status="delivered",
+                last_delivered_at=now)
+
+            return True, "交付文件夹回传成功: " + folder_name + " (" + str(file_count) + " 个文件)"
+        except Exception as e:
+            logger.exception("交付文件夹回传失败")
+            self.db.add_delivery_log(
+                project_name, folder_name + "/(整个交付文件夹)",
+                src_folder, dst_parent, 0,
+                "error", str(e))
+            return False, "回传失败: " + str(e)
+
+    def deliver_delivery_folders_batch(self, project_name, folder_names):
+        """批量回传多个交付子文件夹 — 逐个弹系统 Shell 进度对话框"""
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return [{"name": n, "ok": False, "message": "项目不存在", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
+
+        group_path = proj.get("group_path", "") or ""
+        prod_path = proj.get("production_path", "") or ""
+        if not prod_path:
+            return [{"name": n, "ok": False, "message": "该项目无制作部路径", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
+
+        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/"))
+        src_parent = os.path.join(group_path, delivery_folder_name)
+        dst_parent = os.path.join(prod_path, delivery_folder_name)
+
+        results = []
+        any_ok = False
+        for idx, fn in enumerate(folder_names):
+            src_folder = os.path.join(src_parent, fn)
+            if not os.path.isdir(src_folder):
+                results.append({"name": fn, "ok": False, "message": "000交付 下不存在该文件夹", "index": idx + 1, "total": len(folder_names)})
+                continue
+            ok, msg = self.deliver_delivery_folder(project_name, fn)
+            if ok:
+                any_ok = True
+            results.append({"name": fn, "ok": ok, "message": msg, "index": idx + 1, "total": len(folder_names)})
+
+        if any_ok:
+            self.set_custom_status(project_name, "待质检")
+        return results
+
     def deliver_initial_version(self, project_name):
         """把组内 NAS 的 01上映单集版 目录整体推送到制作部 NAS，完成后状态自动变为"审核中"。
         触发场景：剪辑中的项目点击"统计"后发现集数已达标。

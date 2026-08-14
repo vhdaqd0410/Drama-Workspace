@@ -321,15 +321,24 @@ def api_output_files(project_name):
 def api_deliver_folder(project_name):
     data = request.get_json(silent=True) or {}
     folder_names = data.get("folder_names", [])
+    mode = data.get("mode", "revising")
     if not folder_names:
         return jsonify({"ok": False, "message": "未选择文件夹"})
 
-    if len(folder_names) == 1:
-        ok, msg = sync_engine.deliver_revision_folder(project_name, folder_names[0])
-        return jsonify({"ok": ok, "message": msg})
+    if mode == "delivery":
+        if len(folder_names) == 1:
+            ok, msg = sync_engine.deliver_delivery_folder(project_name, folder_names[0])
+            return jsonify({"ok": ok, "message": msg})
+        else:
+            _bg(sync_engine.deliver_delivery_folders_batch, project_name, folder_names)
+            return jsonify({"ok": True, "message": "交付文件夹回传已启动 (" + str(len(folder_names)) + " 个)", "total": len(folder_names)})
     else:
-        _bg(sync_engine.deliver_revision_folders_batch, project_name, folder_names)
-        return jsonify({"ok": True, "message": "文件夹回传已启动 (" + str(len(folder_names)) + " 个)", "total": len(folder_names)})
+        if len(folder_names) == 1:
+            ok, msg = sync_engine.deliver_revision_folder(project_name, folder_names[0])
+            return jsonify({"ok": ok, "message": msg})
+        else:
+            _bg(sync_engine.deliver_revision_folders_batch, project_name, folder_names)
+            return jsonify({"ok": True, "message": "文件夹回传已启动 (" + str(len(folder_names)) + " 个)", "total": len(folder_names)})
 
 
 

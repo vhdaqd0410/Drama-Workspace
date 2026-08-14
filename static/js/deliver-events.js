@@ -59,7 +59,8 @@ async function deliverFolders(){
   if(sel.length === 0){ toast('请先选择文件夹','warning'); return; }
   toast('⚡ 文件夹回传已启动 ' + sel.length + ' 个...', 'info');
   try{
-    var r = await api('POST', '/api/deliver_folder/' + encodeURIComponent(name), { folder_names: sel });
+    var mode = _deliverablesState.mode || 'revising';
+  var r = await api('POST', '/api/deliver_folder/' + encodeURIComponent(name), { folder_names: sel, mode: mode });
     toast(r.message || '文件夹回传任务已提交', 'success');
     _deliverablesState.selectedFolders = {};
     _deliverablesState.selected = {};
