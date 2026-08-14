@@ -422,8 +422,11 @@ function projectCardHTML(p){
   const epPanel = `<div class="card-episodes-panel" id="ep-panel-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>`;
   const epSummaryBox = `<div class="ep-missing-summary" data-ep-summary="${p.name.replace(/"/g,'&quot;')}"></div>`;
 
+  const bulkChk = window._bulkMode
+    ? `<input type="checkbox" class="bulk-card-chk" data-pname="${p.name.replace(/"/g,'&quot;')}" onchange="updateBulkBar()" title="选择此项目">`
+    : '';
   return`<div class="card">
-    <div class="card-head"><div class="card-title"><span class="card-title-name" title="${p.name}">${p.name}</span>${dept}${month}</div>${(() => {
+    <div class="card-head">${bulkChk}<div class="card-title"><span class="card-title-name" title="${p.name}">${p.name}</span>${dept}${month}</div>${(() => {
   const cur = p.custom_status || '';
   const optsHtml = WF_STATUS_OPTIONS.map(o =>
     `<option value="${o.v}" ${o.v===cur?'selected':''}>${o.label}</option>`
@@ -542,10 +545,11 @@ function renderDashboard(){
     });
   }
 
-  // 按 section 分组渲染
+  // ===== 懒加载：默认只渲染组内NAS进行中的完整卡片，其他分页 =====
+  const _LAZY_BATCH = 20;      // 非活跃 section 每批渲染的卡片数
+  const _forceFull = !!(q || fd || fs || fm);  // 筛选激活时全渲染
   let totalShown=0;
   const sectionHTML=allSections.map(sec=>{
-    // 对每个 section 内的项目做筛选
     let projs=(sec.projects||[]).filter(matchProject);
     projs=sortList(projs);
     if(projs.length===0)return '';
@@ -554,11 +558,20 @@ function renderDashboard(){
     const arrow=sec.collapsed?'▶':'▼';
     totalShown+=projs.length;
 
+    // 组内NAS (group_active) 或筛选激活 → 全渲染
+    const alwaysFull = (sec.key === 'group_active') || _forceFull;
+    const renderCount = alwaysFull ? projs.length : Math.min(_LAZY_BATCH, projs.length);
+    const rendered = projs.slice(0, renderCount);
+    const hasMore = projs.length > renderCount;
+
     // 只给组内NAS section 加批量刷新按钮
     const batchRefreshBtn = (sec.key === 'group_active' && projs.length > 0)
       ? `<button class="btn btn-sm section-refresh-btn"
                  onclick="event.stopPropagation(); batchRefreshSection('${sec.key}', this)"
                  title="批量扫描目录，刷新本组所有项目的输出进度">🔄 一键刷新进度</button>`
+      : '';
+    const moreBtn = hasMore
+      ? `<div style="text-align:center;padding:12px"><button class="btn btn-sm" onclick="expandSectionLazy('${sec.key}', this)">⬇️ 加载剩余 ${projs.length - renderCount} 个项目</button></div>`
       : '';
     return `
     <div class="section-block ${collapsed}" data-section-key="${sec.key}">
@@ -566,15 +579,34 @@ function renderDashboard(){
         <span class="section-arrow">${arrow}</span>
         <span class="section-title">${sec.name}</span>
         ${batchRefreshBtn}
-        <span class="section-count">${projs.length} 个项目</span>
+        <span class="section-count">${projs.length} 个项目${hasMore?' (首次显示 '+renderCount+')':''}</span>
       </div>
-      <div class="section-body">
+      <div class="section-body" data-section-full="false">
         <div class="grid">
-          ${projs.map(projectCardHTML).join('')}
+          ${rendered.map(projectCardHTML).join('')}
         </div>
+        ${moreBtn}
       </div>
     </div>`;
   }).join('');
+
+  // 全局扩展 section 完整渲染（点击"加载更多"或筛选激活）
+  window.expandSectionLazy = function(key, btn){
+    const sec = (allSections||[]).find(s => s.key === key);
+    if(!sec) return;
+    const container = btn.closest('.section-body');
+    const grid = container.querySelector('.grid');
+    // 用 DOM 方式重算一次筛选，把剩余的补渲染
+    let all = (sec.projects||[]).filter(matchProject);
+    all = sortList(all);
+    // 直接重写 entire grid，更可靠
+    grid.innerHTML = all.map(projectCardHTML).join('');
+    container.dataset.sectionFull = 'true';
+    btn.remove();
+    // 更新 section-count 标签
+    const countLabel = container.previousElementSibling.querySelector('.section-count');
+    if(countLabel) countLabel.textContent = all.length + ' 个项目 (全部)';
+  };
 
   const fc=$('filterCount');
   if(fc){
@@ -582,11 +614,112 @@ function renderDashboard(){
     fc.textContent=`显示 ${totalShown} / ${total} 个项目`;
   }
 
+  // 批量栏
+  const bulkBar = $('bulkBar');
+  if(window._bulkMode){
+    if(!bulkBar){
+      const bar = document.createElement("div");
+      bar.id = "bulkBar";
+      bar.style.cssText = "position:sticky;top:0;z-index:50;background:#007aff;color:#fff;padding:10px 16px;border-radius:8px;margin:12px 0;display:flex;align-items:center;gap:12px;box-shadow:0 2px 10px rgba(0,0,0,.15)";
+      bar.innerHTML = `<span>已选 <b id="bulkCount">0</b> 个项目</span>
+        <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkSetMonth()">📅 批量改月份</button>
+        <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkSetStatus()">🏷️ 批量改状态</button>
+        <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkClear()">全部取消</button>
+        <button class="btn btn-sm" style="background:rgba(255,255,255,.25);color:#fff" onclick="toggleBulkMode()">✕ 退出批量</button>`;
+      container.parentElement.insertBefore(bar, container);
+    }
+  } else {
+    if(bulkBar) bulkBar.remove();
+  }
+
   if(totalShown===0){
     container.innerHTML=`<div class="empty-state"><div>📭 没有匹配的项目</div></div>`;
   }else{
     container.innerHTML=sectionHTML;
   }
+}
+
+function toggleBulkMode(){
+  window._bulkMode = !window._bulkMode;
+  toast((window._bulkMode?'✅ 进入':'退出') + ' 批量选择模式' + (window._bulkMode?' — 每张卡片左上角出现 checkbox':'') , 'info');
+  renderDashboard();
+}
+function updateBulkBar(){
+  const checked = document.querySelectorAll('.bulk-card-chk:checked');
+  const lbl = document.getElementById('bulkCount');
+  if(lbl) lbl.textContent = checked.length;
+}
+function getBulkSelected(){
+  return Array.from(document.querySelectorAll('.bulk-card-chk:checked')).map(c => c.dataset.pname);
+}
+function bulkClear(){
+  document.querySelectorAll('.bulk-card-chk').forEach(c => c.checked = false);
+  updateBulkBar();
+}
+async function bulkSetMonth(){
+  const names = getBulkSelected();
+  if(!names.length){ toast('请先选择项目','warning'); return; }
+  const now = new Date();
+  const months = [];
+  for(let y=now.getFullYear()-1; y<=now.getFullYear()+1; y++){
+    for(let m=1; m<=12; m++){
+      months.push(y + '-' + String(m).padStart(2,'0'));
+    }
+  }
+  const html = `<div class="modal-overlay" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="width:320px">
+      <div class="modal-head">📅 批量设置月份 (${names.length} 个项目)</div>
+      <div style="padding:15px">
+        <select id="bulkMonth" style="width:100%;padding:8px">
+          <option value="">— 清空（不统计）—</option>
+          ${months.map(m=>`<option>${m}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" onclick="document.querySelectorAll('.modal-overlay').forEach(m=>m.remove());document.getElementById('bulkModal').remove()">取消</button>
+        <button class="btn btn-primary" onclick="_bulkSetMonthGo('${names.join('||').replace(/'/g,"")}')">确定</button>
+      </div>
+    </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+async function _bulkSetMonthGo(namesStr){
+  const names = namesStr.split('||').filter(Boolean);
+  const month = document.getElementById('bulkMonth').value;
+  document.querySelectorAll('.modal-overlay').forEach(m=>m.remove());
+  try{
+    const r = await api('POST','/api/bulk/update_month', {names, month});
+    toast('✅ 已更新 '+r.updated+' 个项目','success');
+    await loadProjects();
+  }catch(e){ toast('❌ 批量设置失败: '+e.message,'error'); }
+}
+async function bulkSetStatus(){
+  const names = getBulkSelected();
+  if(!names.length){ toast('请先选择项目','warning'); return; }
+  const STATUS_OPTS = ['分集中','剪辑中','审核中','修改中','交付中','待质检','质检中','已完成','已交付'];
+  const html = `<div class="modal-overlay" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="width:320px">
+      <div class="modal-head">🏷️ 批量设置状态 (${names.length} 个项目)</div>
+      <div style="padding:15px">
+        <select id="bulkStatus" style="width:100%;padding:8px">
+          ${STATUS_OPTS.map(s=>`<option>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" onclick="document.querySelectorAll('.modal-overlay').forEach(m=>m.remove())">取消</button>
+        <button class="btn btn-primary" onclick="_bulkSetStatusGo('${names.join('||').replace(/'/g,"")}')">确定</button>
+      </div>
+    </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+async function _bulkSetStatusGo(namesStr){
+  const names = namesStr.split('||').filter(Boolean);
+  const status = document.getElementById('bulkStatus').value;
+  document.querySelectorAll('.modal-overlay').forEach(m=>m.remove());
+  try{
+    const r = await api('POST','/api/bulk/update_status', {names, custom_status: status});
+    toast('✅ 已更新 '+r.updated+' 个项目','success');
+    await loadProjects();
+  }catch(e){ toast('❌ 批量设置失败: '+e.message,'error'); }
 }
 
 function toggleSection(key){

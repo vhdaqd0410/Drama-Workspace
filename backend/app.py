@@ -1052,6 +1052,13 @@ try:
 except ImportError as e:
     print("[WARN] enhanced_routes 未加载:", e)
 
+try:
+    from bulk_api import register_routes as _register_bulk
+    _register_bulk(app, db)
+    print("[OK] bulk_api 已注册")
+except ImportError as e:
+    print("[WARN] bulk_api 未加载:", e)
+
 
 def main():
     web_cfg = config.get("web", {})
