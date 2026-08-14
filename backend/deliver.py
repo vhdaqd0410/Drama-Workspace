@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 class DeliverMixin:
+    _EP_PATTERNS = [
+        re.compile(r'(?i)(?:^|[^a-z0-9])EP[_\s\-]?(\d{1,3})(?!\d)'),
+        re.compile(r'(?i)(?:^|[^a-z0-9])S\d{1,2}E[_\s\-]?(\d{1,3})(?!\d)'),
+        re.compile(r'第[_\s\-]*(\d{1,3})[集话]'),
+        re.compile(r'(?:[_\-\s]|^)(\d{1,3})(?:[_\-\s\.]|$)'),
+    ]
+
     def deliver_file(self, project_name, file_path):
         """手动回传成片：从组内NAS 01上映单集版 → 制作部NAS对应项目的01上映单集版"""
         proj = self.db.get_project(project_name)
@@ -947,6 +954,8 @@ class DeliverMixin:
         editor_plan = self.db.get_episode_plan(project_name)
 
         video_names = self._collect_video_filenames(project_name, which="group")
+        if not video_names:
+            video_names = self._collect_video_filenames(project_name, which="dest")
         current_count = len(video_names)
 
         present_set = set()

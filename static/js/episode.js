@@ -505,7 +505,7 @@ async function runRefreshAllProgress(btn, isAuto){
   let targets = [];
   for (const sec of allSections) {
     for (const p of (sec.projects || [])) {
-      if (p.total_episodes > 0) targets.push(p.name);
+      targets.push(p.name);
     }
   }
   if (targets.length === 0) {

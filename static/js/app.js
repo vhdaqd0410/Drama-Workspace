@@ -27,6 +27,9 @@ document.addEventListener('DOMContentLoaded',async ()=>{
       $('statsRow').innerHTML = '<div style="color:#ff3b30;padding:20px;">❌ 加载失败: ' + e.message + '<br><small>' + (e.stack||'') + '</small></div>';
     }
 
+    // 3.5 自动扫描所有项目的成片进度（后台执行）
+    try{ loadAllEpisodeSummary(); } catch(e){}
+
     // 4. 自动刷新已禁用 — 由用户手动点 🔄 刷新 按钮触发
     // pollDashboard=setInterval(loadProjects,30000);
   }catch(e){
