@@ -135,10 +135,12 @@ class PreviewMixin:
             }
 
             # 两级导航:
-            #   subpath="" -> 最外层，显示虚拟文件夹 "000交付"
+            #   subpath="" -> 最外层，显示虚拟文件夹 "000交付" + 完整性检测
             #   subpath="000交付" -> 扫描真实 000交付 下的子文件夹
             #   subpath="000交付/xxx" -> 继续深入
             if not subpath:
+                dc = self._delivery_completeness_check(base, result["total_episodes"])
+                result["delivery_check"] = dc
                 if os.path.isdir(base):
                     result["folders"].append({
                         "name": folder_name,
@@ -199,6 +201,62 @@ class PreviewMixin:
             return result
 
         return []
+
+    def _delivery_completeness_check(self, base, total_episodes):
+        """检测交付文件夹完整性。
+        返回 dict: { folders: [...], all_ok: bool, total_episodes: int, screenshot_expected: int }
+        """
+        SCREENSHOT_KEYWORDS = ("截图", "screenshot", "thumbnail", "thumb")
+        SCREENSHOT_EXPECTED = 5
+
+        check = {
+            "folders": [],
+            "all_ok": False,
+            "total_episodes": total_episodes or 0,
+            "screenshot_expected": SCREENSHOT_EXPECTED,
+            "base_exists": os.path.isdir(base),
+        }
+
+        if not os.path.isdir(base):
+            return check
+
+        try:
+            entries = sorted(os.listdir(base), key=_natural_key)
+        except OSError:
+            return check
+
+        results = []
+        for name in entries:
+            full = os.path.join(base, name)
+            if not os.path.isdir(full):
+                continue
+            try:
+                file_count = sum(
+                    1 for sn in os.listdir(full)
+                    if os.path.isfile(os.path.join(full, sn))
+                )
+            except OSError:
+                file_count = 0
+
+            is_screenshot = any(k in name.lower() for k in SCREENSHOT_KEYWORDS)
+            expected = SCREENSHOT_EXPECTED if is_screenshot else (total_episodes or 0)
+            ok = file_count >= expected and expected > 0
+
+            results.append({
+                "name": name,
+                "actual": file_count,
+                "expected": expected,
+                "is_screenshot": is_screenshot,
+                "ok": ok,
+            })
+
+        check["folders"] = results
+        check["all_ok"] = (
+            len(results) > 0
+            and all(f["ok"] for f in results)
+            and any(f["is_screenshot"] for f in results)
+        )
+        return check
 
     def _find_file_by_episode_num(self, root, ep_num):
         if not root or not _os.path.isdir(root):

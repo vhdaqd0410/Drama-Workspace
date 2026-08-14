@@ -54,7 +54,7 @@ async function refreshDeliverablesList(){
             _deliverablesState.files = resp.files || [];
             _deliverablesState.folders = resp.folders || [];
             _deliverablesState.breadcrumbs = resp.breadcrumbs || [];
-
+            _deliverablesState.deliveryCheck = resp.delivery_check || null;
         }
         renderDeliverablesModal();
     }catch(e){
@@ -236,7 +236,40 @@ function renderDeliverablesModal(){
       + (_deliverablesState.mode === 'revising'
         ? '<div style="padding:8px 16px;background:#fff3cd;color:#856404;border-bottom:1px solid #ffeaa7;font-size:12px">📝 当前是 <b>修改中</b> 状态，正在查看修改文件夹里的视频</div>'
         : (_deliverablesState.mode === 'delivery'
-           ? '<div style="padding:8px 16px;background:#d4edda;color:#155724;border-bottom:1px solid #c3e6cb;font-size:12px">📦 当前查看 <b>000交付</b> 文件夹，可勾选回传到制作部</div>'
+           ? (function(){
+                var dc = _deliverablesState.deliveryCheck;
+                if(!dc || !dc.base_exists){
+                  return '<div style="padding:8px 16px;background:#d4edda;color:#155724;border-bottom:1px solid #c3e6cb;font-size:12px">📦 当前查看 <b>000交付</b> 文件夹 — 尚未创建交付目录，进入后可查看子文件夹</div>';
+                }
+                if(dc.all_ok){
+                  var okCount = dc.folders.length;
+                  return '<div style="padding:10px 16px;background:#d4edda;color:#155724;border-bottom:1px solid #c3e6cb;font-size:13px;font-weight:600">✅ 交付文件已完成（' + okCount + ' 个文件夹全部齐套）— 请进行下一步质检</div>'
+                    + '<div style="padding:8px 16px;background:#f0f8f0;border-bottom:1px solid #c3e6cb;font-size:12px">'
+                    + dc.folders.map(function(f){
+                        return '<span style="display:inline-block;margin-right:12px;margin-bottom:4px">✅ ' + htm(f.name) + ' (' + f.actual + '/' + f.expected + ')</span>';
+                      }).join('')
+                    + '</div>';
+                }
+                // 不齐套 — 显示详细缺失情况
+                var bad = dc.folders.filter(function(f){ return !f.ok; });
+                var good = dc.folders.filter(function(f){ return f.ok; });
+                var header = '<div style="padding:10px 16px;background:#fff3cd;color:#856404;border-bottom:1px solid #ffeaa7;font-size:13px;font-weight:600">⚠️ 交付文件不齐套（共 ' + dc.folders.length + ' 个文件夹，缺 ' + bad.length + ' 个）</div>';
+                var gridHtml = '<div style="padding:8px 16px;background:#fffdf0;border-bottom:1px solid #ffeaa7;font-size:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px 16px">';
+                dc.folders.forEach(function(f){
+                  var color = f.ok ? '#2E7D32' : '#c5221f';
+                  var emoji = f.ok ? '✅' : '❌';
+                  var label = f.ok
+                    ? (f.actual + '/' + f.expected)
+                    : (f.actual + '/' + f.expected + ' 缺 ' + Math.max(0, f.expected - f.actual));
+                  gridHtml += '<div style="display:flex;align-items:center;gap:6px">'
+                    + '<span>' + emoji + '</span>'
+                    + '<span style="color:#1d1d1f">' + htm(f.name) + '</span>'
+                    + '<span style="color:' + color + ';font-weight:600;margin-left:auto">' + label + '</span>'
+                    + '</div>';
+                });
+                gridHtml += '</div>';
+                return header + gridHtml;
+              })()
            : ''))
 
         // Folders 列表 (revising 模式根目录，带 checkbox 勾选整文件夹回传)
