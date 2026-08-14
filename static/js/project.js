@@ -135,8 +135,9 @@ if(!confirm(`确认要将 "${name}" 从制作部NAS同步到组内NAS吗？\n（
 
           if(target.sync_status && target.sync_status !== 'syncing'){
             clearInterval(poll);
-            toast(`✅ 同步完成: ${name}`,'success');
+            toast(`✅ 同步完成: ${name}，自动进入分集`,'success');
             await loadProjects();
+            setTimeout(() => openFenjiFor(name), 300);
           }
         } catch(e){}
       }, 2000);

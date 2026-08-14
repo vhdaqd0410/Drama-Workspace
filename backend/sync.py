@@ -156,9 +156,19 @@ class SyncMixin:
             project_name, sync_status="syncing", sync_progress="98% 收尾中...")
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.db.update_project_status(
-            project_name, sync_status="synced",
-            sync_progress="", last_synced_at=now)
+        # 同步完成后, 若无有效 workflow 状态, 自动标记为"分集中"
+        cur_status = (proj.get("custom_status") or "").strip()
+        workflow_set = {"分集中", "剪辑中", "审核中", "修改中",
+                        "待质检", "质检中", "待交付", "交付中", "已交付", "已完成"}
+        if not cur_status or cur_status in ("待同步",):
+            self.db.update_project_status(
+                project_name, sync_status="synced",
+                sync_progress="", last_synced_at=now,
+                custom_status="分集中")
+        else:
+            self.db.update_project_status(
+                project_name, sync_status="synced",
+                sync_progress="", last_synced_at=now)
         self.db.add_sync_log(
             project_name, "同步完成", "production->group",
             status="success", message="所有素材同步完成")
