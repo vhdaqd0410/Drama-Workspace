@@ -125,13 +125,6 @@ class PreviewMixin:
         elif mode == "delivery":
             folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
             base = os.path.join(group_path, folder_name)
-            target = base
-            if subpath:
-                safe_sub = subpath.replace("/", "\\").strip("\\")
-                target = os.path.normpath(os.path.join(base, safe_sub))
-                if not target.startswith(os.path.normpath(base)):
-                    target = base
-
             result = {
                 "folders": [],
                 "files": [],
@@ -141,19 +134,42 @@ class PreviewMixin:
                 "project_name": project_name,
             }
 
+            # 两级导航:
+            #   subpath="" -> 最外层，显示虚拟文件夹 "000交付"
+            #   subpath="000交付" -> 扫描真实 000交付 下的子文件夹
+            #   subpath="000交付/xxx" -> 继续深入
+            if not subpath:
+                if os.path.isdir(base):
+                    result["folders"].append({
+                        "name": folder_name,
+                        "path": folder_name,
+                        "file_count": 0,
+                    })
+                result["breadcrumbs"] = []
+                return result
+
+            # 去掉 subpath 开头的 "000交付/"，因为 base 已经指向它了
+            safe_sub = subpath.replace("/", "\\").strip("\\")
+            parts = safe_sub.split("\\")
+            if parts and parts[0] == folder_name:
+                safe_sub = "\\".join(parts[1:])
+
+            target = base
+            if safe_sub:
+                target = os.path.normpath(os.path.join(base, safe_sub))
+                if not target.startswith(os.path.normpath(base)):
+                    target = base
+
             # 构建面包屑
-            rel = os.path.relpath(target, group_path) if os.path.isdir(target) else folder_name
-            parts = rel.replace("/", "\\").split("\\")
-            bc_path = ""
-            for i, part in enumerate(parts):
-                if i == 0:
-                    result["breadcrumbs"].append({"name": part, "path": ""})
-                else:
-                    bc_path = os.path.join(bc_path, part) if bc_path else part
-                    result["breadcrumbs"].append({"name": part, "path": bc_path})
+            bc_path_acc = ""
+            bc_parts = [folder_name] + (safe_sub.split("\\") if safe_sub else [])
+            for part in bc_parts:
+                result["breadcrumbs"].append({"name": part, "path": bc_path_acc})
+                bc_path_acc = os.path.join(bc_path_acc, part) if bc_path_acc else part
 
             if not os.path.isdir(target):
                 return result
+
 
             try:
                 for name in os.listdir(target):

@@ -243,7 +243,7 @@ function renderDeliverablesModal(){
       + (_deliverablesState.folders.length > 0 ? (function(){
           var mode = _deliverablesState.mode;
           var selFolders = _deliverablesState.selectedFolders || {};
-          var folderSelectable = ((mode === 'revising' || mode === 'delivery') && !_deliverablesState.subpath);
+          var _sp = _deliverablesState.subpath || ''; var _spDeep = _sp.includes('\\') || _sp.includes('/'); var folderSelectable = ((mode === 'revising' && !_sp) || (mode === 'delivery' && _sp && !_spDeep));
           var allFoldersSel = folderSelectable && _deliverablesState.folders.length > 0 && _deliverablesState.folders.every(function(f){ return selFolders[f.name]; });
           var folderRows = _deliverablesState.folders.map(function(f){
             var checked = selFolders[f.name] ? 'checked' : '';
@@ -275,7 +275,7 @@ function renderDeliverablesModal(){
         })() : '')
 
 // delivery 根目录 — 隐藏文件表格相关
-      + (_deliverablesState.mode === 'delivery' && !_deliverablesState.subpath ? '' : (
+      + ((mode === 'delivery' && (_deliverablesState.subpath || '').replace('\\','/').split('/').length <= 1) ? '' : (
         // Stats banner
       '<div class="deliv-stats">'
         + '<div class="deliv-stat-item"><b>' + files.length + '</b> 个文件</div>'
