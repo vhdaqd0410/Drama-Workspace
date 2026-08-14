@@ -77,13 +77,14 @@ function bindShortcuts(){
   document.addEventListener('keydown', function(e){
     var tag = (e.target.tagName || '').toUpperCase();
     var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
-    if(isInput) return;
 
-    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){
+    // Ctrl+K / Ctrl+F 始终优先触发（覆盖浏览器默认页面查找）
+    if((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'f')){
       e.preventDefault();
       openSearchModal();
       return;
     }
+    if(isInput) return;
     if(e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r' && !e.shiftKey)){
       e.preventDefault();
       toast('🔄 刷新中...','info');
