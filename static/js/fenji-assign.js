@@ -771,12 +771,12 @@ function fjOpenTimeModal(assignList){
 
 async function fjDoExport(){
   const modal = document.getElementById('fjTimeModal');
-  const assignList = modal._assignList || fjGetAssignList();
-  modal.remove();
+  const assignList = modal?._assignList || fjGetAssignList();
 
-  const dateStr = $('fjTimeDate').value;
-  const period = $('fjTimePeriod').value;
-  const hour = $('fjTimeHour').value;
+  const dateStr = modal?.querySelector('#fjTimeDate')?.value || new Date(Date.now()+24*3600*1000).toISOString().slice(0,10);
+  const period = modal?.querySelector('#fjTimePeriod')?.value || '下午';
+  const hour = modal?.querySelector('#fjTimeHour')?.value || '18';
+  modal?.remove();
   const dt = new Date(dateStr);
   const timeText = `${dt.getMonth()+1}.${dt.getDate()}${period}${hour}点交`;
 
