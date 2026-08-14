@@ -65,3 +65,9 @@ package-lock.json
 *.bak
 _check.js
 data/config.json
+
+# ===========================
+# 分集模板 (运行时上传)
+# ===========================
+data/fenji_templates/
+data/fenji_backups/
