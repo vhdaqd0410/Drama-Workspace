@@ -142,6 +142,17 @@ function renderDeliverablesModal(){
     return;
   }
 
+  // 回传状态统计
+  var deliveredCount = files.filter(function(f){ return f.delivered; }).length;
+  var mismatchCount = files.filter(function(f){ return f.delivery_status === 'size_mismatch'; }).length;
+  var pendingCount = files.length - deliveredCount;
+
+  // 过滤
+  var filt = _deliverablesState.delivFilter || 'all';
+  var filteredFiles = files;
+  if(filt === 'pending') filteredFiles = files.filter(function(f){ return !f.delivered || f.delivery_status === 'size_mismatch'; });
+  else if(filt === 'delivered') filteredFiles = files.filter(function(f){ return f.delivered && f.delivery_status !== 'size_mismatch'; });
+
   // 统计
   var totalBytes = files.reduce(function(s, f){ return s + (f.size||0); }, 0);
   var vids = files.filter(function(f){ var e = (f.ext||'').toLowerCase(); return ['.mp4','.mov','.mkv','.avi','.webm'].indexOf(e) >= 0; });
@@ -149,31 +160,48 @@ function renderDeliverablesModal(){
   var epMin = epNums.length ? Math.min.apply(null, epNums) : '-';
   var epMax = epNums.length ? Math.max.apply(null, epNums) : '-';
 
-  // 全选 checkbox 状态
-  var allSelected = files.length > 0 && files.every(function(f){ return _deliverablesState.selected[f.name]; });
+  // 全选 checkbox 状态（基于过滤后的文件）
+  var allSelected = filteredFiles.length > 0 && filteredFiles.every(function(f){ return _deliverablesState.selected[f.name]; });
 
-  // 文件行
-  var rows = files.map(function(f, idx){
+  // 文件行（基于过滤后的文件, 但 idx 用原 idx 保证 previewDelivFile 和 deliverOne 正常）
+  var rows = filteredFiles.map(function(f, idx){
+    var realIdx = files.indexOf(f);
     var ep = _extractEpNum(f.name);
     var epHtml = (ep !== null)
       ? '<span class="deliv-ep-badge">第' + String(ep).padStart(2,'0') + '集</span>'
       : '<span style="color:#c5221f;font-size:11px">未识别</span>';
     var checked = _deliverablesState.selected[f.name] ? 'checked' : '';
-    var rowId = 'deliv-row-' + idx;
+    var rowId = 'deliv-row-' + realIdx;
     var ext = (f.ext||'').toLowerCase();
     var isVideo = ['.mp4','.mov','.mkv','.avi','.webm'].indexOf(ext) >= 0;
     var icon = isVideo ? '🎥' : '📄';
     var btnClass = isVideo ? 'btn-primary' : '';
 
-    return '<tr id="' + rowId + '">'
+    // 回传状态 badge
+    var status = f.delivery_status || (f.delivered ? 'delivered' : 'pending');
+    var statusBadge = '';
+    var rowBg = '';
+    if(status === 'delivered'){
+      statusBadge = '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 8px;border-radius:10px;background:#d4edda;color:#155724;font-size:11px">✅ 已回传</span>';
+      rowBg = 'background:#f9fafb';
+    } else if(status === 'size_mismatch'){
+      statusBadge = '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 8px;border-radius:10px;background:#fff3cd;color:#856404;font-size:11px">⚠️ 大小不符</span>';
+      rowBg = 'background:#fff9e6';
+    } else {
+      statusBadge = '<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 8px;border-radius:10px;background:#f8d7da;color:#721c24;font-size:11px">❌ 未回传</span>';
+      rowBg = 'background:#fff5f5';
+    }
+
+    return '<tr id="' + rowId + '" style="' + rowBg + '">'
       + '<td class="deliv-td-ck"><input type="checkbox" ' + checked + ' data-deliv-ck="' + htm(f.name) + '" onchange="toggleDelivRow(\'' + htm(f.name).replace(/'/g,"\'") + '\')"></td>'
       + '<td class="deliv-td-ep">' + epHtml + '</td>'
       + '<td class="deliv-td-name" title="' + htm(f.path) + '">' + icon + ' ' + htm(f.name) + '</td>'
       + '<td class="deliv-td-size">' + _fmtSize(f.size||0) + '</td>'
+      + '<td style="font-size:12px">' + statusBadge + '</td>'
       + '<td class="deliv-td-time">' + htm(f.mtime||'') + '</td>'
       + '<td class="deliv-td-actions">'
         + '<button class="btn btn-sm ' + btnClass + '" onclick="previewDelivFile(\'' + htm(name).replace(/'/g,"\'") + '\', \'' + htm(f.name).replace(/'/g,"\'") + '\')">▶ 预览</button> '
-        + '<button class="btn btn-sm" onclick="deliverOne(\'' + htm(name).replace(/'/g,"\'") + '\', \'' + htm(f.name).replace(/'/g,"\'") + '\', ' + idx + ')">⚡ 回传</button>'
+        + '<button class="btn btn-sm" onclick="deliverOne(\'' + htm(name).replace(/'/g,"\'") + '\', \'' + htm(f.name).replace(/'/g,"\'") + '\', ' + realIdx + ')">⚡ 回传</button>'
       + '</td>'
     + '</tr>';
   }).join('');
@@ -248,12 +276,28 @@ function renderDeliverablesModal(){
         + '<div class="deliv-stat-item"><b>' + _fmtSize(totalBytes) + '</b> 总大小</div>'
         + '<div class="deliv-stat-item"><b>' + vids.length + '</b> 个视频</div>'
         + '<div class="deliv-stat-item">集号范围 <b>' + epMin + ' ~ ' + epMax + '</b></div>'
+        + '<div style="flex:1;min-width:12px"></div>'
+        // 回传进度
+        + '<div style="display:flex;align-items:center;gap:8px">'
+          + '<span style="font-size:12px;color:#6b6b70">回传进度</span>'
+          + '<div style="width:140px;height:8px;background:#e5e5ea;border-radius:4px;overflow:hidden">'
+            + '<div style="width:' + (files.length ? Math.round(deliveredCount*100/files.length) : 0) + '%;height:100%;background:linear-gradient(90deg,#2E7D32,#27ae60);border-radius:4px;transition:width .3s"></div>'
+          + '</div>'
+          + '<span style="font-size:12px;font-weight:600;color:' + (deliveredCount===files.length?'#2E7D32':'#86868b') + '">' + deliveredCount + '/' + files.length + '</span>'
+          + (mismatchCount ? '<span style="font-size:11px;color:#b58100;background:#fff3cd;padding:1px 6px;border-radius:8px">⚠️'+mismatchCount+'</span>' : '')
+        + '</div>'
       + '</div>'
 
       // Toolbar
       + '<div class="deliv-toolbar">'
         + '<label class="deliv-all-label"><input type="checkbox" ' + (allSelected?'checked':'') + ' onchange="toggleAllDeliv(this.checked)"> 全选</label>'
-        + '<span style="margin-left:16px;color:#6b6b70;font-size:12px">已选 <b style="color:#0071e3">' + selCount + '</b> / ' + files.length + '</span>'
+        + '<span style="margin-left:8px;color:#6b6b70;font-size:12px">已选 <b style="color:#0071e3">' + selCount + '</b> / ' + filteredFiles.length + '</span>'
+        // 过滤按钮组
+        + '<div style="margin-left:16px;display:flex;border:1px solid #e5e5ea;border-radius:6px;overflow:hidden">'
+          + '<button class="btn btn-sm" style="border:none;border-radius:0;padding:4px 10px;font-size:11px;' + (filt==='all'?'background:#0071e3;color:#fff':'background:#fff;color:#6b6b70') + '" onclick="setDelivFilter(\'all\')">全部 ' + files.length + '</button>'
+          + '<button class="btn btn-sm" style="border:none;border-radius:0;padding:4px 10px;font-size:11px;' + (filt==='pending'?'background:#c5221f;color:#fff':'background:#fff;color:#6b6b70') + '" onclick="setDelivFilter(\'pending\')">未回传 ' + (files.length-deliveredCount) + '</button>'
+          + '<button class="btn btn-sm" style="border:none;border-radius:0;padding:4px 10px;font-size:11px;' + (filt==='delivered'?'background:#2E7D32;color:#fff':'background:#fff;color:#6b6b70') + '" onclick="setDelivFilter(\'delivered\')">已回传 ' + deliveredCount + '</button>'
+        + '</div>'
         + '<div style="flex:1"></div>'
         + '<button class="btn btn-sm btn-primary" onclick="openBothDirs()" style="background:#2E7D32">📂 源→交付 (拖文件)</button>'
         + (_deliverablesState.mode === 'revising'
@@ -286,10 +330,19 @@ function toggleDelivRow(filename){
   renderDeliverablesModal();
 }
 
+function setDelivFilter(filter){
+  _deliverablesState.delivFilter = filter;
+  renderDeliverablesModal();
+}
+
 function toggleAllDeliv(checked){
+  var filt = _deliverablesState.delivFilter || 'all';
+  var base = _deliverablesState.files || [];
+  if(filt === 'pending') base = base.filter(function(f){ return !f.delivered || f.delivery_status === 'size_mismatch'; });
+  else if(filt === 'delivered') base = base.filter(function(f){ return f.delivered && f.delivery_status !== 'size_mismatch'; });
   _deliverablesState.selected = {};
   if(checked){
-    (_deliverablesState.files||[]).forEach(function(f){ _deliverablesState.selected[f.name] = true; });
+    base.forEach(function(f){ _deliverablesState.selected[f.name] = true; });
   }
   renderDeliverablesModal();
 }

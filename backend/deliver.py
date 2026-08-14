@@ -351,7 +351,8 @@ class DeliverMixin:
         return results
 
     def list_output_files(self, project_name):
-        """列出项目所有 01上映单集版 目录中的文件（group → production fallback）"""
+        """列出项目所有 01上映单集版 目录中的文件（group → production fallback）。
+        每个文件带 delivered 字段: True 表示制作部已有同名文件, False 表示未回传。"""
         proj = self.db.get_project(project_name)
         if not proj:
             return []
@@ -366,14 +367,43 @@ class DeliverMixin:
         if not output_dirs:
             return []
 
+        # 预先扫描制作部目标目录, 拿到所有 (文件名, 大小) 集合
+        dest_info = {}  # filename -> (size, mtime)
+        if production_path:
+            dest_dirs = self._find_output_dirs(production_path, project_name)
+            for dd in dest_dirs:
+                try:
+                    for name in os.listdir(dd):
+                        full = os.path.join(dd, name)
+                        if os.path.isfile(full):
+                            try:
+                                dest_info[name] = (
+                                    os.path.getsize(full),
+                                    os.path.getmtime(full),
+                                )
+                            except OSError:
+                                pass
+                except OSError:
+                    continue
+
         files = []
+        seen = set()
         for od in output_dirs:
             try:
                 for name in os.listdir(od):
+                    if name in seen:
+                        continue
+                    seen.add(name)
                     full = os.path.join(od, name)
                     if os.path.isfile(full):
                         ext = os.path.splitext(name)[1].lower()
                         size = os.path.getsize(full)
+                        delivered = name in dest_info
+                        dest_size = dest_info.get(name, (0, 0))[0] if delivered else 0
+                        size_match = delivered and abs(size - dest_size) < 1024  # 允许 1KB 误差
+                        status = "delivered" if delivered else "pending"
+                        if delivered and not size_match:
+                            status = "size_mismatch"
                         files.append({
                             "name": name,
                             "path": full,
@@ -383,7 +413,10 @@ class DeliverMixin:
                             "mtime": datetime.fromtimestamp(
                                 os.path.getmtime(full)).strftime(
                                 "%Y-%m-%d %H:%M"),
-                            "parent_dir": os.path.basename(od) if od else ""
+                            "parent_dir": os.path.basename(od) if od else "",
+                            "delivered": delivered,
+                            "delivery_status": status,  # delivered / pending / size_mismatch
+                            "dest_size": dest_size,
                         })
             except OSError:
                 continue
