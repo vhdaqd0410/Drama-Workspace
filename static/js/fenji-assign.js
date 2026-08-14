@@ -148,7 +148,20 @@ function fjRangeToCount(rng){
   return n;
 }
 function fjOnRangeEdit(person, val){
+  const oldStart = fjGetStartEpisode(fjRanges[person]);
+  const oldLen = fjRangeToCount(fjRanges[person]);
   fjRanges[person] = val;
+  const newLen = fjRangeToCount(val);
+
+  if (oldLen !== newLen) {
+    // 长度变了 —— 保持起点，重新分配范围 + 后面顺延
+    fjRanges[person] = `${oldStart}-${oldStart + newLen - 1}`;
+    fjShiftAllAfter(person);
+  } else if (fjGetStartEpisode(val) !== oldStart) {
+    // 起点变了但长度没变 —— 整体偏移后面的人
+    fjRanges[person] = `${oldStart}-${oldStart + newLen - 1}`;
+    fjShiftAllAfter(person);
+  }
   fjRenderTable();
   fjUpdateValidation();
   fjSaveSession();
@@ -156,27 +169,53 @@ function fjOnRangeEdit(person, val){
 function fjOnLenEdit(person, lenStr){
   const total = parseInt($('fjTotal').value) || 0;
   const len = parseInt(lenStr) || 0;
-  // Assign this person a block of len starting from first unassigned
-  const assigned = {};
-  Object.entries(fjRanges).forEach(([p,r]) => {
-    if(p !== person) fjParseRange(r).forEach(ep => assigned[ep] = p);
-  });
-  let start = 1;
-  while(assigned[start]) start++;
-  if(start + len - 1 > total){
+  const curStart = fjGetStartEpisode(fjRanges[person]);
+  if (curStart + len - 1 > total) {
     toast('超出总集数','warning');
     return;
   }
-  fjRanges[person] = `${start}-${start+len-1}`;
+  fjRanges[person] = `${curStart}-${curStart + len - 1}`;
+  fjShiftAllAfter(person);
   fjRenderTable();
   fjUpdateValidation();
   fjSaveSession();
 }
 function fjRemovePerson(person){
   delete fjRanges[person];
+  // 重排所有人
+  const ordered = fjOrderedPersons();
+  let next = 1;
+  ordered.forEach(p => {
+    const l = fjRangeToCount(fjRanges[p]);
+    fjRanges[p] = `${next}-${next + l - 1}`;
+    next += l;
+  });
   fjRenderTable();
   fjUpdateValidation();
   fjSaveSession();
+}
+function fjGetStartEpisode(rangeStr){
+  const eps = fjParseRange(rangeStr).sort((a,b)=>a-b);
+  return eps[0] || 1;
+}
+function fjOrderedPersons(){
+  return Object.entries(fjRanges)
+    .map(([p,r]) => [p, fjGetStartEpisode(r)])
+    .sort((a,b) => a[1] - b[1])
+    .map(e => e[0]);
+}
+function fjShiftAllAfter(person){
+  const ordered = fjOrderedPersons();
+  const idx = ordered.indexOf(person);
+  if (idx < 0) return;
+  let nextStart = fjGetStartEpisode(fjRanges[person]);
+  for (let i = idx; i < ordered.length; i++) {
+    const p = ordered[i];
+    const len = fjRangeToCount(fjRanges[p]);
+    if (len <= 0) continue;
+    fjRanges[p] = `${nextStart}-${nextStart + len - 1}`;
+    nextStart += len;
+  }
 }
 function fjParseRange(s){
   s = (s||'').trim(); if(!s) return [];
