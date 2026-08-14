@@ -122,7 +122,10 @@ function renderDeliverablesModal(){
       : '📭 组内NAS 01上映单集版 目录中暂时没有找到视频文件';
     var switchBtn = isRevising
       ? '<button class="btn btn-sm" style="background:#0071e3;color:#fff" onclick="switchDelivMode(\'' + htm(name) + '\', \'editing\')">🎬 看成片</button>'
-      : '';
+      : '<button class="btn btn-sm" style="background:#0071e3;color:#fff" onclick="switchDelivMode(\'' + htm(name) + '\', \'revising\')">✏️ 看修改</button>';
+    var openSrcBtn = isRevising
+      ? '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name) + '\', \'revising\')">📁 打开修改目录</button>'
+      : '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name) + '\', \'group_output\')">📁 打开成片目录</button>';
     content.innerHTML =
       '<div style="padding:24px">'
         + '<div style="font-size:15px;font-weight:600;margin-bottom:16px">' + title + '</div>'
@@ -130,7 +133,8 @@ function renderDeliverablesModal(){
           + emptyText
           + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center">'
             + switchBtn
-            + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name) + '\', \'dest\')">📁 打开成片目录</button>'
+            + openSrcBtn
+            + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name) + '\', \'delivery\')">📦 打开交付目录</button>'
             + '<button class="btn btn-sm" onclick="$(' + "'" + 'detailModal' + "'" + ').classList.remove(' + "'" + 'active' + "'" + ')">关闭</button>'
           + '</div>'
         + '</div>'
@@ -251,7 +255,10 @@ function renderDeliverablesModal(){
         + '<label class="deliv-all-label"><input type="checkbox" ' + (allSelected?'checked':'') + ' onchange="toggleAllDeliv(this.checked)"> 全选</label>'
         + '<span style="margin-left:16px;color:#6b6b70;font-size:12px">已选 <b style="color:#0071e3">' + selCount + '</b> / ' + files.length + '</span>'
         + '<div style="flex:1"></div>'
-        + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'dest\')">📁 打开成片目录</button>'
+        + (_deliverablesState.mode === 'revising'
+          ? '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'revising\')">📁 打开修改目录</button>'
+          : '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'group_output\')">📁 打开成片目录</button>')
+        + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name).replace(/'/g,"\'") + '\', \'delivery\')">📦 打开交付目录</button>'
         + '<button class="btn btn-sm" onclick="refreshDeliverablesList()">🔄 刷新列表</button>'
         + '<button class="btn btn-sm btn-primary" onclick="deliverBatch()" ' + (selCount===0||_deliverablesState.running?'disabled':'') + '>⚡ 批量回传 (' + selCount + ')</button>'
       + '</div>'

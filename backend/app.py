@@ -427,10 +427,22 @@ def api_project_open_folder(project_name):
     data = request.get_json(silent=True) or {}
     which = data.get("which", "source")
     path = None
-    if which == "source": path, err = sync_engine.get_source_dir(project_name)
-    elif which == "dest": path, err = sync_engine.get_dest_dir(project_name)
-    elif which == "editing":
-        src, err = sync_engine.get_source_dir(project_name); path = src
+    if which == "source" or which == "editing":
+        path, err = sync_engine.get_source_dir(project_name)
+    elif which == "dest":
+        path, err = sync_engine.get_dest_dir(project_name)
+    elif which == "production":
+        proj = sync_engine.db.get_project(project_name)
+        path = proj.get("production_path", "") if proj else ""
+        if not path or not os.path.isdir(path):
+            path, err = sync_engine.get_dest_dir(project_name)
+    elif which == "delivery":
+        proj = sync_engine.db.get_project(project_name)
+        if proj and proj.get("production_path"):
+            dirs = sync_engine._find_output_dirs(proj["production_path"], project_name)
+            path = dirs[0] if dirs else proj["production_path"]
+        else:
+            path, err = sync_engine.get_dest_dir(project_name)
     elif which == "revising":
         src, err = sync_engine.get_source_dir(project_name)
         rev = data.get("revision", "")
@@ -439,6 +451,13 @@ def api_project_open_folder(project_name):
             path = cand if _os.path.isdir(cand) else src
         else:
             path = src
+    elif which == "group_output":
+        proj = sync_engine.db.get_project(project_name)
+        if proj and proj.get("group_path"):
+            dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
+            path = dirs[0] if dirs else proj["group_path"]
+        else:
+            path, err = sync_engine.get_source_dir(project_name)
     else:
         path, err = sync_engine.get_source_dir(project_name)
     if not path or not os.path.isdir(path):
