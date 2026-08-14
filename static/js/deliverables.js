@@ -243,11 +243,17 @@ function renderDeliverablesModal(){
                 }
                 if(dc.all_ok){
                   var okCount = dc.folders.length;
+                  var safeName = htm(name).replace(/'/g,"\\'");
                   return '<div style="padding:10px 16px;background:#d4edda;color:#155724;border-bottom:1px solid #c3e6cb;font-size:13px;font-weight:600">✅ 交付文件已完成（' + okCount + ' 个文件夹全部齐套）— 请进行下一步质检</div>'
                     + '<div style="padding:8px 16px;background:#f0f8f0;border-bottom:1px solid #c3e6cb;font-size:12px">'
                     + dc.folders.map(function(f){
                         return '<span style="display:inline-block;margin-right:12px;margin-bottom:4px">✅ ' + htm(f.name) + ' (' + f.actual + '/' + f.expected + ')</span>';
                       }).join('')
+                    + '</div>'
+                    + '<div style="padding:14px 16px;background:#e8f5e9;border-bottom:1px solid #c3e6cb;display:flex;gap:10px;align-items:center">'
+                    + '<button onclick="delivGoQA(\'' + safeName + '\')" style="padding:9px 24px;font-size:14px;font-weight:600;background:#2E7D32;color:#fff;border:none;border-radius:6px;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.3)">🔍 立即质检</button>'
+                    + '<button onclick="delivMarkQA(\'' + safeName + '\')" style="padding:9px 16px;font-size:13px;background:#fff;border:1px solid #2E7D32;color:#2E7D32;border-radius:6px;cursor:pointer">⚙️ 标记「待质检」</button>'
+                    + '<button onclick="$(\'detailModal\').classList.remove(\'active\')" style="margin-left:auto;padding:9px 16px;font-size:12px;background:transparent;border:none;color:#6b6b70;cursor:pointer">关闭预览</button>'
                     + '</div>';
                 }
                 // 不齐套 — 显示详细缺失情况
@@ -402,3 +408,26 @@ function toggleAllDelivFolders(checked){
   renderDeliverablesModal();
 }
 
+
+async function delivGoQA(name){
+  document.getElementById('detailModal').classList.remove('active');
+  if(typeof qaStartFor === 'function'){
+    await qaStartFor(name);
+  } else if(typeof switchTab === 'function'){
+    switchTab('qa');
+    toast('已切换到质检 Tab，请手动选择项目', 'info');
+  }
+}
+
+async function delivMarkQA(name){
+  try{
+    await api('POST', '/api/project/' + encodeURIComponent(name) + '/custom_status', {
+      custom_status: '待质检'
+    });
+    toast('✅ 状态已更新为「待质检」', 'success');
+    renderDashboard();
+    refreshDeliverablesList();
+  }catch(e){
+    toast('❌ 更新失败: ' + e.message, 'error');
+  }
+}
