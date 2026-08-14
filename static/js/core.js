@@ -229,6 +229,7 @@ function projectCardHTML(p){
 
   // === 智能打开按钮 ===
   const pname = p.name.replace(/'/g,"\'");
+  const month=p.project_month?`<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#fff3cd;color:#856404;border:1px solid #ffe08a;cursor:pointer" title="点击修改月份">📅 ${p.project_month}</span>`:`<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="点击设置月份">📅 未设月份</span>`;
   let openBtns = '';
   const isGroup = p.project_type === 'group' || p.source_path;
   const hasGroup = !!p.group_path;
@@ -257,7 +258,7 @@ function projectCardHTML(p){
   const epSummaryBox = `<div class="ep-missing-summary" data-ep-summary="${p.name.replace(/"/g,'&quot;')}"></div>`;
 
   return`<div class="card">
-    <div class="card-head"><div class="card-title"><span class="card-title-name" title="${p.name}">${p.name}</span>${dept}</div>${(() => {
+    <div class="card-head"><div class="card-title"><span class="card-title-name" title="${p.name}">${p.name}</span>${dept}${month}</div>${(() => {
   const cur = p.custom_status || '';
   const optsHtml = WF_STATUS_OPTIONS.map(o =>
     `<option value="${o.v}" ${o.v===cur?'selected':''}>${o.label}</option>`
