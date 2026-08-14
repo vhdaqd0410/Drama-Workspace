@@ -817,43 +817,7 @@ async function fjDoExport(){
 
 function fjBuildPreview(assignList, path, timeText){
   const projectName = path.split(/[\\\/]/).pop() || '未命名项目';
-  const scroll = document.getElementById('fjPreviewScroll');
-  if(!scroll){ toast('预览区域找不到','error'); return; }
-  let html = `<table class="preview-table" style="border-collapse:collapse;width:100%;font-size:13px">`;
-  html += `<tr><td class="pt-title" colspan="5" style="background:#4472C4;color:#fff;padding:12px;text-align:center;font-size:16px;font-weight:bold">八月份</td></tr>`;
-  // 新项目
-  const first = assignList[0] || {person:'',range:''};
-  html += `<tr>
-    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(projectName)}</td>
-    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(path)}</td>
-    <td class="pt-body" style="border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(first.person)}：${escHtml(first.range)}</td>
-    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(timeText)}</td>
-    <td class="pt-done" style="background:#E2EFDA;color:#006100;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">已分集</td>
-  </tr>`;
-  assignList.slice(1).forEach(d=>{
-    html += `<tr>
-      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
-      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
-      <td class="pt-body" style="border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(d.person)}：${escHtml(d.range)}</td>
-      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
-      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
-    </tr>`;
-  });
-  html += '</table>';
-  scroll.innerHTML = html;
 
-  // 备份提示
-  const bk = document.getElementById('fjBackupNote');
-  if(bk){
-    if(fjExportState.lastBackup && fjExportState.lastBackup.name){
-      bk.style.display = 'block';
-      bk.innerHTML = '🛡️ 已自动备份原模板：<b>' + escHtml(fjExportState.lastBackup.name) + '</b>';
-    } else {
-      bk.style.display = 'none';
-    }
-  }
-
-  // 显示预览 Modal
   let modal = document.getElementById('fjPreviewModal');
   if(!modal){
     modal = document.createElement('div');
@@ -876,8 +840,41 @@ function fjBuildPreview(assignList, path, timeText){
   </div>`;
   modal.style.display = 'flex';
   modal.onclick = e => { if(e.target === modal) modal.remove(); };
-  // 重建 scroll 引用（innerHTML 后）
-  setTimeout(() => fjBuildPreview._scroll = document.getElementById('fjPreviewScroll'), 0);
+
+  const scroll = document.getElementById('fjPreviewScroll');
+  if(!scroll){ toast('预览区域创建失败','error'); return; }
+
+  let html = `<table class="preview-table" style="border-collapse:collapse;width:100%;font-size:13px">`;
+  html += `<tr><td class="pt-title" colspan="5" style="background:#4472C4;color:#fff;padding:12px;text-align:center;font-size:16px;font-weight:bold">八月份</td></tr>`;
+  const first = assignList[0] || {person:'',range:''};
+  html += `<tr>
+    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(projectName)}</td>
+    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(path)}</td>
+    <td class="pt-body" style="border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(first.person)}：${escHtml(first.range)}</td>
+    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(timeText)}</td>
+    <td class="pt-done" style="background:#E2EFDA;color:#006100;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">已分集</td>
+  </tr>`;
+  assignList.slice(1).forEach(d=>{
+    html += `<tr>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+      <td class="pt-body" style="border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(d.person)}：${escHtml(d.range)}</td>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+    </tr>`;
+  });
+  html += '</table>';
+  scroll.innerHTML = html;
+
+  const bk = document.getElementById('fjBackupNote');
+  if(bk){
+    if(fjExportState.lastBackup && fjExportState.lastBackup.name){
+      bk.style.display = 'block';
+      bk.innerHTML = '🛡️ 已自动备份原模板：<b>' + escHtml(fjExportState.lastBackup.name) + '</b>';
+    } else {
+      bk.style.display = 'none';
+    }
+  }
 }
 
 function fjDownloadPreview(){
