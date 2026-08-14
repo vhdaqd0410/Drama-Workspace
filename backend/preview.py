@@ -46,10 +46,11 @@ class PreviewMixin:
         """
         proj = self.db.get_project(project_name)
         group_path = ""
+        production_path = ""
         if proj:
             group_path = proj.get("group_path", "") or ""
+            production_path = proj.get("production_path", "") or ""
         else:
-            # 项目未在 DB 登记 —— 尝试从组内 NAS 反查路径
             group_root = self.config.get("nas", {}).get("group_root", "")
             for candidate in (
                 os.path.join(group_root, "00已完成", project_name),
@@ -59,9 +60,23 @@ class PreviewMixin:
                     group_path = candidate
                     break
 
+        # editing 模式：优先 production_path（成片实际在这里）
+        if mode == "editing":
+            files = self.list_output_files(project_name)
+            if files:
+                return files
+            if mode == "delivery":
+                return {"folders": [], "files": [], "breadcrumbs": []}
+            return []
+
         if not group_path:
             if mode == "delivery":
                 return {"folders": [], "files": [], "breadcrumbs": []}
+            # Fallback: production_path
+            if production_path:
+                dirs = self._find_output_dirs(production_path, project_name)
+                if dirs:
+                    return self._list_dir_contents(dirs[0])
             return []
 
         # 根据 mode 决定要扫描的 root 目录

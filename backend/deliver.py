@@ -157,13 +157,17 @@ class DeliverMixin:
         return results
 
     def list_output_files(self, project_name):
-        """列出组内NAS项目所有 01上映单集版 目录中的文件"""
+        """列出项目所有 01上映单集版 目录中的文件（group → production fallback）"""
         proj = self.db.get_project(project_name)
         if not proj:
             return []
 
-        output_dirs = self._find_output_dirs(
-            proj["group_path"], project_name)
+        group_path = proj.get("group_path", "")
+        production_path = proj.get("production_path", "")
+
+        output_dirs = self._find_output_dirs(group_path, project_name) if group_path else []
+        if not output_dirs and production_path:
+            output_dirs = self._find_output_dirs(production_path, project_name)
 
         if not output_dirs:
             return []
