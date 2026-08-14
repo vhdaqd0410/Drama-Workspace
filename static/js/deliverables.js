@@ -275,7 +275,7 @@ function renderDeliverablesModal(){
         })() : '')
 
 // delivery 根目录 — 隐藏文件表格相关
-      + ((mode === 'delivery' && (_deliverablesState.subpath || '').replace('\\','/').split('/').length <= 1) ? '' : (
+      + ((_deliverablesState.mode === 'delivery' && (_deliverablesState.subpath || '').replace('\\','/').split('/').length <= 1) ? '' : (
         // Stats banner
       '<div class="deliv-stats">'
         + '<div class="deliv-stat-item"><b>' + files.length + '</b> 个文件</div>'
