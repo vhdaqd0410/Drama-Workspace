@@ -241,9 +241,9 @@ function renderDeliverablesModal(){
 
         // Folders 列表 (revising 模式根目录，带 checkbox 勾选整文件夹回传)
       + (_deliverablesState.folders.length > 0 ? (function(){
-          var mode = _deliverablesState.mode;
+          var _m = _deliverablesState.mode;
           var selFolders = _deliverablesState.selectedFolders || {};
-          var _sp = _deliverablesState.subpath || ''; var _spDeep = _sp.includes('\\') || _sp.includes('/'); var folderSelectable = ((mode === 'revising' && !_sp) || (mode === 'delivery' && _sp && !_spDeep));
+          var _sp = _deliverablesState.subpath || ''; var _spDeep = _sp.includes('\\') || _sp.includes('/'); var folderSelectable = ((_m === 'revising' && !_sp) || (_m === 'delivery' && _sp && !_spDeep));
           var allFoldersSel = folderSelectable && _deliverablesState.folders.length > 0 && _deliverablesState.folders.every(function(f){ return selFolders[f.name]; });
           var folderRows = _deliverablesState.folders.map(function(f){
             var checked = selFolders[f.name] ? 'checked' : '';
@@ -256,7 +256,7 @@ function renderDeliverablesModal(){
               + '<span style="font-size:24px">📁</span>'
               + '<div style="flex:1">'
                 + '<div style="font-weight:600;font-size:14px">' + htm(f.name) + '</div>'
-                + '<div style="font-size:11px;color:#86868b">' + (folderSelectable ? (mode === 'delivery' ? '点击进入 · 勾选回传到制作部' : '点击进入 · 勾选整文件夹回传') : '点击进入查看') + '</div>'
+                + '<div style="font-size:11px;color:#86868b">' + (folderSelectable ? (_m === 'delivery' ? '点击进入 · 勾选回传到制作部' : '点击进入 · 勾选整文件夹回传') : '点击进入查看') + '</div>'
               + '</div>'
               + '<span style="color:#86868b">▶</span>'
             + '</div>';
@@ -265,10 +265,10 @@ function renderDeliverablesModal(){
           var headerHtml = folderSelectable
             ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:#fafafa;border-bottom:1px solid #e5e5ea;font-size:12px">'
                 + '<input type="checkbox" ' + (allFoldersSel?'checked':'') + ' onchange="toggleAllDelivFolders(this.checked)" style="width:14px;height:14px">'
-                + '<b>' + (mode === 'delivery' ? '全选交付文件夹' : '全选修改文件夹') + '</b>'
+                + '<b>' + (_m === 'delivery' ? '全选交付文件夹' : '全选修改文件夹') + '</b>'
                 + '<span style="color:#86868b">已选文件夹 ' + selFolderCount + ' / ' + _deliverablesState.folders.length + '</span>'
                 + '<span style="flex:1"></span>'
-                + '<button class="btn btn-sm btn-primary" onclick="deliverFolders()" style="padding:2px 10px;font-size:11px"' + (selFolderCount===0?' disabled':'') + '>⚡ ' + (mode === 'delivery' ? '回传到制作部' : '回传选中文件夹') + '</button>'
+                + '<button class="btn btn-sm btn-primary" onclick="deliverFolders()" style="padding:2px 10px;font-size:11px"' + (selFolderCount===0?' disabled':'') + '>⚡ ' + (_m === 'delivery' ? '回传到制作部' : '回传选中文件夹') + '</button>'
               + '</div>'
             : '';
           return '<div style="border:1px solid #e5e5ea;border-radius:8px;margin:12px 16px;overflow:hidden">' + headerHtml + folderRows + '</div>';
