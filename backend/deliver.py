@@ -883,6 +883,7 @@ class DeliverMixin:
                     with self._lock:
                         task["current"] = task["total"]
                         task["pct"] = 100
+                        self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
                         task["status"] = "done"
                         task["message"] = "初版交付完成（系统复制）"
                         task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -912,6 +913,7 @@ class DeliverMixin:
                     with self._lock:
                         task["current"] = task["total"]
                         task["pct"] = 100
+                        self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
                         task["status"] = "done"
                         task["message"] = "初版交付完成，状态→审核中"
                         task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -931,6 +933,7 @@ class DeliverMixin:
                         if stderr else "robocopy rc=%d" % rc
                     with self._lock:
                         task["status"] = "error"
+                        self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
                         task["message"] = "初版交付失败: " + err
                     self._cleanup_partial_dst(dst)
                     self.db.add_sync_log(
@@ -943,6 +946,7 @@ class DeliverMixin:
                 proc.wait()
             with self._lock:
                 task["status"] = "error"
+                self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
                 task["message"] = "初版交付超时（超过1小时）"
             self._cleanup_partial_dst(dst)
             self._notify_desktop("⚠️ 初版交付超时", project_name, error=True)
@@ -954,6 +958,7 @@ class DeliverMixin:
                     pass
             with self._lock:
                 task["status"] = "error"
+                self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
                 task["message"] = "初版交付异常: " + str(e)
             if not use_com:
                 self._cleanup_partial_dst(dst)
@@ -1011,6 +1016,7 @@ class DeliverMixin:
                     with self._lock:
                         task["current"] = task["total"]
                         task["pct"] = 100
+                        self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
                         task["status"] = "done"
                         task["message"] = "交付完成（系统复制）"
                         task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1040,6 +1046,7 @@ class DeliverMixin:
                     with self._lock:
                         task["current"] = task["total"]
                         task["pct"] = 100
+                        self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
                         task["status"] = "done"
                         task["message"] = "交付完成"
                         task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1059,6 +1066,7 @@ class DeliverMixin:
                         if stderr else "robocopy rc=%d" % rc
                     with self._lock:
                         task["status"] = "error"
+                        self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
                         task["message"] = "交付失败: " + err
                     self._cleanup_partial_dst(dst)
                     self.db.add_sync_log(
@@ -1071,6 +1079,7 @@ class DeliverMixin:
                 proc.wait()
             with self._lock:
                 task["status"] = "error"
+                self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
                 task["message"] = "交付超时（超过1小时）"
             self._cleanup_partial_dst(dst)
             self._notify_desktop("⚠️ 一键交付超时", project_name, error=True)
@@ -1082,6 +1091,7 @@ class DeliverMixin:
                     pass
             with self._lock:
                 task["status"] = "error"
+                self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
                 task["message"] = "交付异常: " + str(e)
             if not use_com:
                 self._cleanup_partial_dst(dst)

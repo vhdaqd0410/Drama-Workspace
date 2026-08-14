@@ -30,10 +30,28 @@ function initDesktopSSE(){
         if(payload.type==='notify'){
           const level=payload.level==='error'?'error':'success';
           toast(payload.title+': '+payload.message, level);
-          // 完成后自动刷新一次项目列表（带 2s 延迟避免还没写库）
-          if(!_sseRefreshTimer){
-            _sseRefreshTimer=setTimeout(()=>{_sseRefreshTimer=null;try{loadProjects();}catch(e){}},2000);
+          _scheduleSseRefresh();
+        } else if(payload.type==='sync'){
+          // 同步进度事件 → 更新卡片进度显示 + 完成后刷新
+          if(payload.status==='done'){
+            toast('✅ '+payload.project+' 同步完成','success');
+            _scheduleSseRefresh();
+          } else if(payload.status==='error'){
+            toast('❌ '+payload.project+' 同步失败','error');
+            _scheduleSseRefresh();
+          } else {
+            // 纯进度变化 → 静默刷新（让卡片上的进度条动起来）
+            _scheduleSseRefresh(800);
           }
+        } else if(payload.type==='deliver'){
+          if(payload.status==='start'){
+            toast('📤 '+payload.project+' 开始回传','info');
+          } else if(payload.status==='done'){
+            toast('✅ '+payload.project+' 回传完成','success');
+          } else if(payload.status==='error'){
+            toast('❌ '+payload.project+' 回传失败','error');
+          }
+          _scheduleSseRefresh();
         }
       }catch(_){}
     };
@@ -45,8 +63,107 @@ function initDesktopSSE(){
   }catch(e){console.warn('SSE init exception',e);}
 }
 let _sseRefreshTimer=null;
+function _scheduleSseRefresh(delay){
+  delay = delay || 1500;
+  if(_sseRefreshTimer) clearTimeout(_sseRefreshTimer);
+  _sseRefreshTimer = setTimeout(()=>{
+    _sseRefreshTimer = null;
+    try{ loadProjects(); }catch(_){}
+  }, delay);
+}
 
-function switchTab(name){
+/* ============ 全局快捷键 ============ */
+function bindShortcuts(){
+  document.addEventListener('keydown', function(e){
+    var tag = (e.target.tagName || '').toUpperCase();
+    var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
+    if(isInput) return;
+
+    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){
+      e.preventDefault();
+      openSearchModal();
+      return;
+    }
+    if(e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r' && !e.shiftKey)){
+      e.preventDefault();
+      toast('🔄 刷新中...','info');
+      try{ loadProjects(); }catch(_){}
+      return;
+    }
+    if((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'r'){
+      e.preventDefault();
+      toast('♻️  强制重新扫描...','info');
+      try{ localStorage.removeItem('wb_scan_cache'); }catch(_){}
+      api('POST','/api/scan').then(function(){ loadProjects(); }).catch(function(){});
+      return;
+    }
+    if(e.key === 'Escape'){
+      var modal = document.querySelector('.modal-overlay');
+      if(modal) modal.remove();
+      return;
+    }
+  });
+}
+
+function openSearchModal(){
+  var secs = (typeof allSections !== 'undefined' && allSections) ? allSections : [];
+  var items = [];
+  secs.forEach(function(sec){
+    (sec.projects||[]).forEach(function(p){
+      items.push({ name: p.name, section: sec.name, month: p.project_month || '', status: p.custom_status || '' });
+    });
+  });
+  if(!items.length){ toast('暂无项目','info'); return; }
+  var html = '<div class="modal-overlay" id="searchModal" onclick="if(event.target===this)this.remove()">'
+    + '<div class="modal" style="width:480px">'
+    + '<div class="modal-head">🔍 快速搜索 <span style="font-size:11px;color:#86868b;font-weight:400;margin-left:auto">Ctrl+K</span></div>'
+    + '<div style="padding:14px">'
+    + '<input id="searchInput" placeholder="输入项目名称或月份（如 2026-07）" style="width:100%;padding:10px 12px;border:1px solid #e5e5ea;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box" oninput="filterSearchResults()">'
+    + '<div id="searchResults" style="margin-top:10px;max-height:320px;overflow-y:auto"></div>'
+    + '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+  var inp = document.getElementById('searchInput');
+  if(inp) inp.focus();
+  filterSearchResults();
+}
+
+function filterSearchResults(){
+  var kw = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
+  var results = document.getElementById('searchResults');
+  if(!results) return;
+  var secs = (typeof allSections !== 'undefined' && allSections) ? allSections : [];
+  var items = [];
+  secs.forEach(function(sec){
+    (sec.projects||[]).forEach(function(p){
+      var name = (p.name||'').toLowerCase();
+      var month = (p.project_month||'').toLowerCase();
+      if(!kw || name.indexOf(kw)>=0 || month.indexOf(kw)>=0){
+        items.push({ name: p.name, section: sec.name, month: p.project_month || '', status: p.custom_status || '' });
+      }
+    });
+  });
+  if(!items.length){
+    results.innerHTML = '<div style="color:#86868b;padding:20px;text-align:center">未找到匹配的项目</div>';
+    return;
+  }
+  var html = items.slice(0, 50).map(function(it){
+    var monthBadge = it.month ? '<span style="background:#e3f2fd;color:#1565c0;padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px">📅 '+it.month+'</span>' : '';
+    return '<div onclick="document.getElementById('searchModal')?.remove();jumpToProject(''+it.name.replace(/'/g,"\'")+'')" style="padding:10px 12px;cursor:pointer;border-radius:6px;display:flex;justify-content:space-between;align-items:center;font-size:13px;border-bottom:1px solid #f0f0f0">'
+      + '<span><span style="font-weight:500">'+it.name+'</span>'+monthBadge+'</span>'
+      + '<span style="color:#86868b;font-size:11px">'+it.section+ (it.status?' · '+it.status:'')+'</span>'
+      + '</div>';
+  }).join('');
+  results.innerHTML = html;
+}
+
+function jumpToProject(name){
+  if(typeof openProjectDetail === 'function'){
+    openProjectDetail(name);
+  }
+}
+
+
+  function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+name));
   if(name==='fenji'){

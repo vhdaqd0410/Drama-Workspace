@@ -36,6 +36,9 @@ document.addEventListener('DOMContentLoaded',async ()=>{
       try{ initDesktopSSE(); } catch(e){ console.warn('SSE init failed', e); }
     }
 
+    // 3.7 全局快捷键
+    try{ bindShortcuts(); } catch(e){ console.warn('shortcuts init failed', e); }
+
     // 4. 自动刷新已禁用 — 由用户手动点 🔄 刷新 按钮触发
     // pollDashboard=setInterval(loadProjects,30000);
   }catch(e){
