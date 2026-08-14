@@ -218,7 +218,9 @@ function renderDeliverablesModal(){
       + '</div>'
 
             // Breadcrumbs (revising 模式)
-      + (_deliverablesState.mode === 'revising' && _deliverablesState.breadcrumbs.length > 0 ? (function(){
+      + ((_deliverablesState.mode === 'revising' || _deliverablesState.mode === 'delivery') && _deliverablesState.breadcrumbs.length > 0 ? (function(){
+          // 在面包屑最前面加一个显眼的"返回根目录"按钮
+          var crumbHtml = '<button onclick="navDelivTo()" style="margin-right:8px;padding:2px 8px;background:#fff;border:1px solid #e5e5ea;border-radius:4px;cursor:pointer;font-size:11px">⬅ 返回根目录</button>';
           var crumbs = _deliverablesState.breadcrumbs.map(function(b, idx){
             var clickable = idx < _deliverablesState.breadcrumbs.length - 1;
             var sp = _deliverablesState.breadcrumbs.slice(0, idx+1).map(function(x){ return x.path; }).filter(Boolean).join('/');
@@ -227,13 +229,15 @@ function renderDeliverablesModal(){
               ? '<a href="javascript:void(0)" onclick="navDelivTo(\'' + safeSp + '\')" style="color:#0071e3;text-decoration:none">' + htm(b.name) + '</a>'
               : '<span style="color:#1d1d1f;font-weight:600">' + htm(b.name) + '</span>');
           }).join(' <span style="color:#86868b">/</span> ');
-          return '<div style="padding:10px 16px;background:#f5f5f7;border-bottom:1px solid #e5e5ea;font-size:12px">' + crumbs + '</div>';
+          return '<div style="padding:10px 16px;background:#f5f5f7;border-bottom:1px solid #e5e5ea;font-size:12px;display:flex;align-items:center">' + crumbHtml + crumbs + '</div>';
         })() : '')
 
 // 修改模式提示 banner
       + (_deliverablesState.mode === 'revising'
         ? '<div style="padding:8px 16px;background:#fff3cd;color:#856404;border-bottom:1px solid #ffeaa7;font-size:12px">📝 当前是 <b>修改中</b> 状态，正在查看修改文件夹里的视频</div>'
-        : '')
+        : (_deliverablesState.mode === 'delivery'
+           ? '<div style="padding:8px 16px;background:#d4edda;color:#155724;border-bottom:1px solid #c3e6cb;font-size:12px">📦 当前查看 <b>000交付</b> 文件夹，可勾选回传到制作部</div>'
+           : ''))
 
         // Folders 列表 (revising 模式根目录，带 checkbox 勾选整文件夹回传)
       + (_deliverablesState.folders.length > 0 ? (function(){
