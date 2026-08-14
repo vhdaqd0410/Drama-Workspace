@@ -171,6 +171,12 @@ function fjUpdateRowLen(val){
   if(numInput) numInput.value = fjRangeToCount(val);
 }
 function fjOnRangeBlur(person){
+  // 智能顺延：如果这个人是单段连续，自动把后面人的集数重新排成连续
+  if(fjIsSingleSegment(fjRanges[person])){
+    fjAutoAlignFrom(person);
+    return;  // fjAutoAlignFrom 里已经做了 render + save
+  }
+  // 多段：不顺延，只保存重绘
   fjSaveSession();
   fjRenderTable();
 }
@@ -182,38 +188,55 @@ function fjOnLenLive(person, lenStr){
   fjRenderPreview();
 }
 function fjOnLenBlur(person){
-  fjSaveSession();
-  fjRenderTable();
+  // 长度编辑必然是单段 → 自动顺延后面人
+  fjAutoAlignFrom(person);
+}
+function fjIsSingleSegment(rangeStr){
+  const s = (rangeStr||'').trim();
+  return /^(\d+-\d+|\d+)$/.test(s);
 }
 function fjRemovePerson(person){
   if(!confirm(`删除 ${person} 的分配？`)) return;
   delete fjRanges[person];
-  fjRenderTable();
-  fjUpdateValidation();
-  fjSaveSession();
+  // 删除后自动对齐后面所有人，保证连续
+  fjAutoAlignAll();
   toast(`已删除 ${person}`, 'info');
 }
 
-// ===== 手动对齐：从指定人起，把后面所有人的集数重新排成连续段 =====
+// ===== 手动/自动对齐：保留前面人的原样，只对齐指定人+后面的人为连续 =====
 function fjAutoAlignFrom(person){
   const ordered = fjOrderedPersons();
   const idx = ordered.indexOf(person);
   if(idx < 0) return;
-  fjAutoAlignImpl(ordered, idx);
+  // 这个人自己保留原样，从他后面那个人开始对齐
+  fjAutoAlignImpl(ordered, idx + 1);
 }
 function fjAutoAlignAll(){
   const ordered = fjOrderedPersons();
   if(ordered.length === 0) return;
-  fjAutoAlignImpl(ordered, 0);
+  const total = parseInt($('fjTotal').value) || 0;
+  let nextStart = 1;
+  for(let i = 0; i < ordered.length; i++){
+    const p = ordered[i];
+    const len = fjRangeToCount(fjRanges[p]);
+    if(len <= 0) continue;
+    if(nextStart + len - 1 > total){
+      toast(`对齐时 ${p} 超出总集数`, 'warning');
+      break;
+    }
+    fjRanges[p] = `${nextStart}-${nextStart + len - 1}`;
+    nextStart += len;
+  }
+  fjRenderTable();
+  fjUpdateValidation();
+  fjSaveSession();
   toast('🔗 全部已对齐为连续', 'success');
 }
 function fjAutoAlignImpl(ordered, startIdx){
+  if(startIdx <= 0 || startIdx >= ordered.length) return;
   const total = parseInt($('fjTotal').value) || 0;
-  let nextStart = 1;
-  // 如果 startIdx > 0，保留前面人的原样，从那个人的起点开始
-  if(startIdx > 0){
-    nextStart = fjGetEndEpisode(fjRanges[ordered[startIdx - 1]]) + 1;
-  }
+  // 前面人的最后一集 + 1 就是第一个要对齐人的起点
+  let nextStart = fjGetEndEpisode(fjRanges[ordered[startIdx - 1]]) + 1;
   for(let i = startIdx; i < ordered.length; i++){
     const p = ordered[i];
     const len = fjRangeToCount(fjRanges[p]);
