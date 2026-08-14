@@ -678,7 +678,7 @@ async function fjUploadTemplate(){
   const fd = new FormData();
   fd.append('file', input.files[0]);
   try{
-    const data = await api('POST', '/api/fenji/upload_template', fd, true);
+    const data = await api('POST', '/api/fenji/upload_template', fd);
     toast(`✅ 已上传 ${data.name}`, 'success');
     fjExportState.selectedTemplate = data.name;
     localStorage.setItem('fj_selected_template', data.name);
