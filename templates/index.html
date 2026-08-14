@@ -491,6 +491,9 @@ a{color:var(--blue);text-decoration:none}
         <button class="btn btn-sm" onclick="fjAutoAlignAll()">🔗 自动对齐全部</button>
         <button class="btn btn-sm" onclick="readFromProject()">📥 从项目读取</button>
         <button class="btn btn-sm" onclick="showPasteEpisodesModal()">📋 粘贴分集</button>
+        <button class="btn btn-sm" onclick="fjCopyResult()">📋 复制结果</button>
+        <button class="btn btn-sm" title="选择导出用的 Excel 模板" onclick="fjPickTemplate()">📄 模板<span id="fjTplBadge" style="background:var(--bg-border);padding:1px 6px;border-radius:8px;font-size:11px;margin-left:4px">未选</span></button>
+        <button class="btn btn-sm btn-primary" onclick="fjExportExcel()">📊 导出到模板</button>
         <div class="fj-headtail">
           <label><input type="checkbox" id="fjHeadTailOn" onchange="fjRenderHeadTail()"> 头尾分</label>
           <select id="fjHeadTailPerson"><option value="">选一位...</option></select>

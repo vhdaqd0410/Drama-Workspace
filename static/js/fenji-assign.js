@@ -605,5 +605,316 @@ async function openFenjiFor(name){
   await loadFenjiProjects();
   $('fjProject').value = name;
   fjOnProjectChange();
+  fjUpdateTplBadge();
 }
+function fjUpdateTplBadge(){
+  const b = document.getElementById('fjTplBadge');
+  if(!b) return;
+  const t = fjExportState.selectedTemplate || localStorage.getItem('fj_selected_template') || '';
+  b.textContent = t ? t : '未选';
+}
+
+// ===== 模板管理 + 导出到 Excel =====
+let fjExportState = {
+  templates: [],
+  selectedTemplate: localStorage.getItem('fj_selected_template') || '',
+  templateB64: '',          // 如果前端直接 base64 上传了模板
+  previewBlob: null,
+  previewB64: '',
+  previewFileName: '',
+  previewProjectPath: '',
+  lastBackup: null,
+};
+
+async function fjLoadTemplates(){
+  try{
+    const data = await api('GET', '/api/fenji/templates');
+    fjExportState.templates = data.templates || [];
+  }catch(e){ fjExportState.templates = []; }
+}
+
+async function fjPickTemplate(){
+  // 小弹窗：列出已有模板 + 上传新模板
+  await fjLoadTemplates();
+  const existing = fjExportState.templates.length
+    ? `<div class="fj-tpl-row"><select id="fjTplSelect" style="flex:1">${
+        fjExportState.templates.map(n => `<option value="${n}" ${n===fjExportState.selectedTemplate?'selected':''}>${n}</option>`).join('')
+      }</select><button class="btn btn-sm danger" onclick="fjDeleteTemplate()" title="删除">✕</button></div>`
+    : '<div style="color:var(--text-sec);padding:12px 0">还没有上传过模板</div>';
+  const html = `
+    <div class="fj-tpl-picker" style="display:flex;gap:10px;flex-direction:column">
+      ${existing}
+      <div class="fj-tpl-row"><input type="file" id="fjTplFile" accept=".xlsx,.xlsm"><button class="btn btn-sm" onclick="fjUploadTemplate()">📤 上传</button></div>
+      <div class="fj-tpl-row">
+        <button class="btn btn-sm btn-primary" onclick="fjConfirmTemplate()" style="flex:1">✓ 使用选中模板</button>
+      </div>
+    </div>`;
+  fjModalBody(html, () => {
+    if(fjExportState.selectedTemplate){
+      toast('📄 当前模板: ' + fjExportState.selectedTemplate, 'info');
+    }
+  });
+}
+function fjModalBody(html, onClose){
+  let modal = document.getElementById('fjTplModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'fjTplModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `<div style="background:var(--bg-elev);padding:20px;border-radius:10px;min-width:420px;max-width:90vw;border:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">📄 选择模板</h3>
+      <button class="btn btn-sm danger" onclick="document.getElementById('fjTplModal').remove()">✕</button>
+    </div>${html}</div>`;
+  modal.addEventListener('click', e => { if(e.target===modal) { modal.remove(); onClose && onClose(); } });
+  modal.style.display = 'flex';
+}
+
+async function fjUploadTemplate(){
+  const input = document.getElementById('fjTplFile');
+  if(!input || !input.files[0]){ toast('请先选择文件','warning'); return; }
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  try{
+    const data = await api('POST', '/api/fenji/upload_template', fd, true);
+    toast(`✅ 已上传 ${data.name}`, 'success');
+    fjExportState.selectedTemplate = data.name;
+    localStorage.setItem('fj_selected_template', data.name);
+    await fjLoadTemplates();
+    // 刷新 modal 内容
+    fjPickTemplate();
+  }catch(e){ toast('上传失败: '+e.message,'error'); }
+}
+function fjDeleteTemplate(){
+  const sel = document.getElementById('fjTplSelect');
+  if(!sel || !sel.value) return;
+  if(!confirm(`删除模板 ${sel.value}？`)) return;
+  const templates = fjExportState.templates.filter(t => t !== sel.value);
+  fjExportState.templates = templates;
+  if(fjExportState.selectedTemplate === sel.value){
+    fjExportState.selectedTemplate = templates[0] || '';
+    localStorage.setItem('fj_selected_template', fjExportState.selectedTemplate);
+  }
+  fjPickTemplate(); // 刷新
+  toast('已删除', 'info');
+}
+function fjConfirmTemplate(){
+  const sel = document.getElementById('fjTplSelect');
+  if(!sel || !sel.value){ toast('请先选择模板','warning'); return; }
+  fjExportState.selectedTemplate = sel.value;
+  localStorage.setItem('fj_selected_template', sel.value);
+  document.getElementById('fjTplModal')?.remove();
+  fjUpdateTplBadge();
+  toast('📄 已选模板: ' + sel.value, 'success');
+}
+
+// 点击"📊 导出到模板"按钮
+async function fjExportExcel(){
+  // 1. 检查有分配
+  const assignList = fjGetAssignList();
+  if(!assignList.length){ toast('请先完成分集分配','warning'); return; }
+  // 2. 检查模板
+  await fjLoadTemplates();
+  if(!fjExportState.selectedTemplate){
+    toast('请先点「📄 模板」选择一个模板','warning');
+    fjPickTemplate();
+    return;
+  }
+  // 3. 打开交片时间 Modal
+  fjOpenTimeModal(assignList);
+}
+
+function fjOpenTimeModal(assignList){
+  const tmr = new Date(Date.now() + 24*3600*1000);
+  const m = tmr.getMonth()+1, d = tmr.getDate();
+  const html = `
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:360px">
+      <div id="fjTimeHint" style="color:var(--text-sec);font-size:13px">交片日期自动设为明天：${m}.${d}</div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <label style="min-width:60px">交片日期</label>
+        <input type="date" id="fjTimeDate" value="${tmr.toISOString().slice(0,10)}" style="flex:1;padding:6px;border-radius:4px;border:1px solid var(--bg-border);background:var(--bg)">
+      </div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <label style="min-width:60px">上午/下午</label>
+        <select id="fjTimePeriod" style="flex:1;padding:6px;border-radius:4px;border:1px solid var(--bg-border);background:var(--bg)">
+          <option value="上午">上午</option>
+          <option value="下午" selected>下午</option>
+          <option value="晚上">晚上</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <label style="min-width:60px">几点</label>
+        <select id="fjTimeHour" style="flex:1;padding:6px;border-radius:4px;border:1px solid var(--bg-border);background:var(--bg)">
+          ${Array.from({length:24},(_,i)=>`<option value="${i}" ${i===18?'selected':''}>${i}点</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+        <button class="btn btn-sm" onclick="document.getElementById('fjTimeModal')?.remove()">取消</button>
+        <button class="btn btn-sm btn-primary" onclick="fjDoExport()">确定并导出</button>
+      </div>
+    </div>`;
+  let modal = document.getElementById('fjTimeModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'fjTimeModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `<div style="background:var(--bg-elev);padding:20px;border-radius:10px;min-width:420px;border:1px solid var(--border)">
+    <div style="margin-bottom:14px"><h3 style="margin:0">⏰ 设置交片时间</h3></div>${html}</div>`;
+  modal.style.display = 'flex';
+  modal._assignList = assignList;
+  modal.onclick = e => { if(e.target === modal) modal.remove(); };
+}
+
+async function fjDoExport(){
+  const modal = document.getElementById('fjTimeModal');
+  const assignList = modal._assignList || fjGetAssignList();
+  modal.remove();
+
+  const dateStr = $('fjTimeDate').value;
+  const period = $('fjTimePeriod').value;
+  const hour = $('fjTimeHour').value;
+  const dt = new Date(dateStr);
+  const timeText = `${dt.getMonth()+1}.${dt.getDate()}${period}${hour}点交`;
+
+  const project = $('fjProject').value || '未命名项目';
+  let projectPath = project;
+  // 从项目路径下拉框里读路径（如果有的话）
+  const pOpt = $('fjProject')?.selectedOptions?.[0];
+  if(pOpt && pOpt.value){
+    try{
+      const pdata = await api('GET', `/api/project/${encodeURIComponent(pOpt.value)}`);
+      projectPath = pdata.path || project;
+    }catch(e){}
+  }
+
+  toast('⏳ 正在生成模板...');
+  try{
+    const res = await api('POST', '/api/fenji/export_excel', {
+      template_name: fjExportState.selectedTemplate,
+      originalTemplateName: fjExportState.selectedTemplate,
+      projectName: project,
+      path: projectPath,
+      timeText: timeText,
+      statusText: '已分集',
+      assign: assignList,
+    });
+    // 生成 Blob
+    const binary = atob(res.file_b64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+    fjExportState.previewBlob = new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    fjExportState.previewB64 = res.file_b64;
+    fjExportState.previewFileName = res.fileName;
+    fjExportState.previewProjectPath = projectPath;
+    fjExportState.lastBackup = res.backup || null;
+    fjBuildPreview(assignList, projectPath, timeText);
+  }catch(e){ toast('导出失败: '+e.message,'error'); }
+}
+
+function fjBuildPreview(assignList, path, timeText){
+  const projectName = path.split(/[\\\/]/).pop() || '未命名项目';
+  const scroll = document.getElementById('fjPreviewScroll');
+  if(!scroll){ toast('预览区域找不到','error'); return; }
+  let html = `<table class="preview-table" style="border-collapse:collapse;width:100%;font-size:13px">`;
+  html += `<tr><td class="pt-title" colspan="5" style="background:#4472C4;color:#fff;padding:12px;text-align:center;font-size:16px;font-weight:bold">八月份</td></tr>`;
+  // 新项目
+  const first = assignList[0] || {person:'',range:''};
+  html += `<tr>
+    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(projectName)}</td>
+    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(path)}</td>
+    <td class="pt-body" style="border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(first.person)}：${escHtml(first.range)}</td>
+    <td class="pt-block" style="background:#DDEBF7;color:#1F4E79;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(timeText)}</td>
+    <td class="pt-done" style="background:#E2EFDA;color:#006100;font-weight:bold;border:1px solid #BFBFBF;padding:8px;text-align:center">已分集</td>
+  </tr>`;
+  assignList.slice(1).forEach(d=>{
+    html += `<tr>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+      <td class="pt-body" style="border:1px solid #BFBFBF;padding:8px;text-align:center">${escHtml(d.person)}：${escHtml(d.range)}</td>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+      <td class="pt-empty" style="background:#DDEBF7;border:1px solid #BFBFBF"></td>
+    </tr>`;
+  });
+  html += '</table>';
+  scroll.innerHTML = html;
+
+  // 备份提示
+  const bk = document.getElementById('fjBackupNote');
+  if(bk){
+    if(fjExportState.lastBackup && fjExportState.lastBackup.name){
+      bk.style.display = 'block';
+      bk.innerHTML = '🛡️ 已自动备份原模板：<b>' + escHtml(fjExportState.lastBackup.name) + '</b>';
+    } else {
+      bk.style.display = 'none';
+    }
+  }
+
+  // 显示预览 Modal
+  let modal = document.getElementById('fjPreviewModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'fjPreviewModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `<div style="background:var(--bg-elev);border-radius:10px;min-width:680px;max-width:92vw;max-height:88vh;border:1px solid var(--border);display:flex;flex-direction:column">
+    <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+      <h3 style="margin:0">📊 导出预览（可直接保存）</h3>
+      <button class="btn btn-sm danger" onclick="document.getElementById('fjPreviewModal').remove()">✕</button>
+    </div>
+    <div id="fjPreviewScroll" style="overflow:auto;padding:16px;flex:1"></div>
+    <div id="fjBackupNote" style="padding:8px 16px;color:var(--text-sec);font-size:13px"></div>
+    <div style="padding:12px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border)">
+      <button class="btn btn-sm" onclick="document.getElementById('fjPreviewModal').remove()">取消</button>
+      <button class="btn btn-sm" onclick="fjSaveToProjectFolder()">📁 保存到项目文件夹</button>
+      <button class="btn btn-sm btn-primary" onclick="fjDownloadPreview()">💾 下载 Excel 文件</button>
+    </div>
+  </div>`;
+  modal.style.display = 'flex';
+  modal.onclick = e => { if(e.target === modal) modal.remove(); };
+  // 重建 scroll 引用（innerHTML 后）
+  setTimeout(() => fjBuildPreview._scroll = document.getElementById('fjPreviewScroll'), 0);
+}
+
+function fjDownloadPreview(){
+  if(!fjExportState.previewBlob){ toast('没有可保存的文件','warning'); return; }
+  const url = URL.createObjectURL(fjExportState.previewBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = fjExportState.previewFileName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  document.getElementById('fjPreviewModal')?.remove();
+  toast('✅ 文件已下载', 'success');
+}
+
+async function fjSaveToProjectFolder(){
+  if(!fjExportState.previewB64){ toast('没有可保存的文件','warning'); return; }
+  const folder = fjExportState.previewProjectPath.replace(/[\\\/][^\\\/]*$/, '');
+  if(!folder || folder === fjExportState.previewProjectPath){
+    toast('无法识别项目文件夹路径','warning'); return;
+  }
+  try{
+    const res = await api('POST', '/api/fenji/save_to_folder', {
+      fileB64: fjExportState.previewB64,
+      fileName: fjExportState.previewFileName,
+      folder: folder,
+      open: true,
+    });
+    toast(`✅ 已保存到 ${res.saved}，正在用 Excel 打开...`, 'success');
+    document.getElementById('fjPreviewModal')?.remove();
+  }catch(e){ toast('保存失败: '+e.message,'error'); }
+}
+
+// 返回 [{person, range}] —— 后端 /api/fenji/export_excel 需要的格式
+function fjGetAssignList(){
+  const ordered = fjOrderedPersons();
+  return ordered.map(name => ({ person: name, range: fjRanges[name] || '' }))
+               .filter(d => d.range && fjRangeToCount(d.range) > 0);
+}
+
+function escHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 /* ============ QA Center ============ */
