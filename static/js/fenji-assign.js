@@ -606,6 +606,7 @@ async function openFenjiFor(name){
   $('fjProject').value = name;
   fjOnProjectChange();
   fjUpdateTplBadge();
+  fjUpdateTargetBadge();
 }
 function fjUpdateTplBadge(){
   const b = document.getElementById('fjTplBadge');
@@ -618,13 +619,28 @@ function fjUpdateTplBadge(){
 let fjExportState = {
   templates: [],
   selectedTemplate: localStorage.getItem('fj_selected_template') || '',
-  templateB64: '',          // 如果前端直接 base64 上传了模板
+  targetPath: localStorage.getItem('fj_target_path') || '',
+  templateB64: '',
   previewBlob: null,
   previewB64: '',
   previewFileName: '',
   previewProjectPath: '',
   lastBackup: null,
 };
+
+function fjUpdateTplBadge(){
+  const b = document.getElementById('fjTplBadge');
+  if(!b) return;
+  const t = fjExportState.selectedTemplate || localStorage.getItem('fj_selected_template') || '';
+  b.textContent = t ? t : '未选';
+}
+function fjUpdateTargetBadge(){
+  const b = document.getElementById('fjTargetBadge');
+  if(!b) return;
+  const p = fjExportState.targetPath || '';
+  b.textContent = p ? (p.split(/[\\\/]/).pop() || p) : '未设';
+  b.title = p || '点击设置目标文件路径';
+}
 
 async function fjLoadTemplates(){
   try{
@@ -710,7 +726,67 @@ function fjConfirmTemplate(){
   toast('📄 已选模板: ' + sel.value, 'success');
 }
 
-// 点击"📊 导出到模板"按钮
+// ===== 目标文件设置 =====
+function fjPickTargetPath(){
+  const cur = fjExportState.targetPath || '';
+  const html = `
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:400px">
+      <div style="color:var(--text-sec);font-size:13px">
+        指定一个固定路径的 Excel 文件，每次分集完数据会直接追加进去。<br>
+        用同一个模板的话，所有剧的数据都会累积在这个文件里。
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="min-width:70px">目标文件</label>
+        <input type="text" id="fjTargetInput" value="${cur.replace(/"/g,'&quot;')}" placeholder="例如 O:\\分集汇总\\8月汇总.xlsx" style="flex:1;padding:6px;border-radius:4px;border:1px solid var(--bg-border);background:var(--bg)">
+      </div>
+      ${cur ? `<div style="color:var(--text-sec);font-size:12px">当前: ${cur}</div>` : ''}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+        ${cur ? `<button class="btn btn-sm danger" onclick="fjClearTarget()">清除</button>` : ''}
+        <button class="btn btn-sm" onclick="document.getElementById('fjTargetModal')?.remove()">取消</button>
+        <button class="btn btn-sm btn-primary" onclick="fjSaveTarget()">保存</button>
+      </div>
+    </div>`;
+  let modal = document.getElementById('fjTargetModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'fjTargetModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `<div style="background:var(--bg-elev);padding:20px;border-radius:10px;min-width:460px;border:1px solid var(--border)">
+    <div style="margin-bottom:14px"><h3 style="margin:0">⚙️ 设置目标文件</h3></div>${html}</div>`;
+  modal.style.display = 'flex';
+  modal.onclick = e => { if(e.target === modal) modal.remove(); };
+}
+function fjSaveTarget(){
+  const v = document.getElementById('fjTargetInput')?.value?.trim() || '';
+  if(!v){ toast('请输入完整的文件路径','warning'); return; }
+  if(!/\.xlsx?$/i.test(v)){ toast('目标文件必须是 .xlsx 或 .xls','warning'); return; }
+  fjExportState.targetPath = v;
+  localStorage.setItem('fj_target_path', v);
+  document.getElementById('fjTargetModal')?.remove();
+  fjUpdateTargetBadge();
+  toast('✅ 目标已设: ' + v.split(/[\\\/]/).pop(), 'success');
+}
+function fjClearTarget(){
+  fjExportState.targetPath = '';
+  localStorage.removeItem('fj_target_path');
+  document.getElementById('fjTargetModal')?.remove();
+  fjUpdateTargetBadge();
+  toast('已清除目标路径', 'info');
+}
+
+// ===== 一键追加到目标（跳过预览，直接追加 + 自动打开 Excel） =====
+async function fjAppendToTarget(){
+  const assignList = fjGetAssignList();
+  if(!assignList.length){ toast('请先完成分集分配','warning'); return; }
+  await fjLoadTemplates();
+  if(!fjExportState.selectedTemplate){ toast('请先选模板','warning'); fjPickTemplate(); return; }
+  if(!fjExportState.targetPath){ toast('请先设置目标文件','warning'); fjPickTargetPath(); return; }
+  fjOpenTimeModal(assignList, { skip_preview: true, open_excel: true });
+}
+
+// 点击"📊 导出预览"按钮
 async function fjExportExcel(){
   // 1. 检查有分配
   const assignList = fjGetAssignList();
@@ -726,9 +802,11 @@ async function fjExportExcel(){
   fjOpenTimeModal(assignList);
 }
 
-function fjOpenTimeModal(assignList){
+function fjOpenTimeModal(assignList, options){
+  const opts = options || {};
   const tmr = new Date(Date.now() + 24*3600*1000);
   const m = tmr.getMonth()+1, d = tmr.getDate();
+  const btnText = opts.skip_preview ? '确定并追加' : '确定并导出';
   const html = `
     <div style="display:flex;flex-direction:column;gap:14px;min-width:360px">
       <div id="fjTimeHint" style="color:var(--text-sec);font-size:13px">交片日期自动设为明天：${m}.${d}</div>
@@ -752,7 +830,7 @@ function fjOpenTimeModal(assignList){
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
         <button class="btn btn-sm" onclick="document.getElementById('fjTimeModal')?.remove()">取消</button>
-        <button class="btn btn-sm btn-primary" onclick="fjDoExport()">确定并导出</button>
+        <button class="btn btn-sm btn-primary" onclick="fjDoExport(${opts.skip_preview?'true':'false'}, ${opts.open_excel?'true':'false'})">${btnText}</button>
       </div>
     </div>`;
   let modal = document.getElementById('fjTimeModal');
@@ -769,9 +847,11 @@ function fjOpenTimeModal(assignList){
   modal.onclick = e => { if(e.target === modal) modal.remove(); };
 }
 
-async function fjDoExport(){
+async function fjDoExport(skipPreview, openExcel){
   const modal = document.getElementById('fjTimeModal');
   const assignList = modal?._assignList || fjGetAssignList();
+  skipPreview = !!skipPreview;
+  openExcel = !!openExcel;
 
   const dateStr = modal?.querySelector('#fjTimeDate')?.value || new Date(Date.now()+24*3600*1000).toISOString().slice(0,10);
   const period = modal?.querySelector('#fjTimePeriod')?.value || '下午';
@@ -782,7 +862,6 @@ async function fjDoExport(){
 
   const project = $('fjProject').value || '未命名项目';
   let projectPath = project;
-  // 从项目路径下拉框里读路径（如果有的话）
   const pOpt = $('fjProject')?.selectedOptions?.[0];
   if(pOpt && pOpt.value){
     try{
@@ -791,9 +870,9 @@ async function fjDoExport(){
     }catch(e){}
   }
 
-  toast('⏳ 正在生成模板...');
+  toast('⏳ 正在生成...');
   try{
-    const res = await api('POST', '/api/fenji/export_excel', {
+    const payload = {
       template_name: fjExportState.selectedTemplate,
       originalTemplateName: fjExportState.selectedTemplate,
       projectName: project,
@@ -801,8 +880,14 @@ async function fjDoExport(){
       timeText: timeText,
       statusText: '已分集',
       assign: assignList,
-    });
-    // 生成 Blob
+    };
+    if(skipPreview && fjExportState.targetPath){
+      payload.target_path = fjExportState.targetPath;
+      payload.open_excel = openExcel;
+    }
+    const res = await api('POST', '/api/fenji/export_excel', payload);
+
+    // 存 Blob（下载备用）
     const binary = atob(res.file_b64);
     const bytes = new Uint8Array(binary.length);
     for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
@@ -811,7 +896,15 @@ async function fjDoExport(){
     fjExportState.previewFileName = res.fileName;
     fjExportState.previewProjectPath = projectPath;
     fjExportState.lastBackup = res.backup || null;
-    fjBuildPreview(assignList, projectPath, timeText);
+
+    if(skipPreview){
+      const saved = res.target_saved || '';
+      toast(saved
+        ? `✅ 已追加到 ${saved.split(/[\\\/]/).pop()}，Excel 已打开`
+        : '✅ 追加成功', 'success');
+    }else{
+      fjBuildPreview(assignList, projectPath, timeText);
+    }
   }catch(e){ toast('导出失败: '+e.message,'error'); }
 }
 

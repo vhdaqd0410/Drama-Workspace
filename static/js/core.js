@@ -19,7 +19,11 @@ function toast(msg,type='info'){
 function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+name));
-  if(name==='fenji')loadFenjiProjects();
+  if(name==='fenji'){
+    loadFenjiProjects();
+    if(typeof fjUpdateTplBadge==='function')fjUpdateTplBadge();
+    if(typeof fjUpdateTargetBadge==='function')fjUpdateTargetBadge();
+  }
   if(name==='qa')loadQAProjects();
   if(name==='settings')loadConfig();
 }

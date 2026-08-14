@@ -480,13 +480,40 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             except Exception as e:
                 _logger.warning('写回模板失败: %s', e)
 
+        # 5. 如果用户指定了固定目标路径，直接写过去 + 自动打开
+        target_path = (body.get('target_path') or '').strip()
+        open_excel = bool(body.get('open_excel'))
+        actually_saved = ''
+        if target_path:
+            try:
+                safe_tgt = _os.path.abspath(target_path)
+                _os.makedirs(_os.path.dirname(safe_tgt), exist_ok=True)
+                with open(safe_tgt, 'wb') as f:
+                    f.write(new_bytes)
+                actually_saved = safe_tgt
+                _logger.info('已保存到目标: %s', safe_tgt)
+            except Exception as e:
+                _logger.exception('写目标文件失败')
+                return jsonify(ok=False, msg=f'保存目标文件失败: {e}'), 500
+
+        if open_excel and actually_saved:
+            try:
+                import subprocess
+                subprocess.Popen(['start', '', actually_saved], shell=True)
+                _logger.info('已用 Excel 打开 %s', actually_saved)
+            except Exception as e:
+                _logger.warning('打开 Excel 失败: %s', e)
+
         out_name = _re.sub(r'\.[^.]+$', '', original_name) + '_已分集.xlsx'
-        return jsonify({
+        resp = {
             'ok': True,
             'file_b64': _b64.b64encode(new_bytes).decode('ascii'),
             'fileName': out_name,
             'backup': {'name': backup_name, 'saved': backup_path},
-        })
+        }
+        if actually_saved:
+            resp['target_saved'] = actually_saved
+        return jsonify(resp)
 
     @app.route('/api/fenji/save_to_folder', methods=['POST'])
     def fenji_save_to_folder():
