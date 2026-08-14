@@ -85,7 +85,11 @@ def main():
     print()
 
     try:
-        app.run(host=host, port=port, debug=debug, use_reloader=False)
+        try:
+            import waitress
+            waitress.serve(app, host=host, port=port, threads=8)
+        except ImportError:
+            app.run(host=host, port=port, debug=debug, use_reloader=False)
     except KeyboardInterrupt:
         print("\n👋 已停止")
 

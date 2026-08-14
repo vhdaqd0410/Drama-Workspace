@@ -1,20 +1,30 @@
 """NAS Bridge Web 服务主入口"""
 import os
+import os as _os
 import sys
 import time
+import time as _time
 import yaml
 import logging
 import threading
 import subprocess
+import subprocess as _sp
 import signal
+import json
+import json as _json
+import shlex as _shlex
+import glob as _glob
+import tempfile as _tf
+import sqlite3
+import re
+import secrets
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, jsonify, request, send_file
 
 from db import Database
 from sync_engine import SyncEngine
 from watcher import Watcher
-import re
-import json
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -133,7 +143,6 @@ def index():
             if projs:
                 sections_data.append({'key':dept_key,'name':label,'type':'production','collapsed':True,'projects':projs})
         sections_data.append({'key':'completed','name':'✅ 已完成项目','type':'completed','collapsed':True,'projects':group_completed})
-        import json as _json
         boot_data = _json.dumps({'sections':sections_data,'production':production,'group_all':group_all,'group_completed':group_completed}, ensure_ascii=False)
     except Exception as e:
         app.logger.error('boot_data failed: %s', e)
@@ -141,37 +150,6 @@ def index():
     return render_template('index.html', boot_data=boot_data, api_key=_API_SECRET)
 
 
-
-
-def _scan_dir(path, skip_names=None, recursive_depth=0):
-    """扫描目录获取项目文件夹，支持嵌套月份目录展开。"""
-    skip = set(skip_names or [])
-    skip.add('.DS_Store')
-    skip.add('desktop.ini')
-    if not os.path.isdir(path):
-        return []
-    results = []
-    try:
-        items = os.listdir(path)
-    except Exception:
-        return []
-    for item in sorted(items):
-        if item in skip:
-            continue
-        full = os.path.join(path, item)
-        if not os.path.isdir(full):
-            continue
-        if recursive_depth > 0:
-            try:
-                sub = os.listdir(full)
-                has_sub = any(os.path.isdir(os.path.join(full, s)) and not s.startswith('.') for s in sub)
-            except Exception:
-                has_sub = False
-            if has_sub:
-                results.extend(_scan_dir(full, skip, recursive_depth - 1))
-                continue
-        results.append({"name": item, "path": full})
-    return results
 
 
 def _get_db_info_for_list(db_inst, project_name):
@@ -388,7 +366,6 @@ def api_status():
 
 @app.route("/api/health")
 def api_health():
-    import sqlite3
     try:
         conn = sqlite3.connect(db.db_path); conn.close()
         return jsonify({"db_alive": True, "watcher_enabled": watcher.enabled})
@@ -414,7 +391,6 @@ def api_project_dest_dir(project_name):
 def api_project_open_folder(project_name):
     data = request.get_json(silent=True) or {}
     which = data.get("which", "source")
-    import subprocess
     path = None
     if which == "source": path, err = sync_engine.get_source_dir(project_name)
     elif which == "dest": path, err = sync_engine.get_dest_dir(project_name)
@@ -422,7 +398,6 @@ def api_project_open_folder(project_name):
         src, err = sync_engine.get_source_dir(project_name); path = src
     elif which == "revising":
         src, err = sync_engine.get_source_dir(project_name)
-        import os as _os
         rev = data.get("revision", "")
         if rev:
             cand = _os.path.join(src, rev)
@@ -727,15 +702,13 @@ def api_exec_cmd():
     """安全受限的命令执行接口：仅允许启动白名单内的程序。
     body: {"cmd": ["pythonw", "...video_qa_tool.py", "..."]}  或 {"cmd": "pythonw ..."}
     """
-    import subprocess as _sp
-    import shlex as _shlex
     data = request.get_json(silent=True) or {}
     raw_cmd = data.get("cmd")
 
     # 强制要求 token（比全局鉴权更严格）
     require_auth = data.get("_auth_required", True)
     actual_key = request.headers.get("X-API-KEY", "")
-    if require_auth and actual_key != API_SECRET_KEY:
+    if require_auth and actual_key != _API_SECRET:
         return jsonify({"ok": False, "message": "鉴权失败"}), 401
 
     if isinstance(raw_cmd, list):
@@ -785,10 +758,6 @@ _QA_CACHE_LOCK = threading.Lock()
 @app.route("/api/project/<path:project_name>/qa_result", methods=["GET"])
 def api_project_qa_result(project_name):
     """读取项目最新的质检结果（扫描 %TEMP% 目录下的 qa_result_*.json）"""
-    import glob as _glob
-    import tempfile as _tf
-    import time as _time
-
     # 检查缓存是否还热
     with _QA_CACHE_LOCK:
         cached = QA_RESULT_CACHE.get(project_name)
@@ -902,10 +871,6 @@ _QA_STATUS_LOCK = threading.Lock()
 
 def _scan_qa_status(project_name):
     """快速扫描一个项目的 QA 状态，不读完整 JSON"""
-    import glob as _glob
-    import tempfile as _tf
-    import time as _time
-
     with _QA_STATUS_LOCK:
         cached = _qa_status_cache.get(project_name)
         if cached and (_time.time() - cached.get("mtime", 0) < QA_CACHE_TTL):

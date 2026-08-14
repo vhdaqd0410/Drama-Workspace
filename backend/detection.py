@@ -15,6 +15,7 @@ import tempfile
 import traceback as _traceback
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import cv2
@@ -1157,8 +1158,6 @@ def run_detection_batch(base, opts, cache=None, cancel_token=None,
     Returns:
         list: 全部检测结果
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     cp_folder = opts["cp_folder"]
     cp_dir = os.path.join(base, cp_folder)
     video_files = sorted(

@@ -1,10 +1,14 @@
 """素材同步引擎 - 支持多制作部源 + 递归查找成片目录"""
 import os
+import os as _os
 import re
 import shutil
+import shutil as _shutil
 import subprocess
+import subprocess as _sp
 import logging
 import threading
+import time as _time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -12,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 def _natural_key(text):
     """自然排序键：将数字段转为整数，使 '2' 排在 '10' 前面。"""
-    import re
     parts = re.split(r'(\d+)', str(text))
     return [int(p) if p.isdigit() else p.lower() for p in parts]
 
@@ -42,7 +45,6 @@ def _quick_find_file(base_path, filename, max_depth=4, timeout=2.0):
     """浅层快速查找：在 max_depth 层内用 os.scandir 找文件名，超过 timeout 秒直接放弃。
     避免在大的网络盘上 os.walk 阻塞 API。
     """
-    import time as _time
     deadline = _time.time() + timeout
 
     def _walk(depth, cur):
@@ -181,7 +183,6 @@ class SyncEngine:
             logger.error("未配置制作部 NAS 路径 (production_roots)")
             return []
 
-        import re
         month_pattern = re.compile(r'^\d{1,2}月$')
 
         all_names = []
@@ -565,8 +566,9 @@ class SyncEngine:
             logger.warning("组内 NAS 路径不存在: %s", group_root)
             return []
 
-        import re
         month_pattern = re.compile(r'^\d{1,2}月$')
+
+        all_names = []
 
         # 先清理旧数据中 source_root 为空的（O盘项目），准备重新扫描
         all_projects = self.db.get_all_projects()
@@ -702,7 +704,6 @@ class SyncEngine:
         prod_names = {p["name"] for p in production}
 
         # 扫描 O 盘全部项目目录（实时）
-        import re
         month_pattern = re.compile(r'^\d{1,2}月$')
         if os.path.isdir(group_root):
             for name in os.listdir(group_root):
@@ -1378,7 +1379,6 @@ class SyncEngine:
 
     def _poll_deliver_progress(self, project_name):
         """独立后台线程：周期性 os.walk 目标目录更新进度（不在 API 请求里做，避免卡死）"""
-        import time as _time
         for _ in range(240):  # 最多 240*2=480s
             _time.sleep(2)
             with self._lock:
@@ -1479,7 +1479,6 @@ class SyncEngine:
         if not dst or not os.path.exists(dst):
             return
         try:
-            import shutil as _shutil
             _shutil.rmtree(dst, ignore_errors=True)
             logger.warning("已清理交付失败的半成品目录: %s", dst)
         except Exception as e:
@@ -1494,7 +1493,6 @@ class SyncEngine:
                     pids.append((name, task["proc_pid"]))
         for name, pid in pids:
             try:
-                import subprocess as _sp
                 # Windows: taskkill /F /T /PID 终止整个进程树
                 _sp.run(["taskkill", "/F", "/T", "/PID", str(pid)],
                         capture_output=True, timeout=5)
@@ -1712,7 +1710,6 @@ class SyncEngine:
         if not output_dirs:
             return []
 
-        import re
         rev_pattern = re.compile(r'^(\d{4})(修改)?$')
         candidates = []
         for od in output_dirs:
@@ -1982,7 +1979,6 @@ class SyncEngine:
         return []
 
     def _find_file_by_episode_num(self, root, ep_num):
-        import os as _os
         if not root or not _os.path.isdir(root):
             return None
         target = str(ep_num).strip()
@@ -1996,7 +1992,6 @@ class SyncEngine:
         return None
 
     def _search_dir_for_file(self, root, filename):
-        import os as _os
         if not root or not _os.path.isdir(root):
             return None
         p2 = _os.path.join(root, filename)

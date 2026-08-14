@@ -1,7 +1,58 @@
 """Additional routes for workbench enhancements."""
 import os as _os
 import re as _re
+import json as _j
+import yaml as _y
 from flask import request, jsonify
+import config as _cfg
+from utils import scan_dir
+
+
+def _nas_search_roots():
+    """Build [(root, path_key), ...] from config.yaml NAS section."""
+    group_root = _cfg.get("nas.group_root", "")
+    production_roots = _cfg.get("nas.production_roots", []) or []
+    roots = []
+    if group_root:
+        roots.append((group_root, "group_path"))
+    for p in production_roots:
+        roots.append((p, "production_path"))
+    if group_root:
+        roots.append((_os.path.join(group_root, "00已完成"), "group_path"))
+    return roots
+
+
+def _production_labels():
+    """Return path -> label map from config."""
+    return _cfg.get("nas.production_labels", {}) or {}
+
+
+# episode_summary 扫描参数：key = 部门标签（production_labels 的 value 或 "group_root"）
+_EPISODE_SCAN_OVERRIDES = {
+    "group_root": {"skip": ["00已完成", "0000新人"], "depth": 0},
+    "AI漫剧二部": {"skip": ["00序列_ID_剧名"], "depth": 0},
+    "AI漫剧一部海外": {"skip": ["AAA《xxxxxxxx》文件夹模板", "00序列_ID_剧名"], "depth": 0},
+    "AI漫剧九部海外": {"skip": [], "depth": 1},
+    "AI漫剧六部中转": {"skip": [], "depth": 0},
+}
+
+
+def _episode_summary_scan_tasks():
+    """Build [(path, skip_names, depth), ...] from config NAS + scan overrides."""
+    tasks = []
+    group_root = _cfg.get("nas.group_root", "")
+    production_roots = _cfg.get("nas.production_roots", []) or []
+    labels = _production_labels()
+
+    if group_root:
+        o = _EPISODE_SCAN_OVERRIDES["group_root"]
+        tasks.append((group_root, o["skip"], o["depth"]))
+
+    for root in production_roots:
+        label = labels.get(root, "")
+        o = _EPISODE_SCAN_OVERRIDES.get(label, {"skip": [], "depth": 0})
+        tasks.append((root, o["skip"], o["depth"]))
+    return tasks
 
 def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     @app.route("/api/project/<path:project_name>", methods=["GET"])
@@ -13,14 +64,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             pass
         if p:
             return jsonify({"ok": True, "project": p})
-        search_roots = [
-            (r"O:\AI漫剧剪辑一组", "group_path"),
-            (r"N:\AI漫剧二部中转", "production_path"),
-            (r"N:\AI漫剧一部中转\AI漫剧一部海外", "production_path"),
-            (r"N:\AI漫剧九部中转\海外", "production_path"),
-            (r"N:\AI漫剧六部中转", "production_path"),
-            (r"O:\AI漫剧剪辑一组\00已完成", "group_path"),
-        ]
+        search_roots = _nas_search_roots()
         for root, path_key in search_roots:
             candidate = _os.path.join(root, project_name)
             if _os.path.isdir(candidate):
@@ -67,9 +111,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         workers = int(data.get("workers", 4))
         project_path = data.get("project_path") or ""
         if not project_path:
-            for root in [r"O:\AI漫剧剪辑一组", r"N:\AI漫剧二部中转",
-                         r"N:\AI漫剧一部中转\AI漫剧一部海外",
-                         r"N:\AI漫剧九部中转\海外", r"N:\AI漫剧六部中转"]:
+            for root, _pk in _nas_search_roots():
                 candidate = _os.path.join(root, project_name)
                 if _os.path.isdir(candidate):
                     project_path = candidate
@@ -106,13 +148,8 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     def api_episode_summary():
         result = {"ok": True, "projects": []}
         all_names = set()
-        for it in _scan_dir(r"O:\AI漫剧剪辑一组", skip_names=["00已完成", "0000新人"]):
-            all_names.add(it["name"])
-        for cfg in [(r"N:\AI漫剧二部中转", ["00序列_ID_剧名"], 0),
-                     (r"N:\AI漫剧一部中转\AI漫剧一部海外", ["AAA《xxxxxxxx》文件夹模板", "00序列_ID_剧名"], 0),
-                     (r"N:\AI漫剧九部中转\海外", [], 1),
-                     (r"N:\AI漫剧六部中转", [], 0)]:
-            for it in _scan_dir(cfg[0], skip_names=cfg[1], recursive_depth=cfg[2]):
+        for path, skip, depth in _episode_summary_scan_tasks():
+            for it in scan_dir(path, skip_names=skip, recursive_depth=depth):
                 all_names.add(it["name"])
         for name in all_names:
             try:
@@ -209,7 +246,6 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     @app.route("/api/config", methods=["GET"])
     def api_config_get():
         try:
-            import config as _cfg
             cfg = _cfg.load_config()
             return jsonify({"ok": True, "config": cfg})
         except Exception as e:
@@ -219,7 +255,6 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     def api_config_save():
         data = request.get_json(silent=True) or {}
         try:
-            import config as _cfg
             if hasattr(_cfg, 'save_config'):
                 _cfg.save_config(data)
             return jsonify({"ok": True})
@@ -294,7 +329,6 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     )
 
     def _fm_load_links():
-        import json as _j
         try:
             with open(_FM_LINKS_FILE, 'r', encoding='utf-8') as _f:
                 return _j.load(_f)
@@ -302,15 +336,12 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return {}
 
     def _fm_save_links(data):
-        import json as _j
-        import os as _os
         _os.makedirs(_os.path.dirname(_FM_LINKS_FILE), exist_ok=True)
         with open(_FM_LINKS_FILE, 'w', encoding='utf-8') as _f:
             _j.dump(data, _f, ensure_ascii=False, indent=2)
 
     @app.route('/api/fenmiaozhen/config', methods=['GET'])
     def fenmiaozhen_config():
-        import yaml as _y
         _cp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'config.yaml')
         with open(_cp, 'r', encoding='utf-8') as _f:
             _cfg = _y.safe_load(_f) or {}
@@ -329,7 +360,6 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
 
     @app.route('/api/fenmiaozhen/link/<path:name>', methods=['POST'])
     def fenmiaozhen_save_link(name):
-        import json as _j
         try:
             body = request.get_json(force=True, silent=True) or {}
             url = (body.get('url') or '').strip()
@@ -342,32 +372,3 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         _fm_save_links(links)
         return jsonify(ok=True, url=url)
 
-
-def _scan_dir(path, skip_names=None, recursive_depth=0):
-    skip = set(skip_names or [])
-    skip.add(".DS_Store")
-    skip.add("desktop.ini")
-    if not _os.path.isdir(path):
-        return []
-    results = []
-    try:
-        items = _os.listdir(path)
-    except Exception:
-        return []
-    for item in sorted(items):
-        if item in skip:
-            continue
-        full = _os.path.join(path, item)
-        if not _os.path.isdir(full):
-            continue
-        if recursive_depth > 0:
-            try:
-                sub = _os.listdir(full)
-                has_sub = any(_os.path.isdir(_os.path.join(full, s)) and not s.startswith('.') for s in sub)
-            except Exception:
-                has_sub = False
-            if has_sub:
-                results.extend(_scan_dir(full, skip, recursive_depth - 1))
-                continue
-        results.append({"name": item, "path": full})
-    return results
