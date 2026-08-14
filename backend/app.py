@@ -333,6 +333,41 @@ def api_deliver_folder(project_name):
 
 
 
+_VIDEO_EXTS = {'.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv', '.ts', '.m2ts', '.wmv', '.rmvb', '.rm', '.3gp'}
+
+
+@app.route("/api/preview/open_local", methods=["POST"])
+def api_preview_open_local():
+    """用本地默认播放器（如 PotPlayer）打开视频文件。"""
+    data = request.get_json(silent=True) or {}
+    project_name = data.get("project_name", "")
+    filename = data.get("filename", "")
+    mode = data.get("mode", "source")
+    subpath = data.get("subpath", "")
+    if not filename:
+        return jsonify({"ok": False, "message": "未指定文件名"}), 400
+    if ".." in filename:
+        return jsonify({"ok": False, "message": "禁止路径穿越"}), 400
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in _VIDEO_EXTS:
+        return jsonify({"ok": False, "message": "非视频文件"}), 400
+    file_path = sync_engine.get_file_path_for_preview(project_name, filename, mode, subpath)
+    if not file_path or not os.path.isfile(file_path):
+        return jsonify({"ok": False, "message": "文件不存在"}), 404
+    potplayer_path = (config.get("players") or {}).get("potplayer_path", "")
+    try:
+        if potplayer_path and os.path.isfile(potplayer_path):
+            subprocess.Popen([potplayer_path, file_path])
+        else:
+            if os.name == "nt":
+                os.startfile(file_path)
+            else:
+                subprocess.Popen(["xdg-open", file_path])
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
+
+
 @app.route("/api/preview/<path:project_name>/<path:filename>")
 def api_preview_file(project_name, filename):
     """预览成片文件：流式返回文件内容，支持 Range 请求（视频拖拽）。"""

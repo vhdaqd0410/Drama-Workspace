@@ -46,6 +46,15 @@ async function deliverFolders(){
 function previewDelivFile(projectName, fileName){
   window.__previewMode = _deliverablesState.mode || 'source';
   window.__previewSubpath = _deliverablesState.subpath || '';
+  window.__previewListProject = projectName;
+  if (_deliverablesState.files && _deliverablesState.files.length > 0) {
+    window.__previewList = _deliverablesState.files.map(function(f){
+      return { name: f.name || f, subpath: _deliverablesState.subpath || '' };
+    });
+    window.__previewIdx = window.__previewList.findIndex(f => f.name === fileName);
+  } else {
+    window.__previewList = null;
+  }
   _openPreview(projectName, fileName);
 }
 

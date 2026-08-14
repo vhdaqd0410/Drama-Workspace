@@ -694,11 +694,22 @@ window.onerror = function(msg, url, line, col, err){
       <span class="idx-label" id="preview-idx-label">- / -</span>
       <button class="nav-btn" onclick="previewNav(1)" title="下一集 (→)">⏭</button>
       <span class="sep"></span>
-      <button onclick="previewSetSpeed(0.5)">0.5×</button>
-      <button onclick="previewSetSpeed(1)" class="active">1×</button>
-      <button onclick="previewSetSpeed(1.25)">1.25×</button>
-      <button onclick="previewSetSpeed(1.5)">1.5×</button>
-      <button onclick="previewSetSpeed(2)">2×</button>
+      <button onclick="previewStep(-1/30)" title="后退 1 帧 (Shift+←)">⏪</button>
+      <button onclick="previewStep(1/30)" title="前进 1 帧 (Shift+→)">⏩</button>
+      <button onclick="previewStep(-5)" title="后退 5 秒">⟲5</button>
+      <button onclick="previewStep(5)" title="前进 5 秒">⟳5</button>
+      <span class="sep"></span>
+      <button data-speed="0.5" onclick="previewSetSpeed(0.5)">0.5×</button>
+      <button data-speed="1" onclick="previewSetSpeed(1)" class="active">1×</button>
+      <button data-speed="1.25" onclick="previewSetSpeed(1.25)">1.25×</button>
+      <button data-speed="1.5" onclick="previewSetSpeed(1.5)">1.5×</button>
+      <button data-speed="2" onclick="previewSetSpeed(2)">2×</button>
+      <button data-speed="3" onclick="previewSetSpeed(3)">3×</button>
+      <button data-speed="4" onclick="previewSetSpeed(4)">4×</button>
+      <span class="sep"></span>
+      <span class="idx-label" id="preview-time" style="min-width:90px;text-align:center">--:-- / --:--</span>
+      <span class="sep"></span>
+      <button onclick="previewOpenLocal()" title="用本地播放器打开 (O)">🎬</button>
     </div>
   </div>
 </div>
