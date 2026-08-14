@@ -24,6 +24,14 @@ document.addEventListener('click', function(e){
     e.preventDefault();
     return;
   }
+
+  var delivBtn = e.target.closest('[data-action="ep-delivery"]');
+  if(delivBtn){
+    var pname4 = delivBtn.getAttribute('data-project');
+    if(pname4) openDeliverablesModal(pname4, 'delivery');
+    e.preventDefault();
+    return;
+  }
 });
 
 // ===== 双开目录：同时打开源目录 + 交付目录 =====
