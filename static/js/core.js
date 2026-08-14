@@ -206,6 +206,20 @@ function projectCardHTML(p){
     </div>`;
   }
 
+  // === 同步进度条 — syncing 时显示 ===
+  const syncProgId = 'sync-prog-' + p.name.replace(/[^a-zA-Z0-9_]/g,'_');
+  let syncProgressHTML = '';
+  if (p.sync_status === 'syncing') {
+    const sp = p.sync_progress || '准备中...';
+    const m = sp.match(/^(\d+)%\s*(.*)$/);
+    const pct = m ? parseInt(m[1]) : 0;
+    const label = m ? m[2] : sp;
+    syncProgressHTML = `<div class="card-progress card-sync-progress" id="${syncProgId}">
+      <div class="card-progress-bar"><div class="card-progress-fill sync-fill" style="width:${pct}%"></div></div>
+      <div class="card-progress-text"><span>📦 ${label}</span><span class="sync-pct">${pct}%</span></div>
+    </div>`;
+  }
+
   // === 智能打开按钮 ===
   const pname = p.name.replace(/'/g,"\'");
   let openBtns = '';
@@ -244,6 +258,7 @@ function projectCardHTML(p){
   return `<select class="badge editable-badge ${badge.cls}" onchange="onStatusChange('${p.name.replace(/'/g,"\\'")}', this)" title="点击修改项目状态">${optsHtml}</select>`;
 })()}</div>
     ${workflowHTML(p.custom_status)}
+    ${syncProgressHTML}
     ${progressHTML}
     ${epSummaryBox}
     ${epPanel}

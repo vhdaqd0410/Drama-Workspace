@@ -109,21 +109,38 @@ if(!confirm(`确认要将 "${name}" 从制作部NAS同步到组内NAS吗？\n（
     const r = await api('POST', `/api/sync/${encodeURIComponent(name)}`);
     if(r.ok){
       toast('同步已启动，请关注进度','success');
-      await loadProjects();  // 刷新列表
-      // 自动轮询同步状态
+      await loadProjects();
+      const syncProgId = 'sync-prog-' + name.replace(/[^a-zA-Z0-9_]/g,'_');
       const poll = setInterval(async () => {
         try {
           const d = await api('GET', '/api/projects');
           const flat = (d.production || []).concat(d.group_all || []);
           const target = flat.find(x => x.name === name);
-          if(target && target.sync_status && target.sync_status !== 'syncing'){
+          if(!target) return;
+
+          // 实时更新进度条
+          const sp = target.sync_progress || '';
+          const m = sp.match(/^(\d+)%\s*(.*)$/);
+          const pct = m ? parseInt(m[1]) : 0;
+          const label = m ? m[2] : sp;
+          const bar = document.getElementById(syncProgId);
+          if (bar) {
+            const fill = bar.querySelector('.sync-fill');
+            const pctEl = bar.querySelector('.sync-pct');
+            const lblEl = bar.querySelector('.card-progress-text span');
+            if (fill) fill.style.width = pct + '%';
+            if (pctEl) pctEl.textContent = pct + '%';
+            if (lblEl) lblEl.textContent = '📦 ' + (label || '同步中...');
+          }
+
+          if(target.sync_status && target.sync_status !== 'syncing'){
             clearInterval(poll);
-            toast(`同步${target.sync_status === 'synced' ? '完成' : '结束'}: ${target.sync_status}`,'success');
+            toast(`✅ 同步完成: ${name}`,'success');
             await loadProjects();
           }
         } catch(e){}
-      }, 3000);
-      setTimeout(() => clearInterval(poll), 300000);  // 5分钟后停止
+      }, 2000);
+      setTimeout(() => clearInterval(poll), 300000);
     } else {
       toast('同步失败: ' + (r.message || ''),'error');
     }

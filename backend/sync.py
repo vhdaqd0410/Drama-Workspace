@@ -102,7 +102,7 @@ class SyncMixin:
         dst_root = proj["group_path"]
 
         self.db.update_project_status(
-            project_name, sync_status="syncing", sync_progress="准备中...")
+            project_name, sync_status="syncing", sync_progress="5% 准备中...")
         self.db.add_sync_log(
             project_name, "开始同步", "production->group",
             status="info", message="源: " + src_root)
@@ -122,7 +122,8 @@ class SyncMixin:
                     if not os.path.isdir(src):
                         logger.warning("源子目录不存在，跳过: %s", src)
                         continue
-                    progress = "(%d/%d) 同步: %s" % (i, total, subdir)
+                    pct = 5 + int(90 * (i - 1) / max(total, 1))
+                    progress = "%d%% 同步中 (%d/%d): %s" % (pct, i, total, subdir)
                     self.db.update_project_status(
                         project_name, sync_progress=progress)
                     self.db.add_sync_log(
@@ -134,9 +135,8 @@ class SyncMixin:
                             project_name, "同步失败", "production->group",
                             file_path=subdir, status="error", message=msg)
             else:
-                # partial mode without subdirs → sync entire project
                 self.db.update_project_status(
-                    project_name, sync_progress="同步整个项目目录...")
+                    project_name, sync_progress="10% 完整同步项目目录...")
                 ok, msg = self._robocopy(src_root, dst_root, exclude)
                 if not ok:
                     self.db.add_sync_log(
@@ -145,12 +145,15 @@ class SyncMixin:
         else:
             # full mode — mirror entire project
             self.db.update_project_status(
-                project_name, sync_progress="完整同步项目目录...")
+                project_name, sync_progress="10% 完整同步项目目录...")
             ok, msg = self._robocopy(src_root, dst_root, exclude)
             if not ok:
                 self.db.add_sync_log(
                     project_name, "同步失败", "production->group",
                     status="error", message=msg)
+
+        self.db.update_project_status(
+            project_name, sync_status="syncing", sync_progress="98% 收尾中...")
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.db.update_project_status(
