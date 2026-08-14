@@ -105,6 +105,87 @@ def _shell_copy_folder(src_folder, dst_parent_dir):
         return True
 
 
+def _shell_copy_files_batch(src_dir, file_names, dst_dir):
+    """批量复制多个文件 — 弹一个统一的系统原生进度对话框。
+    原理: 临时目录名 = dst_dir 的 basename → CopyHere 到父目录 → Shell 自动合并内容。
+    硬链接把文件"挂"到临时目录 (同盘零耗时)。"""
+    import tempfile as _tf
+    import shutil as _shu
+    dst_name = os.path.basename(dst_dir.rstrip("\\/"))
+    dst_parent = os.path.dirname(dst_dir.rstrip("\\/"))
+    if not dst_name or not dst_parent:
+        raise OSError("目标目录无效: " + dst_dir)
+
+    # 构造临时目录: <tmp>/<dst_name>/  名字和目标目录相同
+    container = _tf.mkdtemp(prefix='deliver_batch_')
+    tmp_folder = os.path.join(container, dst_name)
+    os.makedirs(tmp_folder, exist_ok=True)
+
+    for fname in file_names:
+        src_path = os.path.join(src_dir, fname) if not os.path.isabs(fname) else fname
+        if not os.path.isfile(src_path):
+            logger.warning('批量复制跳过不存在的文件: %s', src_path)
+            continue
+        dest_link = os.path.join(tmp_folder, os.path.basename(fname))
+        try:
+            os.link(src_path, dest_link)
+        except OSError:
+            try:
+                os.symlink(src_path, dest_link)
+            except (OSError, NotImplementedError):
+                _shu.copy2(src_path, dest_link)
+
+    if not os.listdir(tmp_folder):
+        raise OSError("所有文件都找不到, 没有可复制的内容")
+
+    if not os.name == 'nt':
+        os.makedirs(dst_dir, exist_ok=True)
+        for fname in os.listdir(tmp_folder):
+            _shu.copy2(os.path.join(tmp_folder, fname), os.path.join(dst_dir, fname))
+        _shu.rmtree(container, ignore_errors=True)
+        return True
+
+    try:
+        import pythoncom
+        from win32com.client import Dispatch
+        pythoncom.CoInitialize()
+        try:
+            shell = Dispatch('Shell.Application')
+            # Namespace 临时容器目录, 拿里面那个同名文件夹 item
+            folder_container = shell.Namespace(container)
+            tmp_folder_item = folder_container.ParseName(dst_name)
+            folder_parent = shell.Namespace(dst_parent)
+            folder_parent.CopyHere(tmp_folder_item, 0x10)
+            logger.info('Shell.CopyHere 批量已发起: %d 个文件 → %s', len(file_names), dst_dir)
+            # 延迟清理: Shell 复制是异步的, 等几秒让它开始 (CopyHere 是 Folder 级别, Shell 会自己处理)
+            import threading as _th
+            def _cleanup():
+                import time as _t
+                _t.sleep(15)
+                _shu.rmtree(container, ignore_errors=True)
+            _th.Thread(target=_cleanup, daemon=True).start()
+            return True
+        finally:
+            pythoncom.CoUninitialize()
+    except ImportError:
+        logger.warning('pywin32 不可用, fallback 到 shutil')
+        os.makedirs(dst_dir, exist_ok=True)
+        for fname in os.listdir(tmp_folder):
+            _shu.copy2(os.path.join(tmp_folder, fname), os.path.join(dst_dir, fname))
+        _shu.rmtree(container, ignore_errors=True)
+        return True
+    except Exception as e:
+        logger.warning('Shell.CopyHere 批量失败(%s), fallback 到 cmd copy', e)
+        os.makedirs(dst_dir, exist_ok=True)
+        for fname in os.listdir(tmp_folder):
+            try:
+                _shu.copy2(os.path.join(tmp_folder, fname), os.path.join(dst_dir, fname))
+            except Exception:
+                pass
+        _shu.rmtree(container, ignore_errors=True)
+        return True
+
+
 class DeliverMixin:
     _EP_PATTERNS = [
         re.compile(r'(?i)(?:^|[^a-z0-9])EP[_\s\-]?(\d{1,3})(?!\d)'),
@@ -174,48 +255,99 @@ class DeliverMixin:
             return False, str(e)
 
     def deliver_files_batch(self, project_name, file_names):
-        """批量回传成片文件，返回每个文件的回传结果"""
-        results = []
-        total = len(file_names)
-        success_count = 0
-        fail_count = 0
+        """批量回传成片 — Shell 弹一个统一的系统原生进度对话框"""
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return [{"name": n, "ok": False, "message": "项目不存在", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
 
-        # 初始进度：回传 0/total
+        # 收集所有源路径 → 按目录分组
+        file_map = []  # [(abs_src_path, fname)]
+        for fname in file_names:
+            src = fname if os.path.isabs(fname) else None
+            if not src:
+                group_output_dirs = self._find_output_dirs(proj.get("group_path", ""), project_name)
+                for od in group_output_dirs:
+                    candidate = os.path.join(od, fname)
+                    if os.path.isfile(candidate):
+                        src = candidate
+                        break
+            if not src:
+                found = _quick_find_file(proj.get("group_path", ""), fname, max_depth=4)
+                src = found
+            if src and os.path.isfile(src):
+                file_map.append((src, fname))
+
+        if not file_map:
+            self.db.update_project_status(
+                project_name, delivery_status="error",
+                sync_progress="批量回传失败: 所有文件都找不到")
+            return [{"name": n, "ok": False, "message": "文件不存在", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
+
+        # 确定目标目录
+        prod_output_dirs = self._find_output_dirs(proj.get("production_path", ""), project_name)
+        if not prod_output_dirs:
+            self.db.update_project_status(
+                project_name, delivery_status="error",
+                sync_progress="批量回传失败: 制作部目录中未找到 01上映单集版")
+            return [{"name": n, "ok": False, "message": "制作部目录中未找到对应输出目录", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
+
+        dst_dir = prod_output_dirs[0]
+        os.makedirs(dst_dir, exist_ok=True)
+
+        # 按源目录分组 (避免跨盘问题, 硬链接只能同盘)
+        by_src_dir = {}
+        for src_path, fname in file_map:
+            sd = os.path.dirname(src_path)
+            by_src_dir.setdefault(sd, []).append(src_path)
+
         self.db.update_project_status(
-            project_name,
-            delivery_status="delivering",
-            sync_progress="回传 0/{}".format(total))
+            project_name, delivery_status="delivering",
+            sync_progress="已发起 Shell 批量复制 ({} 个文件) — 看系统进度对话框".format(len(file_map)))
 
-        for i, fname in enumerate(file_names):
-            ok, msg = self.deliver_file(project_name, fname)
-            if ok:
-                success_count += 1
-            else:
-                fail_count += 1
+        # 每个源目录独立发起一次批量 Shell.CopyHere
+        errors = []
+        for src_dir, paths in by_src_dir.items():
+            try:
+                _shell_copy_files_batch(src_dir, paths, dst_dir)
+            except Exception as e:
+                logger.error('Shell 批量复制失败 %s → %s: %s', src_dir, dst_dir, e)
+                errors.append(str(e))
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if errors:
+            self.db.update_project_status(
+                project_name, delivery_status="error",
+                sync_progress="部分失败: " + "; ".join(errors[:2]),
+                last_delivered_at=now)
+        else:
+            # Shell.CopyHere 是异步的, 此时只表示"已发起"
+            # 保持 delivering 状态一会儿, 让用户看 Shell 对话框
+            def _mark_done():
+                import time as _t
+                _t.sleep(5)
+                self.db.update_project_status(
+                    project_name, delivery_status="delivered",
+                    sync_progress="", last_delivered_at=now)
+            import threading as _th
+            _th.Thread(target=_mark_done, daemon=True).start()
+
+        # 返回结果列表 (所有已成功发起)
+        results = []
+        for i, (src_path, fname) in enumerate(file_map):
+            ok = fname not in errors
             results.append({
                 "name": fname,
                 "ok": ok,
-                "message": msg,
-                "index": i + 1,
-                "total": total,
+                "message": "已发起 Shell 批量复制" if ok else "失败: " + str(errors[0] if errors else "未知"),
+                "index": i + 1, "total": len(file_map),
             })
-            # 即时写入进度：格式必须与前端正则 /回传\s+(\d+)\/(\d+)/ 匹配
-            self.db.update_project_status(
-                project_name,
-                delivery_status="delivering",
-                sync_progress="回传 {}/{}".format(i + 1, total))
+            self.db.add_delivery_log(
+                project_name, fname, src_path,
+                os.path.join(dst_dir, fname),
+                os.path.getsize(src_path) if os.path.isfile(src_path) else 0,
+                "success" if ok else "error",
+                "Shell 批量回传" if ok else "批量失败: " + str(errors[0] if errors else "未知"))
 
-        # 全部完成后，只有至少成功 1 个才标记为已交付
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if success_count > 0:
-            self.db.update_project_status(
-                project_name, delivery_status="delivered",
-                sync_progress="", last_delivered_at=now)
-        else:
-            self.db.update_project_status(
-                project_name, delivery_status="error",
-                sync_progress="全部失败 0/{}".format(total),
-                last_delivered_at="")
         return results
 
     def list_output_files(self, project_name):
@@ -1268,45 +1400,90 @@ class DeliverMixin:
             return False, str(e)
 
     def deliver_revision_batch(self, project_name, file_names, rev_folder_name=None):
-        """批量回传修改文件夹中的文件到制作部NAS的修改文件夹"""
-        results = []
-        total = len(file_names)
-        success_count = 0
-        fail_count = 0
+        """批量回传修改文件 — Shell 弹一个统一的系统原生进度对话框"""
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return [{"name": n, "ok": False, "message": "项目不存在", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
 
-        self.db.update_project_status(
-            project_name,
-            delivery_status="delivering",
-            sync_progress="回传 0/{}".format(total))
-
-        for i, fname in enumerate(file_names):
-            ok, msg = self.deliver_revision_file(project_name, fname, rev_folder_name)
-            if ok:
-                success_count += 1
-            else:
-                fail_count += 1
-            results.append({
-                "name": fname,
-                "ok": ok,
-                "message": msg,
-                "index": i + 1,
-                "total": total,
-            })
-            self.db.update_project_status(
-                project_name,
-                delivery_status="delivering",
-                sync_progress="回传 {}/{}".format(i + 1, total))
-
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if success_count > 0:
-            self.db.update_project_status(
-                project_name, delivery_status="delivered",
-                sync_progress="", last_delivered_at=now)
+        # 找源修改文件夹
+        if rev_folder_name:
+            folders = self.list_all_revision_folders(project_name)
+            rev_path, rev_name = None, rev_folder_name
+            for f in folders:
+                if f["name"] == rev_folder_name:
+                    rev_path = f["path"]
+                    break
+            if not rev_path:
+                return [{"name": n, "ok": False, "message": "未找到修改文件夹: " + rev_folder_name, "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
         else:
+            rev_path, rev_name = self.find_revision_folder(project_name)
+            if not rev_path:
+                return [{"name": n, "ok": False, "message": "未找到修改文件夹", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
+
+        # 找目标目录: 制作部/项目/01上映单集版/MMDD修改/
+        prod_output_dirs = self._find_output_dirs(proj.get("production_path", ""), project_name)
+        if not prod_output_dirs:
+            return [{"name": n, "ok": False, "message": "制作部项目中未找到对应输出目录", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
+
+        dst_dir = os.path.join(prod_output_dirs[0], rev_name)
+        try:
+            os.makedirs(dst_dir, exist_ok=True)
+        except Exception:
+            pass
+
+        # 筛选实际存在的文件
+        existing = []
+        for fname in file_names:
+            src = os.path.join(rev_path, fname)
+            if os.path.isfile(src):
+                existing.append(src)
+            else:
+                for name in os.listdir(rev_path):
+                    if name == fname and os.path.isfile(os.path.join(rev_path, name)):
+                        existing.append(os.path.join(rev_path, name))
+                        break
+
+        if not existing:
             self.db.update_project_status(
                 project_name, delivery_status="error",
-                sync_progress="全部失败 0/{}".format(total),
-                last_delivered_at="")
+                sync_progress="修改批量回传失败: 所有文件都找不到")
+            return [{"name": n, "ok": False, "message": "文件不存在于修改文件夹", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
+
+        self.db.update_project_status(
+            project_name, delivery_status="delivering",
+            sync_progress="已发起 Shell 批量复制 ({} 个文件) — 看系统进度对话框".format(len(existing)))
+
+        errors = []
+        try:
+            _shell_copy_files_batch(rev_path, existing, dst_dir)
+        except Exception as e:
+            logger.error('Shell 修改批量复制失败 %s → %s: %s', rev_path, dst_dir, e)
+            errors.append(str(e))
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if errors:
+            self.db.update_project_status(
+                project_name, delivery_status="error",
+                sync_progress="部分失败: " + errors[0],
+                last_delivered_at=now)
+        else:
+            def _mark_done():
+                import time as _t
+                _t.sleep(5)
+                self.db.update_project_status(
+                    project_name, delivery_status="delivered",
+                    sync_progress="", last_delivered_at=now)
+            import threading as _th
+            _th.Thread(target=_mark_done, daemon=True).start()
+
+        results = []
+        for i, fname in enumerate(file_names):
+            found = any(os.path.basename(p) == fname for p in existing)
+            results.append({
+                "name": fname, "ok": found and not errors,
+                "message": "已发起 Shell 批量复制" if (found and not errors) else ("文件不存在" if not found else errors[0]),
+                "index": i + 1, "total": len(file_names),
+            })
         return results
 
     def deliver_revision_folder(self, project_name, rev_folder_name):
@@ -1378,43 +1555,82 @@ class DeliverMixin:
             return False, str(e)
 
     def deliver_revision_folders_batch(self, project_name, folder_names):
-        """批量回传多个修改文件夹到制作部NAS"""
-        results = []
-        total = len(folder_names)
-        success_count = 0
-        fail_count = 0
+        """批量回传多个修改文件夹 — Shell 弹一个统一的系统原生进度对话框"""
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return [{"name": n, "ok": False, "message": "项目不存在", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
 
-        self.db.update_project_status(
-            project_name,
-            delivery_status="delivering",
-            sync_progress="回传文件夹 0/{}".format(total))
+        prod_output_dirs = self._find_output_dirs(proj.get("production_path", ""), project_name)
+        if not prod_output_dirs:
+            return [{"name": n, "ok": False, "message": "制作部项目中未找到对应输出目录", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
 
-        for i, fname in enumerate(folder_names):
-            ok, msg = self.deliver_revision_folder(project_name, fname)
-            if ok:
-                success_count += 1
+        prod_output = prod_output_dirs[0]
+        folders_on_dest = self.list_all_revision_folders_on_destination(project_name)
+        dest_set = {f["name"]: f["path"] for f in folders_on_dest}
+
+        def _get_dst_dir(rev_name):
+            if rev_name in dest_set:
+                return dest_set[rev_name]
+            return os.path.join(prod_output, rev_name)
+
+        valid_pairs = []  # [(src_folder_path, rev_folder_name)]
+        for fn in folder_names:
+            folders = self.list_all_revision_folders(project_name)
+            for f in folders:
+                if f["name"] == fn:
+                    valid_pairs.append((f["path"], f["name"]))
+                    break
             else:
-                fail_count += 1
-            results.append({
-                "name": fname,
-                "ok": ok,
-                "message": msg,
-                "index": i + 1,
-                "total": total,
-            })
-            self.db.update_project_status(
-                project_name,
-                delivery_status="delivering",
-                sync_progress="回传文件夹 {}/{}".format(i + 1, total))
+                rev_path, rev_name = self.find_revision_folder(project_name)
+                if rev_path and rev_name == fn:
+                    valid_pairs.append((rev_path, rev_name))
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if success_count > 0:
-            self.db.update_project_status(
-                project_name, delivery_status="delivered",
-                sync_progress="", last_delivered_at=now)
-        else:
+        if not valid_pairs:
             self.db.update_project_status(
                 project_name, delivery_status="error",
-                sync_progress="全部失败 0/{}".format(total),
-                last_delivered_at="")
+                sync_progress="修改文件夹批量回传失败: 所有文件夹都找不到")
+            return [{"name": n, "ok": False, "message": "未找到修改文件夹: " + n, "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
+
+        self.db.update_project_status(
+            project_name, delivery_status="delivering",
+            sync_progress="已发起 Shell 批量复制 ({} 个文件夹) — 看系统进度对话框".format(len(valid_pairs)))
+
+        errors = []
+        for src, rev_name in valid_pairs:
+            dst_dir = _get_dst_dir(rev_name)
+            try:
+                os.makedirs(dst_dir, exist_ok=True)
+            except Exception:
+                pass
+            try:
+                _shell_copy_folder(src, os.path.dirname(dst_dir.rstrip("\\/")))
+            except Exception as e:
+                logger.error('Shell 修改文件夹批量复制失败 %s → %s: %s', src, dst_dir, e)
+                errors.append(str(e))
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if errors:
+            self.db.update_project_status(
+                project_name, delivery_status="error",
+                sync_progress="部分失败: " + errors[0],
+                last_delivered_at=now)
+        else:
+            def _mark_done():
+                import time as _t
+                _t.sleep(5)
+                self.db.update_project_status(
+                    project_name, delivery_status="delivered",
+                    sync_progress="", last_delivered_at=now)
+            import threading as _th
+            _th.Thread(target=_mark_done, daemon=True).start()
+
+        results = []
+        found_names = {n for _, n in valid_pairs}
+        for i, fn in enumerate(folder_names):
+            ok = fn in found_names and not errors
+            results.append({
+                "name": fn, "ok": ok,
+                "message": "已发起 Shell 批量文件夹复制" if ok else ("未找到修改文件夹" if fn not in found_names else errors[0]),
+                "index": i + 1, "total": len(folder_names),
+            })
         return results
