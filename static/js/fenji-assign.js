@@ -125,14 +125,20 @@ function fjRenderTable(){
   body.innerHTML = names.map((name, i) => {
     const rng = fjRanges[name] || '';
     const len = fjRangeToCount(rng);
+    const escaped = name.replace(/'/g,"\\'");
     return `<div class="fj-row">
       <div class="idx">${i+1}</div>
       <div>${name}</div>
-      <input class="range-input" value="${rng}" data-person="${name}" oninput="fjOnRangeEdit('${name.replace(/'/g,"\\'")}', this.value)">
-      <input type="number" value="${len}" min="0" data-person="${name}" oninput="fjOnLenEdit('${name.replace(/'/g,"\\'")}', this.value)">
+      <input class="range-input" value="${rng}" data-person="${escaped}"
+             oninput="fjOnRangeLive('${escaped}', this.value)"
+             onblur="fjOnRangeBlur('${escaped}')">
+      <input type="number" value="${len}" min="0" data-person="${escaped}"
+             oninput="fjOnLenLive('${escaped}', this.value)"
+             onblur="fjOnLenBlur('${escaped}')">
       <div class="row-actions">
-        <button onclick="fjOpenSegModal('${name.replace(/'/g,"\\'")}')" title="分段">⛓</button>
-        <button class="danger" onclick="fjRemovePerson('${name.replace(/'/g,"\\'")}')">✕</button>
+        <button onclick="fjOpenSegModal('${escaped}')" title="多段编辑">⛓</button>
+        <button onclick="fjAutoAlignFrom('${escaped}')" title="从此人起自动连续对齐">🔗</button>
+        <button class="danger" onclick="fjRemovePerson('${escaped}')">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -147,52 +153,85 @@ function fjRangeToCount(rng){
   });
   return n;
 }
-function fjOnRangeEdit(person, val){
-  const oldStart = fjGetStartEpisode(fjRanges[person]);
-  const oldLen = fjRangeToCount(fjRanges[person]);
+// ===== 范围/长度 编辑 —— 实时更新数据但不重绘 DOM，避免焦点丢失 =====
+function fjOnRangeLive(person, val){
   fjRanges[person] = val;
-  const newLen = fjRangeToCount(val);
-
-  if (oldLen !== newLen) {
-    // 长度变了 —— 保持起点，重新分配范围 + 后面顺延
-    fjRanges[person] = `${oldStart}-${oldStart + newLen - 1}`;
-    fjShiftAllAfter(person);
-  } else if (fjGetStartEpisode(val) !== oldStart) {
-    // 起点变了但长度没变 —— 整体偏移后面的人
-    fjRanges[person] = `${oldStart}-${oldStart + newLen - 1}`;
-    fjShiftAllAfter(person);
-  }
-  fjRenderTable();
+  // 找到当前行（通过包含这个 input 的 row 元素），只更新同一行的"长度"数字，不重建 DOM
+  fjUpdateRowLen(val);
   fjUpdateValidation();
-  fjSaveSession();
+  fjRenderPreview();
 }
-function fjOnLenEdit(person, lenStr){
-  const total = parseInt($('fjTotal').value) || 0;
+function fjUpdateRowLen(val){
+  // 从事件对象获取当前焦点行 —— 用 document.activeElement 定位
+  const el = document.activeElement;
+  if(!el || !el.classList || !el.classList.contains('range-input')) return;
+  const row = el.closest('.fj-row');
+  if(!row) return;
+  const numInput = row.querySelector('input[type="number"]');
+  if(numInput) numInput.value = fjRangeToCount(val);
+}
+function fjOnRangeBlur(person){
+  fjSaveSession();
+  fjRenderTable();
+}
+function fjOnLenLive(person, lenStr){
   const len = parseInt(lenStr) || 0;
   const curStart = fjGetStartEpisode(fjRanges[person]);
-  if (curStart + len - 1 > total) {
-    toast('超出总集数','warning');
-    return;
-  }
   fjRanges[person] = `${curStart}-${curStart + len - 1}`;
-  fjShiftAllAfter(person);
+  fjUpdateValidation();
+  fjRenderPreview();
+}
+function fjOnLenBlur(person){
+  fjSaveSession();
+  fjRenderTable();
+}
+function fjRemovePerson(person){
+  if(!confirm(`删除 ${person} 的分配？`)) return;
+  delete fjRanges[person];
+  fjRenderTable();
+  fjUpdateValidation();
+  fjSaveSession();
+  toast(`已删除 ${person}`, 'info');
+}
+
+// ===== 手动对齐：从指定人起，把后面所有人的集数重新排成连续段 =====
+function fjAutoAlignFrom(person){
+  const ordered = fjOrderedPersons();
+  const idx = ordered.indexOf(person);
+  if(idx < 0) return;
+  fjAutoAlignImpl(ordered, idx);
+}
+function fjAutoAlignAll(){
+  const ordered = fjOrderedPersons();
+  if(ordered.length === 0) return;
+  fjAutoAlignImpl(ordered, 0);
+  toast('🔗 全部已对齐为连续', 'success');
+}
+function fjAutoAlignImpl(ordered, startIdx){
+  const total = parseInt($('fjTotal').value) || 0;
+  let nextStart = 1;
+  // 如果 startIdx > 0，保留前面人的原样，从那个人的起点开始
+  if(startIdx > 0){
+    nextStart = fjGetEndEpisode(fjRanges[ordered[startIdx - 1]]) + 1;
+  }
+  for(let i = startIdx; i < ordered.length; i++){
+    const p = ordered[i];
+    const len = fjRangeToCount(fjRanges[p]);
+    if(len <= 0) continue;
+    if(nextStart + len - 1 > total){
+      toast(`对齐时 ${p} 超出总集数`, 'warning');
+      break;
+    }
+    fjRanges[p] = `${nextStart}-${nextStart + len - 1}`;
+    nextStart += len;
+  }
   fjRenderTable();
   fjUpdateValidation();
   fjSaveSession();
 }
-function fjRemovePerson(person){
-  delete fjRanges[person];
-  // 重排所有人
-  const ordered = fjOrderedPersons();
-  let next = 1;
-  ordered.forEach(p => {
-    const l = fjRangeToCount(fjRanges[p]);
-    fjRanges[p] = `${next}-${next + l - 1}`;
-    next += l;
-  });
-  fjRenderTable();
-  fjUpdateValidation();
-  fjSaveSession();
+function fjGetEndEpisode(rangeStr){
+  const eps = fjParseRange(rangeStr).sort((a,b)=>a-b);
+  return eps[eps.length - 1] || 1;
 }
 function fjGetStartEpisode(rangeStr){
   const eps = fjParseRange(rangeStr).sort((a,b)=>a-b);
@@ -203,19 +242,6 @@ function fjOrderedPersons(){
     .map(([p,r]) => [p, fjGetStartEpisode(r)])
     .sort((a,b) => a[1] - b[1])
     .map(e => e[0]);
-}
-function fjShiftAllAfter(person){
-  const ordered = fjOrderedPersons();
-  const idx = ordered.indexOf(person);
-  if (idx < 0) return;
-  let nextStart = fjGetStartEpisode(fjRanges[person]);
-  for (let i = idx; i < ordered.length; i++) {
-    const p = ordered[i];
-    const len = fjRangeToCount(fjRanges[p]);
-    if (len <= 0) continue;
-    fjRanges[p] = `${nextStart}-${nextStart + len - 1}`;
-    nextStart += len;
-  }
 }
 function fjParseRange(s){
   s = (s||'').trim(); if(!s) return [];
