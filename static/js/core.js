@@ -285,7 +285,7 @@ function renderActions(p){
     if(has('分集中')||has('待分集'))btns.push(['📋 继续分集',`openFenjiFor('${pname}')`,'btn-primary']);
     else if(has('待质检')||has('质检中'))btns.push(['🔍 开始质检',`qaStartFor('${pname}')`,'btn-primary']);
     if(has('剪辑中')||has('审核中'))btns.push(['✏️ 标记修改',`updateStatus('${pname}','修改中')`,'']);
-    if(has('修改中'))btns.push(['📦 待交付',`updateStatus('${pname}','交付中')`,'']);
+    if(has('修改中'))btns.push(['📦 待交付',`updateStatus('${pname}','待交付')`,'']);
     if(has('已交付')||has('交付中')||has('待交付'))btns.push(['📦 初版交付',`updateStatus('${pname}','待质检')`,'btn-primary']);
     // 同步按钮：仅当组NAS还没有这个项目 或 sync_status=pending 时显示
     if(needSync)btns.push(['📦 同步素材',`syncMaterial('${pname}')`,'btn-primary']);

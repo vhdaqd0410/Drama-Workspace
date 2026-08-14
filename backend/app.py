@@ -479,6 +479,9 @@ def api_project_open_folder(project_name):
             path = dirs[0] if dirs else proj["production_path"]
         else:
             path, err = sync_engine.get_dest_dir(project_name)
+    elif which == "dest_revision":
+        # 修改中状态 → 打开制作部的成片输出目录（和 dest 一样）
+        path, err = sync_engine.get_dest_dir(project_name)
     elif which == "revising":
         src, err = sync_engine.get_source_dir(project_name)
         rev = data.get("revision", "")
