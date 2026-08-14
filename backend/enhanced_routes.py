@@ -426,7 +426,9 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         if not assign:
             return jsonify(ok=False, msg='assign 为空'), 400
 
-        # 1. 获取模板 bytes
+        # 1. 获取基准 bytes
+        target_path = (body.get('target_path') or '').strip()
+        use_target = bool(target_path)
         tpl_bytes = None
         original_name = (body.get('originalTemplateName')
                          or body.get('template_name')
@@ -449,7 +451,22 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             with open(tpl_path, 'rb') as f:
                 tpl_bytes = f.read()
 
-        # 2. 备份原模板
+        # 1.5 关键改进: 如果指定了 target_path 且目标文件已存在, 从目标文件读取 (它是累积源)
+        #     只有目标文件不存在时才用干净模板启动
+        actually_read_from = 'template'
+        if use_target:
+            if _os.path.isfile(target_path):
+                try:
+                    with open(target_path, 'rb') as f:
+                        tpl_bytes = f.read()
+                    actually_read_from = 'target'
+                    _logger.info('从目标文件读取 (已有数据): %s', target_path)
+                except Exception as e:
+                    _logger.warning('读取目标文件失败, 回退到模板: %s', e)
+            else:
+                _logger.info('目标文件不存在, 从模板启动: %s', target_path)
+
+        # 2. 备份 (备份的是实际读取的那个)
         backup_name, backup_path = '', ''
         try:
             backup_name, backup_path = backup_template(tpl_bytes, original_name, _BACKUP_DIR)
@@ -470,32 +487,33 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             _logger.exception('export_excel 失败')
             return jsonify(ok=False, msg=f'导出失败: {e}'), 500
 
-        # 4. 把追加后的结果写回模板文件 —— 这样下次再导出时旧数据还在
-        #    只有从磁盘模板读取时才写回（前端传 template_b64 的临时情况跳过）
-        if tpl_name and not tpl_b64:
-            try:
-                with open(tpl_path, 'wb') as f:
-                    f.write(new_bytes)
-                _logger.info('已写回模板 %s (大小 %d 字节)', tpl_name, len(new_bytes))
-            except Exception as e:
-                _logger.warning('写回模板失败: %s', e)
-
-        # 5. 如果用户指定了固定目标路径，直接写过去 + 自动打开
-        target_path = (body.get('target_path') or '').strip()
-        open_excel = bool(body.get('open_excel'))
+        # 4. 写回策略:
+        #    - 有 target_path: 只写目标文件, 不动模板 (模板保持干净, 目标才是累积源)
+        #    - 没 target_path: 写回模板 (累积效果, 兼容"导出预览"里也保留旧数据)
         actually_saved = ''
-        if target_path:
+        if use_target:
             try:
                 safe_tgt = _os.path.abspath(target_path)
                 _os.makedirs(_os.path.dirname(safe_tgt), exist_ok=True)
                 with open(safe_tgt, 'wb') as f:
                     f.write(new_bytes)
                 actually_saved = safe_tgt
-                _logger.info('已保存到目标: %s', safe_tgt)
+                _logger.info('✅ 已追加到目标: %s (读取源=%s)', safe_tgt, actually_read_from)
             except Exception as e:
                 _logger.exception('写目标文件失败')
                 return jsonify(ok=False, msg=f'保存目标文件失败: {e}'), 500
+        else:
+            # 只在没有 target_path 时才写回模板 (保持旧行为兼容)
+            if tpl_name and not tpl_b64:
+                try:
+                    with open(tpl_path, 'wb') as f:
+                        f.write(new_bytes)
+                    _logger.info('已写回模板 %s (大小 %d 字节)', tpl_name, len(new_bytes))
+                except Exception as e:
+                    _logger.warning('写回模板失败: %s', e)
 
+        # 5. 自动打开 Excel
+        open_excel = bool(body.get('open_excel'))
         if open_excel and actually_saved:
             try:
                 import subprocess
