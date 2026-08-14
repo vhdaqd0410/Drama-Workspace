@@ -31,6 +31,11 @@ document.addEventListener('DOMContentLoaded',async ()=>{
     // 3.5 自动扫描所有项目的成片进度（后台执行）
     try{ loadAllEpisodeSummary(); } catch(e){}
 
+    // 3.6 桌面版：建立 SSE 实时事件连接（任务完成通知）
+    if(window.__IS_DESKTOP__){
+      try{ initDesktopSSE(); } catch(e){ console.warn('SSE init failed', e); }
+    }
+
     // 4. 自动刷新已禁用 — 由用户手动点 🔄 刷新 按钮触发
     // pollDashboard=setInterval(loadProjects,30000);
   }catch(e){

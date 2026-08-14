@@ -16,6 +16,36 @@ function toast(msg,type='info'){
   setTimeout(()=>{t.style.opacity='0';t.style.transition='all .3s';setTimeout(()=>t.remove(),300)},3500);
 }
 
+/* ============ 桌面版 SSE 实时通知 ============ */
+let _sseSource=null;
+function initDesktopSSE(){
+  if(_sseSource)return;
+  try{
+    _sseSource=new EventSource('/api/sse');
+    _sseSource.onopen=()=>console.log('[SSE] 连接已建立');
+    _sseSource.onmessage=(evt)=>{
+      if(!evt.data||evt.data.startsWith('{'))return;
+      try{
+        const payload=JSON.parse(evt.data);
+        if(payload.type==='notify'){
+          const level=payload.level==='error'?'error':'success';
+          toast(payload.title+': '+payload.message, level);
+          // 完成后自动刷新一次项目列表（带 2s 延迟避免还没写库）
+          if(!_sseRefreshTimer){
+            _sseRefreshTimer=setTimeout(()=>{_sseRefreshTimer=null;try{loadProjects();}catch(e){}},2000);
+          }
+        }
+      }catch(_){}
+    };
+    _sseSource.onerror=()=>{
+      console.warn('[SSE] 连接断开，3s 后重连');
+      _sseSource=null;
+      setTimeout(()=>{try{initDesktopSSE();}catch(_){}},3000);
+    };
+  }catch(e){console.warn('SSE init exception',e);}
+}
+let _sseRefreshTimer=null;
+
 function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+name));

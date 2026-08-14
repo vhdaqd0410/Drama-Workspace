@@ -873,42 +873,70 @@ class DeliverMixin:
             task["status"] = "running"
             task["message"] = "初版交付 - 正在复制..."
         proc = None
+        use_com = self._is_desktop_opt("CAN_COM")
         try:
             os.makedirs(dst, exist_ok=True)
-            cmd = ["robocopy", src, dst] + ROBOCOPY_FAST
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            with self._lock:
-                task["proc_pid"] = proc.pid
-            stdout, stderr = proc.communicate(timeout=TIMEOUT_ROBOCOPY_FAST)
-            rc = proc.returncode
-            success = rc < 8
-            if success:
-                with self._lock:
-                    task["current"] = task["total"]
-                    task["pct"] = 100
-                    task["status"] = "done"
-                    task["message"] = "初版交付完成，状态→审核中"
-                    task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                self.db.update_project_status(
-                    project_name,
-                    custom_status="审核中",
-                    delivery_status="delivered",
-                    last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                )
-                self.db.add_sync_log(
-                    project_name, "初版交付完成→审核中", "group->production",
-                    file_path=src, status="success",
-                    message="成片已推送到: " + dst + "，robocopy rc=" + str(rc))
+
+            if use_com:
+                ok, msg = self._copy_desktop_com(src, dst, timeout=TIMEOUT_ROBOCOPY_FAST)
+                if ok:
+                    with self._lock:
+                        task["current"] = task["total"]
+                        task["pct"] = 100
+                        task["status"] = "done"
+                        task["message"] = "初版交付完成（系统复制）"
+                        task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.db.update_project_status(
+                        project_name,
+                        custom_status="审核中",
+                        delivery_status="delivered",
+                        last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    )
+                    self.db.add_sync_log(
+                        project_name, "初版交付完成→审核中", "group->production",
+                        file_path=src, status="success",
+                        message="成片已推送到: " + dst + "（Shell 系统复制）")
+                    self._notify_desktop("✅ 初版交付完成", project_name + " 已推送到制作部，状态→审核中")
+                else:
+                    logger.info("初版交付 COM 失败 (%s), fallback robocopy", msg)
+                    raise RuntimeError("COM 复制失败，fallback robocopy: " + msg)
             else:
-                err = stderr.decode("gbk", errors="replace")[:500] \
-                    if stderr else "robocopy rc=%d" % rc
+                cmd = ["robocopy", src, dst] + ROBOCOPY_FAST
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 with self._lock:
-                    task["status"] = "error"
-                    task["message"] = "初版交付失败: " + err
-                self._cleanup_partial_dst(dst)
-                self.db.add_sync_log(
-                    project_name, "初版交付失败", "group->production",
-                    file_path=src, status="error", message=err)
+                    task["proc_pid"] = proc.pid
+                stdout, stderr = proc.communicate(timeout=TIMEOUT_ROBOCOPY_FAST)
+                rc = proc.returncode
+                success = rc < 8
+                if success:
+                    with self._lock:
+                        task["current"] = task["total"]
+                        task["pct"] = 100
+                        task["status"] = "done"
+                        task["message"] = "初版交付完成，状态→审核中"
+                        task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.db.update_project_status(
+                        project_name,
+                        custom_status="审核中",
+                        delivery_status="delivered",
+                        last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    )
+                    self.db.add_sync_log(
+                        project_name, "初版交付完成→审核中", "group->production",
+                        file_path=src, status="success",
+                        message="成片已推送到: " + dst + "，robocopy rc=" + str(rc))
+                    self._notify_desktop("✅ 初版交付完成", project_name + " 已推送到制作部，状态→审核中")
+                else:
+                    err = stderr.decode("gbk", errors="replace")[:500] \
+                        if stderr else "robocopy rc=%d" % rc
+                    with self._lock:
+                        task["status"] = "error"
+                        task["message"] = "初版交付失败: " + err
+                    self._cleanup_partial_dst(dst)
+                    self.db.add_sync_log(
+                        project_name, "初版交付失败", "group->production",
+                        file_path=src, status="error", message=err)
+                    self._notify_desktop("❌ 初版交付失败", project_name + ": " + err, error=True)
         except subprocess.TimeoutExpired:
             if proc:
                 proc.kill()
@@ -917,6 +945,7 @@ class DeliverMixin:
                 task["status"] = "error"
                 task["message"] = "初版交付超时（超过1小时）"
             self._cleanup_partial_dst(dst)
+            self._notify_desktop("⚠️ 初版交付超时", project_name, error=True)
         except Exception as e:
             if proc:
                 try:
@@ -926,6 +955,9 @@ class DeliverMixin:
             with self._lock:
                 task["status"] = "error"
                 task["message"] = "初版交付异常: " + str(e)
+            if not use_com:
+                self._cleanup_partial_dst(dst)
+            self._notify_desktop("❌ 初版交付异常", project_name + ": " + str(e), error=True)
         finally:
             run_id = task.get("run_id")
             if run_id:
@@ -971,41 +1003,68 @@ class DeliverMixin:
             task["status"] = "running"
             task["message"] = "正在复制..."
         proc = None
+        use_com = self._is_desktop_opt("CAN_COM")
         try:
-            cmd = ["robocopy", src, dst] + ROBOCOPY_FAST
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            with self._lock:
-                task["proc_pid"] = proc.pid
-            stdout, stderr = proc.communicate(timeout=3600)
-            rc = proc.returncode
-            success = rc < 8
-            if success:
-                with self._lock:
-                    task["current"] = task["total"]
-                    task["pct"] = 100
-                    task["status"] = "done"
-                    task["message"] = "交付完成"
-                    task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                self.db.update_project_status(
-                    project_name,
-                    delivery_status="delivered",
-                    last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    custom_status="已完成",
-                )
-                self.db.add_sync_log(
-                    project_name, "一键交付完成", "group->production",
-                    file_path=src, status="success",
-                    message="已交付到: " + dst + "，robocopy rc=" + str(rc))
+            if use_com:
+                ok, msg = self._copy_desktop_com(src, dst, timeout=3600)
+                if ok:
+                    with self._lock:
+                        task["current"] = task["total"]
+                        task["pct"] = 100
+                        task["status"] = "done"
+                        task["message"] = "交付完成（系统复制）"
+                        task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.db.update_project_status(
+                        project_name,
+                        delivery_status="delivered",
+                        last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        custom_status="已完成",
+                    )
+                    self.db.add_sync_log(
+                        project_name, "一键交付完成", "group->production",
+                        file_path=src, status="success",
+                        message="已交付到: " + dst + "（Shell 系统复制）")
+                    self._notify_desktop("✅ 一键交付完成", project_name + " 已全部推送到制作部")
+                else:
+                    logger.info("一键交付 COM 失败 (%s), fallback robocopy", msg)
+                    raise RuntimeError("COM 复制失败，fallback robocopy: " + msg)
             else:
-                err = stderr.decode("gbk", errors="replace")[:500] \
-                    if stderr else "robocopy rc=%d" % rc
+                cmd = ["robocopy", src, dst] + ROBOCOPY_FAST
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 with self._lock:
-                    task["status"] = "error"
-                    task["message"] = "交付失败: " + err
-                self._cleanup_partial_dst(dst)
-                self.db.add_sync_log(
-                    project_name, "一键交付失败", "group->production",
-                    file_path=src, status="error", message=err)
+                    task["proc_pid"] = proc.pid
+                stdout, stderr = proc.communicate(timeout=3600)
+                rc = proc.returncode
+                success = rc < 8
+                if success:
+                    with self._lock:
+                        task["current"] = task["total"]
+                        task["pct"] = 100
+                        task["status"] = "done"
+                        task["message"] = "交付完成"
+                        task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.db.update_project_status(
+                        project_name,
+                        delivery_status="delivered",
+                        last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        custom_status="已完成",
+                    )
+                    self.db.add_sync_log(
+                        project_name, "一键交付完成", "group->production",
+                        file_path=src, status="success",
+                        message="已交付到: " + dst + "，robocopy rc=" + str(rc))
+                    self._notify_desktop("✅ 一键交付完成", project_name + " 已全部推送到制作部")
+                else:
+                    err = stderr.decode("gbk", errors="replace")[:500] \
+                        if stderr else "robocopy rc=%d" % rc
+                    with self._lock:
+                        task["status"] = "error"
+                        task["message"] = "交付失败: " + err
+                    self._cleanup_partial_dst(dst)
+                    self.db.add_sync_log(
+                        project_name, "一键交付失败", "group->production",
+                        file_path=src, status="error", message=err)
+                    self._notify_desktop("❌ 一键交付失败", project_name + ": " + err, error=True)
         except subprocess.TimeoutExpired:
             if proc:
                 proc.kill()
@@ -1014,6 +1073,7 @@ class DeliverMixin:
                 task["status"] = "error"
                 task["message"] = "交付超时（超过1小时）"
             self._cleanup_partial_dst(dst)
+            self._notify_desktop("⚠️ 一键交付超时", project_name, error=True)
         except Exception as e:
             if proc:
                 try:
@@ -1023,6 +1083,9 @@ class DeliverMixin:
             with self._lock:
                 task["status"] = "error"
                 task["message"] = "交付异常: " + str(e)
+            if not use_com:
+                self._cleanup_partial_dst(dst)
+            self._notify_desktop("❌ 一键交付异常", project_name + ": " + str(e), error=True)
         finally:
             run_id = task.get("run_id")
             if run_id:

@@ -226,7 +226,111 @@ class SyncMixin:
             except OSError:
                 pass
 
+    @staticmethod
+    def _is_desktop_opt(key):
+        return os.environ.get(f"DRAMA_DESKTOP_{key}") == "1"
+
+    def _precheck_copy(self, src, dst):
+        """桌面版前置健康检查。返回 (ok: bool, msg: str)。"""
+        if not self._is_desktop_opt("PRECHECK"):
+            return True, ""
+        # 1. UNC / 路径可达（3s 超时）
+        try:
+            import socket
+            import threading
+            reachable = [False]
+            def _probe():
+                try:
+                    if os.path.exists(src):
+                        reachable[0] = True
+                except Exception:
+                    pass
+            t = threading.Thread(target=_probe, daemon=True)
+            t.start()
+            t.join(timeout=3.0)
+            if not reachable[0]:
+                return False, f"源路径不可达：{src}（NAS 断开？）"
+        except Exception:
+            pass
+        # 2. 源文件是否被占用（试独占打开一个文件）
+        if os.path.isfile(src):
+            try:
+                fd = os.open(src, os.O_RDWR | os.O_EXCL)
+                os.close(fd)
+            except OSError as e:
+                return False, f"源文件被占用（可能 Premiere 正在使用）: {e}"
+        return True, ""
+
+    def _copy_desktop_com(self, src, dst, timeout=7200):
+        """桌面版优化：直接 pywin32 COM 调 Shell.Application.CopyHere。
+        比 VBS 子进程更稳：同 Session、无进程存活轮询、无写临时文件。"""
+        try:
+            import pythoncom
+            from win32com.client import Dispatch
+        except ImportError:
+            return False, "pywin32 不可用"
+        if not os.path.isdir(src):
+            return False, "源目录不存在: " + src
+        os.makedirs(dst, exist_ok=True)
+        pythoncom.CoInitialize()
+        try:
+            shell = Dispatch("Shell.Application")
+            folder_src = shell.Namespace(src)
+            folder_dst = shell.Namespace(dst)
+            if folder_src is None:
+                return False, "Shell 找不到源目录"
+            if folder_dst is None:
+                return False, "Shell 找不到目标目录"
+            items = folder_src.Items()
+            item_count = items.Count
+            logger.info("桌面 COM CopyHere: %s → %s (%d 项)", src, dst, item_count)
+            folder_dst.CopyHere(items, 0)  # 0 = 默认（弹系统进度对话框）
+            # 等复制完成（轮询目标文件数稳定）
+            start = time.time()
+            stable = 0
+            last_count, last_size = -1, -1
+            while True:
+                time.sleep(1.0)
+                if time.time() - start > timeout:
+                    return False, "COM 复制超时"
+                dc, ds = self._count_dir_stats(dst)
+                if dc == last_count and abs(ds - last_size) < 1024:
+                    stable += 1
+                else:
+                    stable = 0
+                last_count, last_size = dc, ds
+                if dc >= item_count and stable >= 5:
+                    return True, f"桌面 COM 复制完成 ({dc} 文件, {ds/1024/1024:.1f} MB)"
+                # 源目录里的每个文件都出现在 dst 里 → 完成
+                if self._all_items_in_dst(src, dst):
+                    return True, f"桌面 COM 复制完成 ({dc} 文件)"
+        finally:
+            pythoncom.CoUninitialize()
+
+    def _all_items_in_dst(self, src, dst):
+        """检查 src 下的所有文件/子目录是否都在 dst 里出现了（快速完成判定）"""
+        try:
+            src_names = set(os.listdir(src))
+            dst_names = set(os.listdir(dst))
+            return src_names.issubset(dst_names)
+        except Exception:
+            return False
+
     def _copy_dir(self, src, dst, exclude_patterns):
+        # 前置检查（桌面版）
+        ok, msg = self._precheck_copy(src, dst)
+        if not ok:
+            logger.warning("前置检查失败: %s", msg)
+            # 不是致命错误，继续尝试（用户可能有特殊情况）
+        # 桌面版：优先用 pywin32 COM 直调
+        if self._is_desktop_opt("CAN_COM"):
+            ok, msg = self._copy_desktop_com(src, dst)
+            if ok:
+                if exclude_patterns:
+                    self._purge_excluded(dst, exclude_patterns)
+                return True, msg
+            logger.info("桌面 COM 不可用 (%s), fallback VBS", msg)
+        # 原有逻辑：VBS 子进程
         ok, msg = self._copy_explorer(src, dst)
         if ok:
             if exclude_patterns:
@@ -398,3 +502,80 @@ class SyncMixin:
     def clear_cache(self):
         with self._lock:
             self._output_dir_cache.clear()
+
+    # ============================================================
+    # 桌面版任务栏闪烁 + 通知钩子
+    # ============================================================
+
+    def _notify_desktop(self, title, message, error=False):
+        """桌面版完成/失败时：闪任务栏 + 广播 SSE 事件。
+        非桌面版或 NOTIFY 关闭时静默跳过。"""
+        if not self._is_desktop_opt("NOTIFY"):
+            return
+        level = "error" if error else "success"
+        logger.info("📣 桌面通知 [%s]: %s — %s", level, title, message)
+        self._flash_taskbar()
+        self._sse_publish({
+            "type": "notify",
+            "level": level,
+            "title": title,
+            "message": message,
+            "ts": time.strftime("%H:%M:%S"),
+        })
+
+    @staticmethod
+    def _flash_taskbar():
+        """ctypes 闪任务栏按钮 (FlashWindowEx)"""
+        if not os.name == "nt":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            class FLASHWINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.UINT),
+                    ("hwnd", wintypes.HWND),
+                    ("dwFlags", wintypes.DWORD),
+                    ("uCount", wintypes.UINT),
+                    ("dwTimeout", wintypes.DWORD),
+                ]
+            # 用 Shell_TrayWnd 作为宿主（闪烁任务栏整体）
+            hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
+            if not hwnd:
+                return
+            info = FLASHWINFO(
+                cbSize=ctypes.sizeof(FLASHWINFO),
+                hwnd=hwnd,
+                dwFlags=3,  # FLASHW_ALL
+                uCount=3,
+                dwTimeout=0,
+            )
+            ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+            # 2 秒后停止闪烁
+            import threading
+            def _stop():
+                time.sleep(2.0)
+                info.dwFlags = 0  # FLASHW_STOP
+                try:
+                    ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+                except Exception:
+                    pass
+            threading.Thread(target=_stop, daemon=True).start()
+        except Exception as e:
+            logger.debug("任务栏闪烁失败: %s", e)
+
+    def _sse_publish(self, event):
+        """向所有 SSE 客户端广播事件。无客户端时静默。"""
+        try:
+            import json as _json
+            clients = getattr(self, "_sse_clients", None)
+            if not clients:
+                return
+            payload = _json.dumps(event, ensure_ascii=False)
+            for q in list(clients):
+                try:
+                    q.put_nowait(payload)
+                except Exception:
+                    pass
+        except Exception:
+            pass

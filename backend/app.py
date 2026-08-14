@@ -88,7 +88,7 @@ if not _API_SECRET:
 # 免鉴权白名单：页面 + 静态资源 + 内部轮询 + 文件流式端点
 # video/img 原生请求不走 fetch，无法自动带 key；服务已绑 127.0.0.1，外部无法直连
 _PUBLIC_ROUTES = {"/", "/health", "/api/health", "/api/status", "/favicon.ico"}
-_PUBLIC_PREFIXES = ("/static/", "/api/_self/", "/api/preview/", "/api/thumbnail/", "/api/frame/", "/api/file_stream/")
+_PUBLIC_PREFIXES = ("/static/", "/api/_self/", "/api/preview/", "/api/thumbnail/", "/api/frame/", "/api/file_stream/", "/api/sse")
 
 @app.before_request
 def _auth_gate():
@@ -147,7 +147,7 @@ def index():
     except Exception as e:
         app.logger.error('boot_data failed: %s', e)
         boot_data = 'null'
-    return render_template('index.html', boot_data=boot_data, api_key=_API_SECRET)
+    return render_template('index.html', boot_data=boot_data, api_key=_API_SECRET, is_desktop=_os.environ.get('DRAMA_DESKTOP') == '1')
 
 
 
@@ -406,6 +406,42 @@ def api_health():
         return jsonify({"db_alive": True, "watcher_enabled": watcher.enabled})
     except Exception as e:
         return jsonify({"db_alive": False, "db_error": str(e)}), 500
+
+
+# ============================================================
+# SSE 进度推送（桌面版用，实时事件）
+# ============================================================
+
+@app.route("/api/sse")
+def api_sse():
+    """Server-Sent Events 推送端点。客户端长连接，后端主动推事件。"""
+    import queue as _queue
+    def _generate():
+        q = _queue.Queue(maxsize=256)
+        with sync_engine._lock:
+            sync_engine._sse_clients.append(q)
+        try:
+            yield "retry: 3000\n\n"
+            # 首次连接发个心跳
+            import json as _j
+            yield "event: hello\ndata: " + _j.dumps({"ok": True}) + "\n\n"
+            while True:
+                try:
+                    payload = q.get(timeout=30)
+                    yield "data: " + str(payload) + "\n\n"
+                except _queue.Empty:
+                    # 心跳保活
+                    yield ": keepalive\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            with sync_engine._lock:
+                if q in sync_engine._sse_clients:
+                    sync_engine._sse_clients.remove(q)
+    from flask import Response
+    return Response(_generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no"})
 
 
 @app.route("/api/project/<path:project_name>/source_dir")

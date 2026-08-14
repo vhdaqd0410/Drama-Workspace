@@ -6,3 +6,4 @@ opencv-python>=4.5
 Pillow>=8.0
 PyYAML>=6.0
 openpyxl>=3.0
+pystray>=0.19

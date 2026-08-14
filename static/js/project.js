@@ -62,25 +62,24 @@ async function loadProjects(){
     projects=flat;
     allSections=d.sections||[];
     allProjects={production:d.production||[],group_all:d.group_all||[],group_completed:d.group_completed||[]};
-    // 月份合并链: /api/project_months → localStorage → 内存（跳过空壳项目）
+    // 月份合并：等专门接口回来再 merge（绕开 scan.py dict 缺失，也避免 localStorage 脏数据）
     function _isShell(p){var s=String(p.custom_status||'').trim(),d=String(p.delivery_status||'').trim(),t=Number(p.total_episodes||0);return !s&&(!d||d==='pending')&&t===0;}
     try{
-      var saved = JSON.parse(localStorage.getItem('wb_project_months')||'{}');
-      // 异步拉专门接口（绕开 scan.py dict 缺失）
-      api('GET','/api/project_months').then(function(monthsMap){
-        if(monthsMap && typeof monthsMap==='object'){
-          Object.assign(saved, monthsMap);
-          localStorage.setItem('wb_project_months', JSON.stringify(saved));
-          // 重新 merge 到内存并重绘
-          (allSections||[]).forEach(function(sec){(sec.projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});});
-          (projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});
-          renderDashboard();
-        }
-      }).catch(function(){});
-      // 先用 localStorage 的数据 merge（接口回来后再补全重绘）
-      (allSections||[]).forEach(function(sec){(sec.projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});});
-      (projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});
-    }catch(e){}
+      // await 等 API 回来，不用 localStorage 做初始 merge（localStorage 里可能留着清理前的脏数据）
+      var monthsMap = await api('GET','/api/project_months');
+      if(monthsMap && typeof monthsMap==='object'){
+        localStorage.setItem('wb_project_months', JSON.stringify(monthsMap));
+        (allSections||[]).forEach(function(sec){(sec.projects||[]).forEach(function(p){if(!_isShell(p)&&monthsMap[p.name])p.project_month=monthsMap[p.name];});});
+        (projects||[]).forEach(function(p){if(!_isShell(p)&&monthsMap[p.name])p.project_month=monthsMap[p.name];});
+      }
+    }catch(e){
+      // API 挂了才回退到 localStorage
+      try{
+        var saved = JSON.parse(localStorage.getItem('wb_project_months')||'{}');
+        (allSections||[]).forEach(function(sec){(sec.projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});});
+        (projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});
+      }catch(e2){}
+    }
     updateDepartmentFilter();
     renderDashboard();
     updateLightLists();
