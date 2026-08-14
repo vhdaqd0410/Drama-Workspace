@@ -148,7 +148,7 @@ function filterSearchResults(){
   }
   var html = items.slice(0, 50).map(function(it){
     var monthBadge = it.month ? '<span style="background:#e3f2fd;color:#1565c0;padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px">📅 '+it.month+'</span>' : '';
-    return '<div onclick="document.getElementById('searchModal')?.remove();jumpToProject(''+it.name.replace(/'/g,"\'")+'')" style="padding:10px 12px;cursor:pointer;border-radius:6px;display:flex;justify-content:space-between;align-items:center;font-size:13px;border-bottom:1px solid #f0f0f0">'
+    return '<div class="search-result-item" data-name="' + it.name.replace(/"/g, "&quot;") + '" style="padding:10px 12px;cursor:pointer;border-radius:6px;display:flex;justify-content:space-between;align-items:center;font-size:13px;border-bottom:1px solid #f0f0f0" onclick="jumpToProjectItem(this)">'
       + '<span><span style="font-weight:500">'+it.name+'</span>'+monthBadge+'</span>'
       + '<span style="color:#86868b;font-size:11px">'+it.section+ (it.status?' · '+it.status:'')+'</span>'
       + '</div>';
@@ -156,6 +156,12 @@ function filterSearchResults(){
   results.innerHTML = html;
 }
 
+function jumpToProjectItem(el){
+  var name = el.getAttribute('data-name') || '';
+  var m = document.getElementById('searchModal');
+  if(m) m.remove();
+  jumpToProject(name);
+}
 function jumpToProject(name){
   if(typeof openProjectDetail === 'function'){
     openProjectDetail(name);
