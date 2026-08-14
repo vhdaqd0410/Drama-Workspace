@@ -342,7 +342,7 @@ def api_preview_open_local():
     data = request.get_json(silent=True) or {}
     project_name = data.get("project_name", "")
     filename = data.get("filename", "")
-    mode = data.get("mode", "source")
+    mode = data.get("mode", "editing")
     subpath = data.get("subpath", "")
     if not filename:
         return jsonify({"ok": False, "message": "未指定文件名"}), 400
@@ -371,7 +371,7 @@ def api_preview_open_local():
 @app.route("/api/preview/<path:project_name>/<path:filename>")
 def api_preview_file(project_name, filename):
     """预览成片文件：流式返回文件内容，支持 Range 请求（视频拖拽）。"""
-    mode = request.args.get("mode", "source")
+    mode = request.args.get("mode", "editing")
     subpath = request.args.get("subpath", "")
     file_path = sync_engine.get_file_path_for_preview(project_name, filename, mode, subpath)
     if file_path and os.path.isfile(file_path):
@@ -476,6 +476,20 @@ def api_project_custom_status(project_name):
     ok, msg = sync_engine.set_custom_status(project_name, status)
     if ok: return jsonify({"ok": True, "message": msg})
     return jsonify({"ok": False, "message": msg}), 400
+
+
+@app.route("/api/project/<path:project_name>/update_month", methods=["POST"])
+def api_project_update_month(project_name):
+    """设置项目月份"""
+    data = request.get_json(silent=True) or {}
+    month = data.get("month", "").strip()
+    if not month:
+        return jsonify({"ok": False, "message": "月份不能为空"}), 400
+    import re as _re
+    if not _re.match(r"^\d{4}-\d{2}$", month):
+        return jsonify({"ok": False, "message": "格式应为 YYYY-MM, 如 2026-08"}), 400
+    db.update_project_status(project_name, project_month=month)
+    return jsonify({"ok": True, "message": f"已设置为 {month}"})
 
 
 

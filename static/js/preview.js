@@ -44,7 +44,7 @@ function _openPreview(projectName, fileName){
 }
 
 function previewFile(fileName, subpath, projectName){
-  window.__previewMode = window.currentMode || 'source';
+  window.__previewMode = window.currentMode || 'editing';
   _openPreview(projectName, fileName);
 }
 

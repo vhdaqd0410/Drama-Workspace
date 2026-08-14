@@ -1,4 +1,17 @@
 // 剧集详情: openProjectDetail, buildEpSummary, 粘贴分集 modal
+function setProjectMonth(name){
+  var now = new Date();
+  var def = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  var val = prompt('设置项目月份 (格式 YYYY-MM, 例 2026-08):', def);
+  if(!val) return;
+  val = val.trim();
+  if(!/^\d{4}-\d{2}$/.test(val)){ toast('格式错误，请用 2026-08 这种格式','error'); return; }
+  api('POST', '/api/project/' + encodeURIComponent(name) + '/update_month', { month: val }).then(function(d){
+    if(d.ok){ toast('✅ 月份已更新: ' + val, 'success'); openProjectDetail(name); }
+    else toast(d.message || '更新失败', 'error');
+  }).catch(function(e){ toast('更新失败: '+e.message, 'error'); });
+}
+
 async function openProjectDetail(name){
   const modal=$('detailModal');
   const content=$('detailContent');
@@ -13,6 +26,7 @@ async function openProjectDetail(name){
       {key:'group_path',label:'组内路径',full:true},
       {key:'source_root',label:'来源路径',full:true},
       {key:'department',label:'所属部门'},
+      {key:'project_month',label:'📅 项目月份'},
       {key:'source',label:'来源'},
       {key:'source_type',label:'来源类型'},
       {key:'sync_status',label:'同步状态'},
@@ -55,6 +69,7 @@ async function openProjectDetail(name){
       </div>
       ${epHtml?`<div class="detail-section"><h3>📑 分集列表（${p.episodes.length} 集）</h3>${epHtml}</div>`:''}
       <div class="detail-actions">
+        <button onclick="setProjectMonth('${p.name.replace(/'/g,"\\'")}')" class="secondary">📅 设置月份</button>
         ${p.group_path?`<button onclick="openFolder('group','${p.name.replace(/'/g,"\\'")}')" class="secondary">📁 打开组内文件夹</button>`:''}
         ${p.production_path?`<button onclick="openFolder('production','${p.name.replace(/'/g,"\\'")}')" class="secondary">📁 打开制作文件夹</button>`:''}
         <button onclick="$('detailModal').classList.remove('active');openFenjiFor('${p.name.replace(/'/g,"\\'")}')" class="secondary">📑 管理分集</button>

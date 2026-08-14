@@ -8,9 +8,10 @@ document.addEventListener('DOMContentLoaded',async ()=>{
     $('statsRow').innerHTML = '<div class="stat-card"><div class="stat-icon blue">📁</div><div><div class="stat-num">...</div><div class="stat-label">加载中</div></div></div>';
 
     // 1. 绑定筛选器
-    const fd=$('filterDept');const fs=$('filterStatus');const sb=$('sortBy');const so=$('sortOrder');
+    const fd=$('filterDept');const fs=$('filterStatus');const fm=$('filterMonth');const sb=$('sortBy');const so=$('sortOrder');
     if(fd)fd.addEventListener('change',renderDashboard);
     if(fs)fs.addEventListener('change',renderDashboard);
+    if(fm)fm.addEventListener('change',renderDashboard);
     if(sb)sb.addEventListener('change',renderDashboard);
     if(so)so.addEventListener('change',renderDashboard);
     const gs=$('globalSearch');if(gs)gs.addEventListener('input',renderDashboard);

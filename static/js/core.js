@@ -169,7 +169,10 @@ function renderStats(){
     const s = String(q.status || '').toLowerCase();
     return s === 'fail' || s === 'error';
   }).length;
+  const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
+  const thisMonth = list.filter(p => p.project_month === nowMonth).length;
   $('statsRow').innerHTML=`
+    <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fff3cd;color:#856404">📅</div><div><div class="stat-num">${thisMonth}</div><div class="stat-label">本月项目</div></div></div>
     <div class="stat-card"><div class="stat-icon blue">📁</div><div><div class="stat-num">${total}</div><div class="stat-label">总项目</div></div></div>
     <div class="stat-card"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>
     <div class="stat-card"><div class="stat-icon green">✅</div><div><div class="stat-num">${passed}</div><div class="stat-label">质检通过</div></div></div>
@@ -276,6 +279,15 @@ function projectCardHTML(p){
   </div>`;
 }
 
+function updateMonthFilter(){
+  const months=[...new Set((projects||[]).map(p=>p.project_month).filter(Boolean))].sort().reverse();
+  const sel=$('filterMonth');
+  if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">全部月份</option>'+months.map(m=>`<option>${m}</option>`).join('');
+  if(cur){const opts=Array.from(sel.options);for(const o of opts){if(o.value===cur){sel.value=cur;break}}}
+}
+
 function updateDepartmentFilter(){
   const depts=[...new Set(projects.map(p=>p.department).filter(Boolean))];
   const sel=$('filterDept');
@@ -289,9 +301,11 @@ function matchFilter(p){
   const q=($('globalSearch')?.value||'').toLowerCase();
   const fd=$('filterDept')?.value||'';
   const fs=$('filterStatus')?.value||'';
+  const fm=$('filterMonth')?.value||'';
   if(q&&!p.name.toLowerCase().includes(q))return false;
   if(fd&&p.department!==fd)return false;
   if(fs&&p.custom_status!==fs)return false;
+  if(fm&&p.project_month!==fm)return false;
   return true;
 }
 
@@ -309,6 +323,8 @@ function sortProjects(list){
 
 function renderDashboard(){
   renderStats();
+  updateMonthFilter();
+  updateDepartmentFilter();
   const container=$('projectGrid');
   if(!container)return;
 
@@ -316,6 +332,7 @@ function renderDashboard(){
   const q=($('globalSearch')?.value||'').toLowerCase().trim();
   const fd=$('filterDept')?.value||'';
   const fs=$('filterStatus')?.value||'';
+  const fm=$('filterMonth')?.value||'';
   const sortKey=$('sortBy')?.value||'custom_status';
   const sortOrder=$('sortOrder')?.value||'asc';
 
@@ -323,6 +340,7 @@ function renderDashboard(){
     if(q&&!p.name.toLowerCase().includes(q))return false;
     if(fd&&p.department!==fd)return false;
     if(fs&&p.custom_status!==fs)return false;
+    if(fm&&p.project_month!==fm)return false;
     return true;
   }
   function sortList(list){

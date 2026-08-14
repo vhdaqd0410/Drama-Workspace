@@ -213,7 +213,7 @@ class PreviewMixin:
     def get_file_path_for_preview(self, project_name, filename, mode="editing", subpath=""):
         tried = set()
         """根据模式获取文件的实际路径用于预览"""
-        if mode == "editing":
+        if mode in ("source", "auto", "editing"):
             files = self.list_output_files(project_name)
             for f in files:
                 if f["name"] == filename:
@@ -243,6 +243,11 @@ class PreviewMixin:
             full = os.path.join(target, filename)
             if os.path.isfile(full):
                 return full
+        else:
+            files = self.list_output_files(project_name)
+            for f in files:
+                if f["name"] == filename:
+                    return f["path"]
         # Cross-mode fallback
         for getter in (self.get_source_dir, self.get_dest_dir):
             root, err = getter(project_name)
