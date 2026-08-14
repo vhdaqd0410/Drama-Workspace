@@ -16,6 +16,95 @@ from scan import _natural_key, _quick_find_file
 logger = logging.getLogger(__name__)
 
 
+def _shell_copy_file(src_path, dst_dir):
+    """用 Windows Shell.Application 弹出系统原生复制进度对话框复制文件。
+    返回 True 表示已成功发起复制请求（复制在后台进行），False 表示失败。
+    仅在 Windows 下可用；其他系统 fallback 到 shutil.copy。"""
+    if not os.name == 'nt':
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.copy2(src_path, os.path.join(dst_dir, os.path.basename(src_path)))
+        return True
+    try:
+        import pythoncom
+        from win32com.client import Dispatch
+        pythoncom.CoInitialize()
+        try:
+            shell = Dispatch('Shell.Application')
+            folder_src = shell.Namespace(os.path.dirname(src_path))
+            item_src = folder_src.ParseName(os.path.basename(src_path))
+            if item_src is None:
+                raise OSError("Shell 找不到源文件: " + src_path)
+            os.makedirs(dst_dir, exist_ok=True)
+            folder_dst = shell.Namespace(dst_dir)
+            if folder_dst is None:
+                raise OSError("Shell 找不到目标目录: " + dst_dir)
+            # 0x10 = 自动重命名冲突文件, 0x0 = 默认(弹系统进度对话框)
+            folder_dst.CopyHere(item_src, 0x10)
+            logger.info('Shell.CopyHere 已发起: %s → %s', src_path, dst_dir)
+            return True
+        finally:
+            pythoncom.CoUninitialize()
+    except ImportError:
+        logger.warning('pywin32 不可用, fallback 到 shutil.copy')
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.copy2(src_path, os.path.join(dst_dir, os.path.basename(src_path)))
+        return True
+    except Exception as e:
+        logger.warning('Shell.CopyHere 失败(%s), fallback 到 cmd copy', e)
+        os.makedirs(dst_dir, exist_ok=True)
+        dst = os.path.join(dst_dir, os.path.basename(src_path))
+        result = subprocess.run(
+            ["cmd", "/c", "copy", "/y", src_path, dst],
+            capture_output=True, timeout=300)
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or b"").decode("gbk", errors="replace").strip()
+            raise OSError("cmd copy 失败: " + err)
+        return True
+
+
+def _shell_copy_folder(src_folder, dst_parent_dir):
+    """用 Shell.Application 弹出系统原生复制对话框复制整个文件夹。"""
+    if not os.name == 'nt':
+        dst = os.path.join(dst_parent_dir, os.path.basename(src_folder))
+        os.makedirs(dst_parent_dir, exist_ok=True)
+        if os.path.isdir(dst):
+            shutil.copytree(src_folder, dst, dirs_exist_ok=True)
+        else:
+            shutil.copytree(src_folder, dst)
+        return True
+    try:
+        import pythoncom
+        from win32com.client import Dispatch
+        pythoncom.CoInitialize()
+        try:
+            shell = Dispatch('Shell.Application')
+            parent = os.path.dirname(src_folder.rstrip('\\/'))
+            folder_src = shell.Namespace(parent)
+            item_src = folder_src.ParseName(os.path.basename(src_folder.rstrip('\\/')))
+            if item_src is None:
+                raise OSError("Shell 找不到源文件夹: " + src_folder)
+            os.makedirs(dst_parent_dir, exist_ok=True)
+            folder_dst = shell.Namespace(dst_parent_dir)
+            folder_dst.CopyHere(item_src, 0x10)
+            logger.info('Shell.CopyFolder 已发起: %s → %s', src_folder, dst_parent_dir)
+            return True
+        finally:
+            pythoncom.CoUninitialize()
+    except ImportError:
+        logger.warning('pywin32 不可用, fallback 到 shutil.copytree')
+        dst = os.path.join(dst_parent_dir, os.path.basename(src_folder.rstrip('\\/')))
+        os.makedirs(dst_parent_dir, exist_ok=True)
+        shutil.copytree(src_folder, dst, dirs_exist_ok=True)
+        return True
+    except Exception as e:
+        logger.warning('Shell.CopyFolder 失败(%s), fallback 到 robocopy', e)
+        name = os.path.basename(src_folder.rstrip('\\/'))
+        dst = os.path.join(dst_parent_dir, name)
+        os.makedirs(dst_parent_dir, exist_ok=True)
+        shutil.copytree(src_folder, dst, dirs_exist_ok=True)
+        return True
+
+
 class DeliverMixin:
     _EP_PATTERNS = [
         re.compile(r'(?i)(?:^|[^a-z0-9])EP[_\s\-]?(\d{1,3})(?!\d)'),
@@ -68,34 +157,7 @@ class DeliverMixin:
 
         try:
             file_size = os.path.getsize(src)
-            os.makedirs(dst_dir, exist_ok=True)
-
-            last_err = None
-
-            # 方案1：直接 Python copy（net use 成功后可用）
-            try:
-                shutil.copy(src, dst)
-                last_err = None  # success
-            except PermissionError as e:
-                last_err = str(e)
-            except OSError as e:
-                last_err = str(e)
-
-            # 方案2：fallback 到 cmd copy + UNC 路径
-            if last_err is not None:
-                src_unc = self._to_unc(src)
-                dst_unc = self._to_unc(dst)
-                result = subprocess.run(
-                    ["cmd", "/c", "copy", "/y", src_unc, dst_unc],
-                    capture_output=True, timeout=120)
-                if result.returncode != 0:
-                    err = (result.stderr or result.stdout or b"Unknown error")
-                    # cmd 输出是 GBK 编码
-                    err_str = err.decode("gbk", errors="replace").strip()
-                    raise OSError(err_str)
-                # cmd copy 成功，确认文件存在
-                if not os.path.isfile(dst):
-                    raise OSError("cmd copy reported success but file not found: " + dst)
+            _shell_copy_file(src, dst_dir)
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.db.add_delivery_log(
@@ -1185,18 +1247,11 @@ class DeliverMixin:
                 if result.returncode != 0 and not os.path.isdir(dst_dir):
                     raise OSError("无法创建修改文件夹: " + dst_dir)
 
-            # 复制文件
+            # Shell 原生复制（弹系统进度对话框）
             try:
-                shutil.copy(src, dst)
-            except (PermissionError, OSError):
-                src_unc = self._to_unc(src)
-                dst_unc = self._to_unc(dst)
-                result = subprocess.run(
-                    ["cmd", "/c", "copy", "/y", src_unc, dst_unc],
-                    capture_output=True, timeout=120)
-                if result.returncode != 0:
-                    err = (result.stderr or result.stdout or b"Unknown error")
-                    raise OSError(err.decode("gbk", errors="replace").strip())
+                _shell_copy_file(src, dst_dir)
+            except Exception:
+                raise
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.db.add_delivery_log(
@@ -1290,17 +1345,11 @@ class DeliverMixin:
                 if result.returncode != 0 and not os.path.isdir(dst_dir):
                     raise OSError("无法创建目标文件夹: " + dst_dir)
 
+            # Shell 原生文件夹复制（弹系统进度对话框）
             try:
-                shutil.copytree(rev_path, dst_dir, dirs_exist_ok=True)
-            except (PermissionError, OSError):
-                src_unc = self._to_unc(rev_path)
-                dst_unc = self._to_unc(dst_dir)
-                result = subprocess.run(
-                    ["cmd", "/c", "xcopy", "/E", "/I", "/Y", src_unc + "\\*", dst_unc + "\\"],
-                    capture_output=True, timeout=600)
-                if result.returncode != 0 and not os.path.isdir(dst_dir):
-                    err = (result.stderr or result.stdout or b"Unknown error")
-                    raise OSError(err.decode("gbk", errors="replace").strip())
+                _shell_copy_folder(rev_path, os.path.dirname(dst_dir))
+            except Exception:
+                raise
 
             file_count = 0
             total_size = 0
