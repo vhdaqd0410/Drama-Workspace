@@ -275,6 +275,7 @@ class ScanMixin:
                     "created_at": "",
                     "total_episodes": 0,
                     "current_episodes": 0,
+                    "project_month": "",
                 }
                 # 从 DB 获取真正的制作部部门名（不要硬编码组内NAS/已完成）
                 _dept = ""
@@ -303,6 +304,7 @@ class ScanMixin:
                     entry["created_at"] = db_proj.get("created_at") or ""
                     entry["total_episodes"] = db_proj.get("total_episodes", 0) or 0
                     entry["current_episodes"] = db_proj.get("current_episodes", 0) or 0
+                    entry["project_month"] = db_proj.get("project_month") or ""
 
                 group_all.append(entry)
 
@@ -329,6 +331,7 @@ class ScanMixin:
                 g["total_episodes"] = p.get("total_episodes", 0) or 0
                 g["current_episodes"] = p.get("current_episodes", 0) or 0
                 g["episode_plan"] = p.get("episode_plan") or "{}"
+                g["project_month"] = p.get("project_month") or ""
                 if not g.get("created_at"):
                     g["created_at"] = p.get("created_at", "") or ""
 
@@ -362,6 +365,7 @@ class ScanMixin:
                     "total_episodes": 0,
                     "current_episodes": 0,
                     "is_completed": True,
+                    "project_month": "",
                 }
                 # 从 DB 获取真正的制作部部门名（不要硬编码组内NAS/已完成）
                 _dept = ""
@@ -389,6 +393,7 @@ class ScanMixin:
                     entry["created_at"] = db_proj.get("created_at") or ""
                     entry["total_episodes"] = db_proj.get("total_episodes", 0) or 0
                     entry["current_episodes"] = db_proj.get("current_episodes", 0) or 0
+                    entry["project_month"] = db_proj.get("project_month") or ""
                     source_dept = db_proj.get("department", "") or ""
                     if source_dept:
                         entry["source_department"] = source_dept

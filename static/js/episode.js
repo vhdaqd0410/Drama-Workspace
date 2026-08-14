@@ -1,15 +1,63 @@
 // 剧集详情: openProjectDetail, buildEpSummary, 粘贴分集 modal
 function setProjectMonth(name){
+  // 生成月份选项：2025-01 ~ 2026-12（或当前年+前后各1年）
   var now = new Date();
-  var def = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
-  var val = prompt('设置项目月份 (格式 YYYY-MM, 例 2026-08):', def);
-  if(!val) return;
-  val = val.trim();
-  if(!/^\d{4}-\d{2}$/.test(val)){ toast('格式错误，请用 2026-08 这种格式','error'); return; }
-  api('POST', '/api/project/' + encodeURIComponent(name) + '/update_month', { month: val }).then(function(d){
-    if(d.ok){ toast('✅ 月份已更新: ' + val, 'success'); openProjectDetail(name); }
-    else toast(d.message || '更新失败', 'error');
-  }).catch(function(e){ toast('更新失败: '+e.message, 'error'); });
+  var cur = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  var years = [now.getFullYear()-1, now.getFullYear(), now.getFullYear()+1];
+  var months = [];
+  years.forEach(function(y){
+    for(var m=1; m<=12; m++){
+      months.push(y + '-' + String(m).padStart(2,'0'));
+    }
+  });
+  // 找当前值
+  var curVal = '';
+  (allSections||[]).forEach(function(sec){ (sec.projects||[]).forEach(function(p){ if(p.name===name && p.project_month) curVal=p.project_month; }); });
+  if(!curVal) (projects||[]).forEach(function(p){ if(p.name===name && p.project_month) curVal=p.project_month; });
+
+  // 构建 modal
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = '';  // 占位
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:14px;padding:24px;width:340px;box-shadow:0 12px 40px rgba(0,0,0,.2);font-family:-apple-system,"Segoe UI",sans-serif;';
+  box.innerHTML = '<div style="font-size:16px;font-weight:600;margin-bottom:16px">📅 设置项目月份</div>'
+    + '<div style="font-size:13px;color:#666;margin-bottom:14px;word-break:break-all">' + name + '</div>'
+    + '<select id="_monthSel" style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none">'
+    + '<option value="">— 清空（不统计）—</option>'
+    + months.map(function(m){
+        var sel = m === curVal ? ' selected' : '';
+        return '<option value="' + m + '"' + sel + '>' + m + (m === cur ? ' · 本月' : '') + '</option>';
+      }).join('')
+    + '</select>'
+    + '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">'
+    + '<button id="_mCancel" style="padding:8px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:14px">取消</button>'
+    + '<button id="_mOk" style="padding:8px 20px;border:none;border-radius:8px;background:#0071e3;color:#fff;cursor:pointer;font-size:14px">确定</button>'
+    + '</div>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  function close(){ document.body.removeChild(overlay); }
+  overlay.addEventListener('click', function(e){ if(e.target===overlay) close(); });
+  box.querySelector('#_mCancel').addEventListener('click', close);
+  box.querySelector('#_mOk').addEventListener('click', function(){
+    var val = box.querySelector('#_monthSel').value;
+    close();
+    api('POST', '/api/project/' + encodeURIComponent(name) + '/update_month', { month: val }).then(function(d){
+      if(d.ok){
+        toast(val ? ('✅ 月份已更新: ' + val) : '✅ 已清除月份', 'success');
+        try{
+          var saved = JSON.parse(localStorage.getItem('wb_project_months')||'{}');
+          if(val) saved[name] = val; else delete saved[name];
+          localStorage.setItem('wb_project_months', JSON.stringify(saved));
+        }catch(e){}
+        (allSections||[]).forEach(function(sec){ (sec.projects||[]).forEach(function(p){ if(p.name===name) p.project_month=val; }); });
+        (projects||[]).forEach(function(p){ if(p.name===name) p.project_month=val; });
+        Object.values(allProjects||{}).forEach(function(list){ (list||[]).forEach(function(p){ if(p.name===name) p.project_month=val; }); });
+        renderDashboard();
+      }else{ toast(d.message || '更新失败', 'error'); }
+    }).catch(function(e){ toast('更新失败: '+e.message, 'error'); });
+  });
 }
 
 async function openProjectDetail(name){

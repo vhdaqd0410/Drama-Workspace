@@ -46,14 +46,41 @@ async function loadProjects(){
   try{
     const d = await api('GET','/api/projects');
     allSections=d.sections||[];
-    let flat=[];
-    if(d.sections)d.sections.forEach(s=>flat=flat.concat(s.projects||[]));
+    // 按项目名称去重：同一项目出现在多个section时只保留一条（优先保留有实际状态的那条）
+    let _nameMap = {};
+    if(d.sections)d.sections.forEach(s=>(s.projects||[]).forEach(p=>{
+      var ex = _nameMap[p.name];
+      if(!ex){ _nameMap[p.name]=p; return; }
+      // 已有记录时，优先保留"有实际制作痕迹"的那条
+      var _isSh = function(x){var _s=String(x.custom_status||'').trim(),_d=String(x.delivery_status||'').trim(),_t=Number(x.total_episodes||0);return !_s&&(!_d||_d==='pending')&&_t===0;};
+      if(_isSh(ex) && !_isSh(p)) _nameMap[p.name]=p;
+    }));
+    let flat = Object.values(_nameMap);
     if(flat.length===0&&Array.isArray(d))flat=d;
     if(flat.length===0&&d.projects)flat=d.projects;
     if(flat.length===0&&d.data)flat=d.data;
     projects=flat;
     allSections=d.sections||[];
     allProjects={production:d.production||[],group_all:d.group_all||[],group_completed:d.group_completed||[]};
+    // 月份合并链: /api/project_months → localStorage → 内存（跳过空壳项目）
+    function _isShell(p){var s=String(p.custom_status||'').trim(),d=String(p.delivery_status||'').trim(),t=Number(p.total_episodes||0);return !s&&(!d||d==='pending')&&t===0;}
+    try{
+      var saved = JSON.parse(localStorage.getItem('wb_project_months')||'{}');
+      // 异步拉专门接口（绕开 scan.py dict 缺失）
+      api('GET','/api/project_months').then(function(monthsMap){
+        if(monthsMap && typeof monthsMap==='object'){
+          Object.assign(saved, monthsMap);
+          localStorage.setItem('wb_project_months', JSON.stringify(saved));
+          // 重新 merge 到内存并重绘
+          (allSections||[]).forEach(function(sec){(sec.projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});});
+          (projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});
+          renderDashboard();
+        }
+      }).catch(function(){});
+      // 先用 localStorage 的数据 merge（接口回来后再补全重绘）
+      (allSections||[]).forEach(function(sec){(sec.projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});});
+      (projects||[]).forEach(function(p){if(!_isShell(p)&&saved[p.name])p.project_month=saved[p.name];});
+    }catch(e){}
     updateDepartmentFilter();
     renderDashboard();
     updateLightLists();

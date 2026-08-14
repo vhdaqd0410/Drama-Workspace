@@ -480,16 +480,30 @@ def api_project_custom_status(project_name):
 
 @app.route("/api/project/<path:project_name>/update_month", methods=["POST"])
 def api_project_update_month(project_name):
-    """设置项目月份"""
+    """设置项目月份（传空字符串=清空）"""
     data = request.get_json(silent=True) or {}
-    month = data.get("month", "").strip()
-    if not month:
-        return jsonify({"ok": False, "message": "月份不能为空"}), 400
-    import re as _re
-    if not _re.match(r"^\d{4}-\d{2}$", month):
-        return jsonify({"ok": False, "message": "格式应为 YYYY-MM, 如 2026-08"}), 400
-    db.update_project_status(project_name, project_month=month)
-    return jsonify({"ok": True, "message": f"已设置为 {month}"})
+    month = (data.get("month") or "").strip()
+    if month:
+        import re as _re
+        if not _re.match(r"^\d{4}-\d{2}$", month):
+            return jsonify({"ok": False, "message": "格式应为 YYYY-MM, 如 2026-08"}), 400
+    db.update_project_status(project_name, project_month=month or None)
+    return jsonify({"ok": True, "message": f"已设置为 {month or '空'}"})
+
+
+@app.route("/api/project_months", methods=["GET"])
+def api_project_months():
+    """返回所有项目的月份映射 {name: 'YYYY-MM'} — 绕开 scan.py 的手写 dict 字段缺失问题"""
+    try:
+        rows = db.get_all_projects()
+        result = {}
+        for p in rows:
+            m = (p.get("project_month") or "").strip()
+            if m:
+                result[p["name"]] = m
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({})
 
 
 

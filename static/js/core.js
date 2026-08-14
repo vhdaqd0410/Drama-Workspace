@@ -170,7 +170,14 @@ function renderStats(){
     return s === 'fail' || s === 'error';
   }).length;
   const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
-  const thisMonth = list.filter(p => p.project_month === nowMonth).length;
+  // 只统计"有实际制作痕迹"的项目（排除空壳/模板目录）
+  const activeList = list.filter(p => {
+    const s = String(p.custom_status || '').trim();
+    const d = String(p.delivery_status || '').trim();
+    const t = Number(p.total_episodes || 0);
+    return s || (d && d !== 'pending') || t > 0;
+  });
+  const thisMonth = activeList.filter(p => p.project_month === nowMonth).length;
   $('statsRow').innerHTML=`
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fff3cd;color:#856404">📅</div><div><div class="stat-num">${thisMonth}</div><div class="stat-label">本月项目</div></div></div>
     <div class="stat-card"><div class="stat-icon blue">📁</div><div><div class="stat-num">${total}</div><div class="stat-label">总项目</div></div></div>
@@ -229,7 +236,12 @@ function projectCardHTML(p){
 
   // === 智能打开按钮 ===
   const pname = p.name.replace(/'/g,"\'");
-  const month=p.project_month?`<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#fff3cd;color:#856404;border:1px solid #ffe08a;cursor:pointer" title="点击修改月份">📅 ${p.project_month}</span>`:`<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="点击设置月份">📅 未设月份</span>`;
+  // 空壳项目（无状态+未交付+0集）强制不显示月份，即使有脏数据
+  const _s = String(p.custom_status||'').trim(), _d = String(p.delivery_status||'').trim(), _t = Number(p.total_episodes||0);
+  const _isShell = !_s && (!_d || _d==='pending') && _t===0;
+  const month = (!_isShell && p.project_month)
+    ? `<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#fff3cd;color:#856404;border:1px solid #ffe08a;cursor:pointer" title="点击修改月份">📅 ${p.project_month}</span>`
+    : (_isShell ? '' : `<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="点击设置月份">📅 未设月份</span>`);
   let openBtns = '';
   const isGroup = p.project_type === 'group' || p.source_path;
   const hasGroup = !!p.group_path;
@@ -281,7 +293,7 @@ function projectCardHTML(p){
 }
 
 function updateMonthFilter(){
-  const months=[...new Set((projects||[]).map(p=>p.project_month).filter(Boolean))].sort().reverse();
+  const months=[...new Set((projects||[]).filter(p=>{const s=String(p.custom_status||'').trim(),d=String(p.delivery_status||'').trim(),t=Number(p.total_episodes||0);return !!s||(d&&d!=='pending')||t>0;}).map(p=>p.project_month).filter(Boolean))].sort().reverse();
   const sel=$('filterMonth');
   if(!sel)return;
   const cur=sel.value;
