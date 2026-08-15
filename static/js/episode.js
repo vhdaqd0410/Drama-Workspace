@@ -561,32 +561,35 @@ function _isActiveProject(p){
   return s !== '' && s !== '已完成';
 }
 
-// === 页面首次加载：优先扫描"进行中"项目，其余后台慢慢加载 ===
+// 判断是否为组内NAS进行中 section（本部门当前要用的项目）
+function _isGroupActiveSection(sec){
+  return sec && (sec.key === 'group_active' || (sec.projects && sec.projects.some(function(p){
+    return p.project_type === 'group' && _isActiveProject(p);
+  })));
+}
+
+// === 页面首次加载：只扫描"组内NAS进行中"的项目，其余按需加载 ===
 async function loadInitialEpisodeSummary(){
-  // 第一批：只扫"进行中"且有分集数的项目（用户最关心的），尽快完成，
-  // 让进度条和预览尽早可用，不拖累首页加载
-  await runRefreshAllProgress(null, true, {onlyActive: true, background: false});
-  // 第二批：其余项目（已完成、无分集数等）后台低优先级慢慢扫，不阻塞任何操作
-  runRefreshAllProgress(null, true, {onlyActive: false, background: true});
+  // 只扫"组内NAS进行中"且有分集数的项目（本部门当前真正要用的），数量很少、快速完成，
+  // 让进度条和预览尽早可用；已完成 / 其他部门项目完全不扫，点开时按需加载
+  await runRefreshAllProgress(null, true);
 }
 
 // === 全项目进度刷新（自动 + 手动共用）===
 async function runRefreshAllProgress(btn, isAuto, opts){
   opts = opts || {};
-  const onlyActive = opts.onlyActive;
-  const background = opts.background;
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 扫描中...'; }
   if (!allSections) { if(btn){btn.disabled=false;btn.textContent='🔄 刷新所有进度';} return; }
 
   let targets = [];
   for (const sec of allSections) {
+    // 自动扫描：只处理"组内NAS进行中"section（本部门项目）
+    // 已完成 / 其他部门项目不扫，点开时按需加载
+    if (isAuto && !_isGroupActiveSection(sec)) continue;
     for (const p of (sec.projects || [])) {
-      const isActive = _isActiveProject(p);
       const hasEp = Number(p.total_episodes) > 0;
       // 自动扫描：只处理有分集数的项目（无分集数的项目扫描无意义且耗时）
       if (isAuto && !hasEp) continue;
-      // onlyActive：只要进行中项目（第一批）
-      if (onlyActive && !isActive) continue;
       targets.push(p.name);
     }
   }
@@ -596,12 +599,11 @@ async function runRefreshAllProgress(btn, isAuto, opts){
     return;
   }
 
-  // 后台补扫静默执行（不打扰用户），前台优先扫描才提示
-  if (isAuto && !background) toast('📡 优先扫描 ' + targets.length + ' 个进行中项目的成片进度...', 'info');
+  if (isAuto) toast('📡 扫描 ' + targets.length + ' 个进行中项目的成片进度...', 'info');
 
   // 自动扫描用较低并发（4），避免占满后端线程池阻塞预览视频加载；
-  // 后台补扫用更低并发（2），更不打扰用户操作；手动刷新保持 8 路快速
-  const CONCURRENCY = isAuto ? (background ? 2 : 4) : 8;
+  // 手动刷新保持 8 路快速
+  const CONCURRENCY = isAuto ? 4 : 8;
   let idx = 0;
   let ok = 0, fail = 0;
   function worker() {
@@ -616,11 +618,8 @@ async function runRefreshAllProgress(btn, isAuto, opts){
   await Promise.all(Array.from({length: Math.min(CONCURRENCY, targets.length)}, worker));
 
   if(btn){btn.disabled=false;btn.textContent='🔄 刷新所有进度';}
-  // 后台补扫完成静默，前台优先扫描才提示
-  if (!background) {
-    toast(('✅ 进度扫描完成：' + ok + '/' + targets.length + ' 成功') + (fail>0 ? ('，' + fail + ' 失败') : ''),
-          fail>0 ? 'warning' : 'success');
-  }
+  toast(('✅ 进度扫描完成：' + ok + '/' + targets.length + ' 成功') + (fail>0 ? ('，' + fail + ' 失败') : ''),
+        fail>0 ? 'warning' : 'success');
 }
 
 function toggleAlertDetail(){
