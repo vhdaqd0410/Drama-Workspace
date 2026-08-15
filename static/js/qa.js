@@ -983,3 +983,105 @@ function startQAPolling() { }
 async function refreshQAResult() { }
 async function loadQAHistory(p) { }
 async function loadQAHistoryRun(p, i) { }
+
+// ===== 质检概览统计条（质检中心顶部）=====
+async function loadQASummary() {
+  const bar = document.getElementById('qaSummaryBar');
+  if (!bar) return;
+  bar.innerHTML = '<div style="padding:12px 16px;color:#86868b;font-size:13px;text-align:center">加载质检统计...</div>';
+  try {
+    const d = await api('GET', '/api/qa/summary');
+    if (!d || !d.ok) { bar.innerHTML = ''; return; }
+    const s = d.summary || {};
+    const bs = d.by_status || {};
+    const passCount = (bs.pass || []).length;
+    const warnCount = (bs.warn || []).length;
+    const failCount = (bs.fail || []).length;
+    const runCount = (bs.running || []).length;
+    const rate = s.pass_rate || 0;
+
+    const rateColor = rate >= 90 ? '#2E7D32' : (rate >= 70 ? '#b8860b' : '#c5221f');
+    const failHtml = (bs.fail || []).map(function(p){
+      return `<span style="color:#c5221f;font-weight:600" title="${p.project_name}">${p.project_name.length>12?p.project_name.slice(0,12)+'…':p.project_name}(${p.last_fail}失败)</span>`;
+    }).join(', ');
+
+    bar.innerHTML = `<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(90deg,#f8fafc,#eef4ff);border:1px solid #dbe4f0;border-radius:10px;padding:12px 18px;font-size:13px">
+      <span style="font-weight:700">🔍 质检概览</span>
+      <span>质检 <b>${s.total_run||0}</b> 次 · 视频 <b>${s.total_videos||0}</b> 个</span>
+      <span>通过率 <b style="color:${rateColor};font-size:16px">${rate}%</b></span>
+      <span>🟢 通过 <b>${s.total_pass||0}</b></span>
+      <span>🟡 警告 <b>${s.total_warn||0}</b></span>
+      <span>🔴 失败 <b>${s.total_fail||0}</b></span>
+      <span style="flex:1"></span>
+      <span title="通过 ${passCount} · 警告 ${warnCount} · 失败 ${failCount} · 运行 ${runCount}">
+        项目: <b style="color:#2E7D32">${passCount}通过</b> · <b style="color:#b8860b">${warnCount}警告</b> · <b style="color:#c5221f">${failCount}失败</b>
+        ${runCount ? ' · ⏳运行中 <b style="color:#0071e3">'+runCount+'</b>' : ''}
+      </span>
+      <button class="btn btn-sm" onclick="qaDownloadBatchReport()" title="下载跨项目质检汇总报告">📥 批量报告</button>
+      <button class="btn btn-sm qa-btn qa-btn-accent" onclick="qaShowBatchStart()" title="对多个进行中项目批量启动质检">⚡ 批量质检</button>
+    </div>
+    ${failHtml ? `<div style="margin-top:6px;font-size:12px;color:#c5221f;padding:0 4px">⚠️ 未通过质检的项目: ${failHtml}</div>` : ''}`;
+  } catch (e) {
+    bar.innerHTML = '';
+  }
+}
+
+// 下载批量质检汇总报告
+function qaDownloadBatchReport() {
+  window.open('/api/qa/batch_report?dl=1', '_blank');
+}
+
+// 批量质检：选择多个进行中项目启动质检
+function qaShowBatchStart() {
+  const items = (window.allSections || []).reduce(function(acc, sec){
+    (sec.projects || []).forEach(function(p){
+      const s = String(p.custom_status || '').trim();
+      if (s && s !== '已完成' && s !== '质检中') acc.push(p);
+    });
+    return acc;
+  }, []);
+  if (items.length === 0) { toast('没有可批量质检的项目', 'warning'); return; }
+
+  // 弹选择框
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay active';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:999;display:flex;align-items:center;justify-content:center';
+  const listHtml = items.map(function(p, i){
+    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer">
+      <input type="checkbox" checked data-idx="${i}" style="width:15px;height:15px">
+      <span>${htm(p.name)}</span><span style="color:#86868b;font-size:12px">(${p.custom_status||'未设置'})</span>
+    </label>`;
+  }).join('');
+  overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:520px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.2)">
+    <div style="padding:14px 18px;border-bottom:1px solid #eee;font-weight:700">⚡ 批量质检 <span style="font-weight:400;color:#86868b;font-size:12px">选择要质检的项目（已排除质检中）</span></div>
+    <div style="padding:10px 18px;overflow-y:auto;flex:1">${listHtml}</div>
+    <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-sm btn-primary" onclick="qaDoBatchStart(this)">🚀 开始质检</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay._qaItems = items;
+}
+
+async function qaDoBatchStart(btn) {
+  const overlay = btn.closest('.modal-overlay');
+  const items = overlay._qaItems || [];
+  const selected = [];
+  overlay.querySelectorAll('input[data-idx]').forEach(function(cb){
+    if (cb.checked) selected.push(items[parseInt(cb.dataset.idx)]);
+  });
+  if (selected.length === 0) { toast('请至少选择一个项目', 'warning'); return; }
+  const names = selected.map(function(p){ return p.name; });
+  btn.disabled = true; btn.textContent = '启动中...';
+  try {
+    const r = await api('POST', '/api/qa/batch_start', { projects: names, workers: 4 });
+    toast(('✅ 已启动 ' + (r.started_count||0) + ' 个项目质检') + ((r.skipped_count||0) ? ('，跳过 ' + r.skipped_count + ' 个') : ''), 'success');
+    overlay.remove();
+    loadQASummary();
+    if (typeof loadProjects === 'function') loadProjects();
+  } catch(e) {
+    toast('❌ 批量质检失败: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '🚀 开始质检';
+  }
+}

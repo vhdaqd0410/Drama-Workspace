@@ -305,6 +305,16 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         ok = qa_engine.run(project_path, project_name,
                            workers=opts['workers'],
                            opts=opts, folder_layout=folder_layout)
+        # 质检启动成功 → 工作流状态自动流转为"质检中"
+        if ok:
+            try:
+                cur = (db.get_project(project_name) or {}).get("custom_status") or ""
+                if str(cur).strip() != "质检中":
+                    db.update_project_status(
+                        project_name, custom_status="质检中",
+                        sync_progress="质检进行中...")
+            except Exception as _e:
+                _logger.warning("质检启动后设置质检中失败: %s", _e)
         return jsonify({"ok": ok})
 
     @app.route("/api/project/<path:project_name>/qa_cancel", methods=["POST"])
@@ -338,6 +348,163 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         # passed, warnings, failed, results, log, report_html, qa_result_file}
         status = qa_engine.get_status(project_name)
         return jsonify({"ok": True, **status})
+
+    @app.route("/api/qa/summary", methods=["GET"])
+    def api_qa_summary():
+        """质检结果统计：各部门/项目质检通过率、最近质检记录、运行中任务。"""
+        try:
+            runs = db.list_all_qa_runs(limit=200) or []
+            # 只统计已完成的质检
+            done_runs = [r for r in runs if r.get("status") in ("done", "completed")]
+            total_run = len(done_runs)
+            total_videos = sum(int(r.get("total") or 0) for r in done_runs)
+            total_pass = sum(int(r.get("passed") or 0) for r in done_runs)
+            total_warn = sum(int(r.get("warnings") or 0) for r in done_runs)
+            total_fail = sum(int(r.get("failed") or 0) for r in done_runs)
+            pass_rate = round(total_pass * 100.0 / total_videos, 1) if total_videos else 0
+
+            # 按项目聚合最近结果
+            by_project = {}
+            for r in runs:
+                name = r.get("project_name") or ""
+                if not name:
+                    continue
+                item = by_project.setdefault(name, {
+                    "project_name": name, "last_total": 0, "last_pass": 0,
+                    "last_warn": 0, "last_fail": 0, "last_time": "", "status": "done",
+                })
+                # 保留最近一次（按 started_at 排序）
+                last = item["last_time"]
+                if r.get("status") in ("done", "completed") and (not last or str(r.get("started_at") or "") > last):
+                    item.update({
+                        "last_total": int(r.get("total") or 0),
+                        "last_pass": int(r.get("passed") or 0),
+                        "last_warn": int(r.get("warnings") or 0),
+                        "last_fail": int(r.get("failed") or 0),
+                        "last_time": str(r.get("started_at") or ""),
+                    })
+
+            # 运行中任务
+            running = [r for r in runs if r.get("status") in ("running", "pending")]
+            active_names = [r.get("project_name") for r in running]
+
+            # 按状态归类项目
+            by_status = {"pass": [], "warn": [], "fail": [], "running": []}
+            for name, item in by_project.items():
+                if name in active_names:
+                    by_status["running"].append(item)
+                elif item["last_fail"] > 0:
+                    by_status["fail"].append(item)
+                elif item["last_warn"] > 0:
+                    by_status["warn"].append(item)
+                else:
+                    by_status["pass"].append(item)
+
+            return jsonify({
+                "ok": True,
+                "summary": {
+                    "total_run": total_run,
+                    "total_videos": total_videos,
+                    "total_pass": total_pass,
+                    "total_warn": total_warn,
+                    "total_fail": total_fail,
+                    "pass_rate": pass_rate,
+                },
+                "by_status": {
+                    "pass": by_status["pass"],
+                    "warn": by_status["warn"],
+                    "fail": by_status["fail"],
+                    "running": by_status["running"],
+                },
+                "running_count": len(active_names),
+            })
+        except Exception as e:
+            _logger.exception("质检统计失败")
+            return jsonify({"ok": False, "message": str(e)}), 500
+
+    @app.route("/api/qa/batch_report", methods=["GET"])
+    def api_qa_batch_report():
+        """生成跨项目的质检批量汇总报告，并下载 HTML。
+
+        Query:
+            dl: 1 时强制下载，否则内联显示。
+        """
+        import qa_toolkits
+        force_dl = request.args.get("dl") == "1"
+        try:
+            runs = db.list_all_qa_runs(limit=200) or []
+            html_path = qa_toolkits.generate_batch_report_html(runs)
+            if not _os.path.isfile(html_path):
+                return jsonify({"ok": False, "message": "批量报告生成失败"}), 500
+            directory = _os.path.dirname(html_path)
+            filename = _os.path.basename(html_path)
+            return send_from_directory(directory, filename, as_attachment=force_dl)
+        except Exception as e:
+            _logger.exception("生成批量质检报告失败")
+            return jsonify({"ok": False, "message": str(e)}), 500
+
+    @app.route("/api/qa/batch_start", methods=["POST"])
+    def api_qa_batch_start():
+        """批量启动质检：接收项目名列表，对每个项目定位目录并启动质检。
+
+        body: { projects: ["项目A", "项目B", ...], workers: 4 }
+        返回: { ok, started: [已启动项目], skipped: [跳过项目及原因] }
+        """
+        data = request.get_json(silent=True) or {}
+        projects = data.get("projects") or []
+        workers = int(data.get("workers") or 4)
+        if not projects:
+            return jsonify({"ok": False, "message": "未选择项目"}), 400
+        if qa_engine is None:
+            return jsonify({"ok": False, "message": "QA引擎未初始化"}), 500
+
+        started, skipped = [], []
+        for name in projects:
+            name = str(name or "").strip()
+            if not name:
+                continue
+            # 定位项目目录（组内优先，其次制作部）
+            path = ""
+            proj = db.get_project(name)
+            if proj:
+                gp = proj.get("group_path") or ""
+                if gp and _os.path.isdir(gp):
+                    path = gp
+                else:
+                    pp = proj.get("production_path") or ""
+                    if pp and _os.path.isdir(pp):
+                        path = pp
+            if not path:
+                for root, _pk in _nas_search_roots():
+                    candidate = _os.path.join(root, name)
+                    if _os.path.isdir(candidate):
+                        path = candidate
+                        break
+            if not path or not _os.path.isdir(path):
+                skipped.append({"name": name, "reason": "找不到项目目录"})
+                continue
+            try:
+                ok = qa_engine.run(path, name, workers=workers)
+                if ok:
+                    started.append(name)
+                    try:
+                        cur = (db.get_project(name) or {}).get("custom_status") or ""
+                        if str(cur).strip() != "质检中":
+                            db.update_project_status(name, custom_status="质检中")
+                    except Exception:
+                        pass
+                else:
+                    skipped.append({"name": name, "reason": "质检已在运行或启动失败"})
+            except Exception as e:
+                skipped.append({"name": name, "reason": str(e)})
+
+        return jsonify({
+            "ok": True,
+            "started": started,
+            "skipped": skipped,
+            "started_count": len(started),
+            "skipped_count": len(skipped),
+        })
 
     @app.route("/api/project/<path:project_name>/qa_report", methods=["GET"])
     def api_qa_report_download(project_name):

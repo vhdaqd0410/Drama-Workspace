@@ -835,3 +835,106 @@ def generate_report_json(project_path, project_name, results, extra_data=None):
         'folder_info': extra_data.get('folder_info', {}),
         'results': results,
     }
+
+
+def generate_batch_report_html(runs, output_path=None):
+    """生成跨项目的质检批量汇总报告（基于各项目的最近一次质检 summary）。
+
+    Args:
+        runs: list[dict]，每个含 project_name / total / passed / warnings /
+              failed / started_at / status / summary_json。
+        output_path: 保存路径，缺省用临时目录。
+
+    Returns:
+        str — 报告 HTML 保存路径。
+    """
+    import html as _html
+    if not output_path:
+        output_path = os.path.join(
+            tempfile.gettempdir(),
+            f"质检批量汇总_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        )
+
+    # 只取每个项目最近一次正常完成的质检
+    by_project = {}
+    for r in runs:
+        if r.get("status") not in ("done", "completed"):
+            continue
+        name = r.get("project_name") or ""
+        if not name:
+            continue
+        item = by_project.get(name)
+        if not item or str(r.get("started_at") or "") > str(item.get("started_at") or ""):
+            by_project[name] = r
+
+    items = sorted(by_project.values(), key=lambda x: str(x.get("started_at") or ""), reverse=True)
+
+    total_videos = sum(int(x.get("total") or 0) for x in items)
+    total_pass = sum(int(x.get("passed") or 0) for x in items)
+    total_warn = sum(int(x.get("warnings") or 0) for x in items)
+    total_fail = sum(int(x.get("failed") or 0) for x in items)
+    pass_rate = round(total_pass * 100.0 / total_videos, 1) if total_videos else 0
+
+    rows = ""
+    for it in items:
+        total = int(it.get("total") or 0)
+        passed = int(it.get("passed") or 0)
+        warn = int(it.get("warnings") or 0)
+        failed = int(it.get("failed") or 0)
+        rate = round(passed * 100.0 / total, 1) if total else 0
+        color = "#2E7D32" if rate >= 90 else ("#b8860b" if rate >= 70 else "#c5221f")
+        status_badge = ""
+        if failed > 0:
+            status_badge = '<span style="background:#fdecea;color:#c5221f;padding:2px 8px;border-radius:4px;font-weight:600">未通过</span>'
+        elif warn > 0:
+            status_badge = '<span style="background:#fff8e6;color:#9a6b00;padding:2px 8px;border-radius:4px;font-weight:600">警告</span>'
+        else:
+            status_badge = '<span style="background:#e2efda;color:#2E7D32;padding:2px 8px;border-radius:4px;font-weight:600">通过</span>'
+        # 失败明细
+        fail_detail = ""
+        videos = (it.get("summary_json") or {}).get("videos") if isinstance(it.get("summary_json"), dict) else None
+        if videos:
+            fail_vids = [v for v in videos if v.get("status") == "fail"]
+            if fail_vids:
+                names = "、".join(_html.escape(str(v.get("video") or "")) for v in fail_vids[:5])
+                fail_detail = f'<div style="font-size:12px;color:#c5221f;margin-top:4px">失败: {names}{" 等" if len(fail_vids)>5 else ""}</div>'
+
+        rows += f"""<tr>
+            <td style="padding:10px 12px;border-bottom:1px solid #eee">{_html.escape(str(it.get("project_name") or ""))}</td>
+            <td style="text-align:center;border-bottom:1px solid #eee">{_html.escape(str(it.get("started_at") or ""))[:16]}</td>
+            <td style="text-align:center;border-bottom:1px solid #eee">{total}</td>
+            <td style="text-align:center;color:#2E7D32;border-bottom:1px solid #eee">{passed}</td>
+            <td style="text-align:center;color:#b8860b;border-bottom:1px solid #eee">{warn}</td>
+            <td style="text-align:center;color:#c5221f;border-bottom:1px solid #eee">{failed}</td>
+            <td style="text-align:center;border-bottom:1px solid #eee"><b style="color:{color}">{rate}%</b></td>
+            <td style="text-align:center;border-bottom:1px solid #eee">{status_badge}</td>
+        </tr>
+        <tr><td colspan="8" style="padding:0 12px;border-bottom:1px solid #eee">{fail_detail}</td></tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>质检批量汇总报告</title>
+<style>
+body{{font-family:'Microsoft YaHei',sans-serif;margin:0;padding:24px;background:#f5f6f8;color:#333}}
+.wrap{{max-width:1000px;margin:0 auto;background:#fff;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
+h1{{font-size:22px;margin:0 0 4px}} .sub{{color:#86868b;font-size:13px;margin-bottom:20px}}
+.cards{{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}}
+.card{{flex:1;min-width:120px;background:#f8fafc;border:1px solid #e5e8ee;border-radius:8px;padding:14px;text-align:center}}
+.card .num{{font-size:24px;font-weight:700}} .card .lbl{{font-size:12px;color:#86868b;margin-top:2px}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+th{{background:#f0f3f8;padding:10px 12px;text-align:left;border-bottom:2px solid #ddd}}
+th.c{{text-align:center}}
+.summary{{margin-bottom:16px;padding:12px 16px;background:#f8fafc;border-radius:8px;font-size:13px}}
+</style></head><body><div class="wrap">
+<h1>🔍 质检批量汇总报告</h1>
+<div class="sub">生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ｜ 覆盖 {len(items)} 个项目</div>
+<div class="summary">总通过率：<b style="color:{'#2E7D32' if pass_rate>=90 else ('#b8860b' if pass_rate>=70 else '#c5221f')}">{pass_rate}%</b>
+｜ 共检测视频 <b>{total_videos}</b> 个 ｜ 通过 <b style="color:#2E7D32">{total_pass}</b> ｜ 警告 <b style="color:#b8860b">{total_warn}</b> ｜ 失败 <b style="color:#c5221f">{total_fail}</b></div>
+<table>
+<tr><th>项目</th><th class="c">质检时间</th><th class="c">总数</th><th class="c">通过</th><th class="c">警告</th><th class="c">失败</th><th class="c">通过率</th><th class="c">状态</th></tr>
+{rows}
+</table>
+</div></body></html>"""
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    return output_path

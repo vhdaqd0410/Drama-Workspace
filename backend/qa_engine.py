@@ -732,10 +732,44 @@ class QAEngine:
             progress_data['log'].append(f"报告已生成: {html_path}")
         self._emit(progress_q, progress_callback, progress_data)
 
+        # ===== 质检完成自动流转工作流状态 =====
+        # 仅正常完成时流转（取消/异常不改变状态）
+        if run_status == 'done':
+            self._auto_advance_workflow(project_name, passed, failed)
+
         logger.info(
             "质检完成: project=%s status=%s total=%d pass=%d warn=%d fail=%d elapsed=%.1fs",
             project_name, run_status, total, passed, warnings, failed, elapsed
         )
+
+    def _auto_advance_workflow(self, project_name, passed, failed):
+        """质检完成后自动推进项目工作流状态：
+        - 全部通过(failed==0) → 流转到"待交付"（进入交付环节）
+        - 有失败(failed>0)   → 流转到"修改中"（需修复后重新质检）
+        """
+        try:
+            proj = db.get_project(project_name)
+            if not proj:
+                return
+            cur = str(proj.get("custom_status") or "").strip()
+            # 只在"质检中/待质检"状态推进，避免覆盖用户手动设置的其他状态
+            if cur not in ("质检中", "待质检"):
+                return
+            target = "待交付" if failed == 0 else "修改中"
+            db.update_project_status(
+                project_name, custom_status=target,
+                sync_progress="质检%s，自动流转到%s" % ("通过" if failed == 0 else "未通过", target))
+            try:
+                db.add_sync_log(
+                    project_name, "质检完成自动流转", "qa",
+                    status="info",
+                    message="质检%s (%d失败)，状态 %s → %s" % (
+                        "通过" if failed == 0 else "未通过", failed, cur, target))
+            except Exception:
+                pass
+            logger.info("质检自动流转: %s %s -> %s (fail=%d)", project_name, cur, target, failed)
+        except Exception as e:
+            logger.warning("质检自动流转失败: %s", e)
 
     def get_last_result(self, project_name):
         """返回某个项目最近一次质检的结果缓存（含报告路径）。
