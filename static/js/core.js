@@ -150,17 +150,33 @@ function openSearchModal(){
     });
   });
   if(!items.length){ toast('暂无项目','info'); return; }
-  var html = '<div class="modal-overlay" id="searchModal" onclick="if(event.target===this)this.remove()">'
-    + '<div class="modal" style="width:480px">'
-    + '<div class="modal-head">🔍 快速搜索 <span style="font-size:11px;color:#86868b;font-weight:400;margin-left:auto">Ctrl+K</span></div>'
-    + '<div style="padding:14px">'
-    + '<input id="searchInput" placeholder="输入项目名称或月份（如 2026-07）" style="width:100%;padding:10px 12px;border:1px solid #e5e5ea;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box" oninput="filterSearchResults()">'
-    + '<div id="searchResults" style="margin-top:10px;max-height:320px;overflow-y:auto"></div>'
-    + '</div></div></div>';
+  // 已有搜索框则移除，避免重复
+  var old = document.getElementById('searchModal');
+  if(old) old.remove();
+  var sc = _getSearchShortcut() || 'Ctrl+K / Ctrl+F';
+  var html = '<div id="searchModal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh" onclick="if(event.target===this)this.remove()">'
+    + '<div style="width:min(680px,90vw);background:#fff;border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.25);overflow:hidden">'
+    + '<div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #e5e5ea">'
+    + '<span style="font-size:18px">🔍</span>'
+    + '<input id="searchInput" placeholder="搜索项目名称、月份（如 2026-07）、拼音首字母..." autofocus style="flex:1;border:none;outline:none;font-size:16px;background:transparent" oninput="filterSearchResults()" onkeydown="if(event.key===\'Enter\')jumpToFirstResult();if(event.key===\'Escape\')this.closest(\'#searchModal\').remove()">'
+    + '<span style="font-size:11px;color:#86868b;background:#f0f2f5;padding:3px 8px;border-radius:6px;white-space:nowrap">'+sc+'</span>'
+    + '</div>'
+    + '<div id="searchResults" style="max-height:56vh;overflow-y:auto"></div>'
+    + '<div style="padding:8px 16px;background:#fafafa;border-top:1px solid #f0f0f0;font-size:11px;color:#86868b;display:flex;gap:14px">'
+    + '<span>↑↓ 选择 · Enter 打开 · Esc 关闭</span>'
+    + '<span style="margin-left:auto">模糊搜索</span>'
+    + '</div>'
+    + '</div></div>';
   document.body.insertAdjacentHTML('beforeend', html);
   var inp = document.getElementById('searchInput');
   if(inp) inp.focus();
   filterSearchResults();
+}
+
+// 回车跳转到第一个搜索结果
+function jumpToFirstResult(){
+  var first = document.querySelector('#searchResults .search-result-item');
+  if(first) jumpToProjectItem(first);
 }
 
 // 模糊匹配：支持子序列匹配（如 "昼夜回响" 匹配 "昼夜回响"）

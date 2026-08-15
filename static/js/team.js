@@ -16,6 +16,10 @@ async function loadConfig(){
       const sel = document.getElementById('cfgSearchShortcut');
       if(sel) sel.value = d.settings.search_shortcut;
     }
+    if(d && d.ok && d.settings && d.settings.wakeup_shortcut){
+      const sel2 = document.getElementById('cfgWakeupShortcut');
+      if(sel2) sel2.value = d.settings.wakeup_shortcut;
+    }
   }catch(_){}
 }
 async function saveConfig(){
@@ -37,6 +41,15 @@ async function saveShortcut(){
     await api('PUT', '/api/settings', { search_shortcut: val });
     window._shortcutConfig = { search: val };
     toast('⚡ 快捷键已更新' + (val ? ': ' + val : '（默认 Ctrl+K/F）'), 'success');
+  }catch(e){ toast('保存失败: '+e.message,'error'); }
+}
+async function saveWakeupShortcut(){
+  const sel = document.getElementById('cfgWakeupShortcut');
+  if(!sel) return;
+  const val = sel.value;
+  try{
+    await api('PUT', '/api/settings', { wakeup_shortcut: val });
+    toast('⚡ 全局唤醒快捷键已保存' + (val ? ': ' + val : '（默认自动选择）') + '，重启软件生效', 'info');
   }catch(e){ toast('保存失败: '+e.message,'error'); }
 }
 async function migrateOld(){

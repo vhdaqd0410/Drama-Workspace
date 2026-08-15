@@ -348,24 +348,85 @@ def _trigger_api(action):
 
 # ============================================================
 # 全局热键：即使窗口隐藏到托盘，按快捷键也能唤回窗口
+# 支持在设置界面自定义（wakeup_shortcut），未配置则用默认候选
 # ============================================================
-# Windows 虚拟键码
 _MOD_ALT = 0x0001
 _MOD_CTRL = 0x0002
 _MOD_SHIFT = 0x0004
-_VK_W = 0x57          # 'W'
-_VK_B = 0x42          # 'B'
-_VK_G = 0x47          # 'G'
 _HOTKEY_ID = 0x5E11   # 自定义热键 ID
 
-# 候选热键组合（Ctrl+Alt 常被系统/输入法占用，按优先级尝试）
+# 键名 → 虚拟键码（覆盖常用键）
+_VK_MAP = {
+    'a': 0x41, 'b': 0x42, 'c': 0x43, 'd': 0x44, 'e': 0x45, 'f': 0x46,
+    'g': 0x47, 'h': 0x48, 'i': 0x49, 'j': 0x4A, 'k': 0x4B, 'l': 0x4C,
+    'm': 0x4D, 'n': 0x4E, 'o': 0x4F, 'p': 0x50, 'q': 0x51, 'r': 0x52,
+    's': 0x53, 't': 0x54, 'u': 0x55, 'v': 0x56, 'w': 0x57, 'x': 0x58,
+    'y': 0x59, 'z': 0x5A,
+    '0': 0x30, '1': 0x31, '2': 0x32, '3': 0x33, '4': 0x34,
+    '5': 0x35, '6': 0x36, '7': 0x37, '8': 0x38, '9': 0x39,
+    'space': 0x20, 'enter': 0x0D, 'esc': 0x1B, 'tab': 0x09,
+    'f1': 0x70, 'f2': 0x71, 'f3': 0x72, 'f4': 0x73, 'f5': 0x74,
+    'f6': 0x75, 'f7': 0x76, 'f8': 0x77, 'f9': 0x78, 'f10': 0x79,
+    'f11': 0x7A, 'f12': 0x7B,
+}
+
+# 默认候选热键组合（Ctrl+Alt 常被系统/输入法占用，按优先级尝试）
 _HOTKEY_CANDIDATES = [
-    ("Ctrl+Shift+B", _MOD_CTRL | _MOD_SHIFT, _VK_B),
-    ("Ctrl+Shift+G", _MOD_CTRL | _MOD_SHIFT, _VK_G),
-    ("Alt+Shift+B", _MOD_ALT | _MOD_SHIFT, _VK_B),
-    ("Alt+G", _MOD_ALT, _VK_G),
-    ("Ctrl+Alt+W", _MOD_ALT | _MOD_CTRL, _VK_W),
+    ("Ctrl+Shift+B", _MOD_CTRL | _MOD_SHIFT, 0x42),
+    ("Ctrl+Shift+G", _MOD_CTRL | _MOD_SHIFT, 0x47),
+    ("Alt+Shift+B", _MOD_ALT | _MOD_SHIFT, 0x42),
+    ("Alt+G", _MOD_ALT, 0x47),
+    ("Ctrl+Alt+W", _MOD_ALT | _MOD_CTRL, 0x57),
 ]
+
+
+def _parse_hotkey_str(s):
+    """把 'ctrl+shift+b' 解析为 (label, mod, vk)。失败返回 None。"""
+    s = (s or "").strip().lower()
+    if not s:
+        return None
+    parts = [p.strip() for p in s.split('+') if p.strip()]
+    if not parts:
+        return None
+    mod = 0
+    modifiers = []
+    key_part = None
+    for p in parts:
+        if p in ('ctrl', 'control'):
+            mod |= _MOD_CTRL
+            modifiers.append('Ctrl')
+        elif p == 'alt':
+            mod |= _MOD_ALT
+            modifiers.append('Alt')
+        elif p == 'shift':
+            mod |= _MOD_SHIFT
+            modifiers.append('Shift')
+        else:
+            key_part = p
+    if key_part is None or key_part not in _VK_MAP:
+        return None
+    vk = _VK_MAP[key_part]
+    label = '+'.join(modifiers + [key_part.upper()])
+    return (label, mod, vk)
+
+
+def _read_wakeup_shortcut():
+    """从数据库读取用户配置的全局唤醒快捷键。"""
+    try:
+        import sqlite3 as _sq
+        _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "data", "workbench.db")
+        conn = _sq.connect(_db_path, timeout=3)
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key='wakeup_shortcut'"
+            ).fetchone()
+            return row[0] if row else ''
+        finally:
+            conn.close()
+    except Exception:
+        return ''
+
 
 def _run_global_hotkey():
     """后台线程：注册系统级全局热键，按下列唤回主窗口。"""
@@ -374,14 +435,23 @@ def _run_global_hotkey():
         from ctypes import wintypes
         user32 = ctypes.windll.user32
 
-        # 依次尝试注册，取第一个成功的组合
+        # 优先用用户配置的快捷键；否则用默认候选列表
+        user_cfg = _read_wakeup_shortcut()
+        parsed = _parse_hotkey_str(user_cfg)
+
+        candidates = []
+        if parsed:
+            candidates = [parsed]
+        else:
+            candidates = _HOTKEY_CANDIDATES
+
         registered = None
-        for label, mod, vk in _HOTKEY_CANDIDATES:
+        for label, mod, vk in candidates:
             if user32.RegisterHotKey(None, _HOTKEY_ID, mod, vk):
                 registered = (label, mod, vk)
                 break
         if registered is None:
-            print("[hotkey] 所有全局热键注册失败（可能被其他程序占用）")
+            print("[hotkey] 全局热键注册失败（可能被其他程序占用）")
             return
 
         label, mod, vk = registered

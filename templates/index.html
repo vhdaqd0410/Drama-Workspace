@@ -848,6 +848,20 @@ a{color:var(--blue);text-decoration:none}
         </select>
         <div style="font-size:11px;color:var(--text-sec);margin-top:4px">选择后立即生效，支持模糊搜索</div>
       </div>
+      <div class="form-group" style="margin-top:12px">
+        <label>全局唤醒窗口</label>
+        <select id="cfgWakeupShortcut" onchange="saveWakeupShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
+          <option value="">默认（自动选择）</option>
+          <option value="ctrl+shift+b">Ctrl+Shift+B</option>
+          <option value="ctrl+shift+g">Ctrl+Shift+G</option>
+          <option value="alt+shift+b">Alt+Shift+B</option>
+          <option value="alt+g">Alt+G</option>
+          <option value="ctrl+alt+w">Ctrl+Alt+W</option>
+          <option value="ctrl+alt+d">Ctrl+Alt+D</option>
+          <option value="ctrl+shift+w">Ctrl+Shift+W</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">窗口隐藏到托盘后，按此快捷键可从任意程序唤回窗口。⚠️ 修改后需重启软件生效。</div>
+      </div>
     </div>
     <div class="panel settings-section" style="grid-column:1/-1"><h3>👤 分集默认</h3>
       <div class="form-group"><label>建议剪辑师名字 (每行一个)</label><textarea id="cfgNames"></textarea></div>
@@ -930,14 +944,14 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260815h"></script>
+<script src="/static/js/core.js?v=20260815i"></script>
 <script src="/static/js/project.js?v=20260815r"></script>
 <script src="/static/js/tabs.js?v=20260815n"></script>
 <script src="/static/js/episode.js?v=20260815s"></script>
 <script src="/static/js/fenji-init.js?v=20260815n"></script>
 <script src="/static/js/fenji-assign.js?v=20260815n"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
-<script src="/static/js/team.js?v=20260815n"></script>
+<script src="/static/js/team.js?v=20260815o"></script>
 <script src="/static/js/deliverables.js?v=20260815m"></script>
 <script src="/static/js/deliver-events.js?v=20260815n"></script>
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>
