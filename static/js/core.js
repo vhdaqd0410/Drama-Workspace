@@ -335,6 +335,56 @@ function renderStats(){
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fff3cd;color:#856404">📅</div><div><div class="stat-num">${thisMonth}</div><div class="stat-label">本月项目</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='已完成';renderDashboard()" style="cursor:pointer"><div class="stat-icon green">✅</div><div><div class="stat-num">${thisMonthDone}</div><div class="stat-label">本月已完成</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';$('globalSearch').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>`;
+  renderOverviewCharts();
+}
+
+// ===== 首页概览图表（部门分布 + 工作流状态分布）=====
+function renderOverviewCharts(){
+  const wrap = $('overviewCharts');
+  if(!wrap) return;
+  const list = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
+  if(list.length === 0){ wrap.innerHTML=''; return; }
+
+  // 部门分布
+  const deptCount = {};
+  list.forEach(p=>{ const d=(p.department||'未分部门'); deptCount[d]=(deptCount[d]||0)+1; });
+  const deptArr = Object.entries(deptCount).sort((a,b)=>b[1]-a[1]);
+  const deptMax = deptArr[0] ? deptArr[0][1] : 1;
+
+  // 工作流状态分布（含未设置）
+  const statusOrder = ['分集中','剪辑中','审核中','修改中','待交付','交付中','待质检','质检中','已完成'];
+  const statusCount = {};
+  list.forEach(p=>{ const s=(p.custom_status||'').trim()||'未设置'; statusCount[s]=(statusCount[s]||0)+1; });
+  const statusArr = statusOrder.filter(s=>statusCount[s]).map(s=>[s,statusCount[s]])
+    .concat(statusCount['未设置'] ? [['未设置',statusCount['未设置']]] : [])
+    .sort((a,b)=>b[1]-a[1]);
+  const statusMax = statusArr[0] ? statusArr[0][1] : 1;
+
+  const statusColor = {
+    '分集中':'#8e44ad','剪辑中':'#2980b9','审核中':'#16a085','修改中':'#e67e22',
+    '待交付':'#d35400','交付中':'#c0392b','待质检':'#f39c12','质检中':'#9b59b6',
+    '已完成':'#27ae60','未设置':'#bdc3c7'
+  };
+
+  function barChart(title, data, max, colorFn){
+    const rows = data.map(([label, val])=>{
+      const w = max>0 ? Math.max(3, Math.round(val/max*100)) : 0;
+      const c = colorFn(label);
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="width:90px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
+        <div style="flex:1;height:18px;background:#f0f2f5;border-radius:4px;overflow:hidden"><div style="width:${w}%;height:100%;background:${c};border-radius:4px;transition:width .4s"></div></div>
+        <div style="width:30px;font-size:12px;font-weight:600;color:#333">${val}</div>
+      </div>`;
+    }).join('');
+    return `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
+      <div style="font-weight:700;font-size:14px;margin-bottom:12px">${title}</div>
+      ${rows}
+    </div>`;
+  }
+
+  wrap.innerHTML =
+    barChart('🏢 部门项目分布', deptArr, deptMax, ()=>'#5c6bc0') +
+    barChart('📊 工作流状态分布', statusArr, statusMax, l=>statusColor[l]||'#95a5a6');
 }
 function getDeptStyle(dept){
   if(!dept)return '';
