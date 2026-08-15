@@ -1123,7 +1123,7 @@ def main():
             _routes = sorted({r.rule for r in app.url_map.iter_rules() if not r.rule.startswith('/static')})
             logger.info("已注册 API 路由: %d 个", len(_routes))
             logger.info("使用 waitress WSGI 服务器")
-            serve(app, host=host, port=port, threads=8)
+            serve(app, host=host, port=port, threads=16)
         except ImportError:
             app.run(host=host, port=port, debug=False, threaded=True)
     finally:

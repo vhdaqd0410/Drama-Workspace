@@ -403,7 +403,7 @@ def _run_server():
         _flask_app[0] = app
         _register_quit_api(app)
         import waitress
-        waitress.serve(app, host="127.0.0.1", port=_SERVER_PORT, threads=8)
+        waitress.serve(app, host="127.0.0.1", port=_SERVER_PORT, threads=16)
     except SystemExit:
         pass
     except Exception as e:

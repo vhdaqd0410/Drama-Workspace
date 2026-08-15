@@ -557,17 +557,21 @@ function refreshProjectStatus(name, btn){
 
 // === 页面首次加载：自动扫描所有有总集数的项目进度 ===
 async function loadInitialEpisodeSummary(){
-  await runRefreshAllProgress(null, true);
+  // 自动扫描只处理有分集数(total_episodes>0)的项目，避免扫描全部项目
+  // 阻塞后端线程池、拖慢预览视频加载
+  await runRefreshAllProgress(null, true, true);
 }
 
 // === 全项目进度刷新（自动 + 手动共用）===
-async function runRefreshAllProgress(btn, isAuto){
+async function runRefreshAllProgress(btn, isAuto, onlyWithEpisodes){
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 扫描中...'; }
   if (!allSections) { if(btn){btn.disabled=false;btn.textContent='🔄 刷新所有进度';} return; }
 
   let targets = [];
   for (const sec of allSections) {
     for (const p of (sec.projects || [])) {
+      // 自动扫描时只处理有分集数的项目（无分集数的项目扫描无意义且耗时）
+      if (onlyWithEpisodes && !(Number(p.total_episodes) > 0)) continue;
       targets.push(p.name);
     }
   }
@@ -579,7 +583,9 @@ async function runRefreshAllProgress(btn, isAuto){
 
   if (isAuto) toast('📡 自动扫描 ' + targets.length + ' 个项目的成片进度...', 'info');
 
-  const CONCURRENCY = 8;
+  // 自动扫描用较低并发（4），避免占满后端线程池阻塞预览视频加载；
+  // 手动刷新保持 8 路快速
+  const CONCURRENCY = isAuto ? 4 : 8;
   let idx = 0;
   let ok = 0, fail = 0;
   function worker() {
