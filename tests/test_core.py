@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""核心单元测试：统计口径、异常监控、目录查找、交付路径计算。"""
+"""核心单元测试：统计口径、目录查找、交付路径计算。"""
 import os
 import sys
 import shutil
@@ -8,7 +8,6 @@ import pytest
 
 from scan import (
     compute_overview_stats,
-    _compute_project_alert,
     _is_active_project,
     _is_producing,
     find_dir_recursive,
@@ -72,47 +71,7 @@ class TestOverviewStats:
 
 
 # ============================================================
-# 2. 异常监控（_compute_project_alert）
-# ============================================================
-
-class TestProjectAlert:
-    def test_done_no_alert(self):
-        assert _compute_project_alert({"custom_status": "已完成", "total_episodes": 70,
-                                       "current_episodes": 70, "created_at": "2026-08-01 00:00:00"}) is None
-
-    def test_no_status_no_alert(self):
-        assert _compute_project_alert({"custom_status": "", "total_episodes": 0}) is None
-
-    def test_stuck_no_progress(self):
-        """剪辑中但0进度且创建超2天 → danger。"""
-        a = _compute_project_alert({"custom_status": "剪辑中", "total_episodes": 70,
-                                    "current_episodes": 0, "created_at": "2026-08-01 00:00:00",
-                                    "delivery_status": "pending"})
-        assert a is not None and a[0] == "danger"
-
-    def test_pending_no_delivery(self):
-        """待交付但无交付记录 → warn。"""
-        a = _compute_project_alert({"custom_status": "待交付", "total_episodes": 70,
-                                    "current_episodes": 70, "created_at": "2026-08-10 00:00:00",
-                                    "delivery_status": "pending", "last_delivered_at": ""})
-        assert a is not None and a[0] == "warn"
-
-    def test_done_episodes_not_advanced(self):
-        """集数已齐但状态未推进 → warn。"""
-        a = _compute_project_alert({"custom_status": "审核中", "total_episodes": 70,
-                                    "current_episodes": 70, "created_at": "2026-08-10 00:00:00",
-                                    "delivery_status": "pending"})
-        assert a is not None and a[0] == "warn"
-
-    def test_no_episodes_no_alert(self):
-        """无分集数不误报。"""
-        assert _compute_project_alert({"custom_status": "剪辑中", "total_episodes": 0,
-                                       "current_episodes": 0, "created_at": "2026-08-01 00:00:00",
-                                       "delivery_status": "pending"}) is None
-
-
-# ============================================================
-# 3. 目录查找（find_dir_recursive）
+# 2. 目录查找（find_dir_recursive）
 # ============================================================
 
 class TestFindDirRecursive:

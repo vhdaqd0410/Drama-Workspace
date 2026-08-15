@@ -72,74 +72,6 @@ def compute_overview_stats(production, group_all, group_completed, now_month=Non
     }
 
 
-def _compute_project_alert(p):
-    """对进行中项目计算异常提醒。
-
-    Returns:
-        None 或 (level, message)。level: 'danger'(红) | 'warn'(黄)
-    规则（保守，避免误报）：
-      1. 剪辑/审核/修改中，有分集数但 0 进展，且创建超 2 天 → danger 无进展
-      2. 待交付但从未交付过 → warn
-      3. 集数已齐(>=total)但仍停在剪辑中/审核中 → warn 未推进
-      4. 交付中/质检中但超过 30 分钟无进展 → danger 卡死
-    """
-    status = str(p.get("custom_status") or "").strip()
-    if not status or status == "已完成":
-        return None
-
-    now = time.time()
-    created_at = str(p.get("created_at") or "").strip()
-    created_ts = None
-    if created_at:
-        try:
-            created_ts = datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S").timestamp()
-        except Exception:
-            created_ts = None
-    days = (now - created_ts) / 86400 if created_ts else None
-
-    total = int(p.get("total_episodes") or 0)
-    current = int(p.get("current_episodes") or 0)
-    delivery_status = str(p.get("delivery_status") or "").strip()
-
-    # 1. 有分集数但 0 进展，创建超 2 天
-    if status in ("剪辑中", "审核中", "修改中") and total > 0 and current <= 0:
-        if days is not None and days > 2:
-            return ("danger", "开始%d天仍无集数进度" % int(days))
-
-    # 2. 待交付但从未交付
-    if status == "待交付" and delivery_status not in ("delivered",):
-        if not str(p.get("last_delivered_at") or "").strip():
-            return ("warn", "待交付但无交付记录")
-
-    # 3. 集数已齐但状态未推进
-    if total > 0 and current >= total and status in ("剪辑中", "审核中"):
-        return ("warn", "集数已齐但状态未推进")
-
-    # 4. 交付中/质检中卡死（30分钟无进展标记）
-    if status in ("交付中", "质检中"):
-        sync_progress = str(p.get("sync_progress") or "").strip()
-        last_delivered = str(p.get("last_delivered_at") or "").strip()
-        if not sync_progress and not last_delivered:
-            if days is not None and days > 1:
-                return ("danger", "长时间停留在%s" % status)
-
-    return None
-
-
-def _attach_alerts(projects):
-    """给项目列表计算 alert 字段。"""
-    for p in projects:
-        if p.get("project_type") != "group":
-            continue  # 只对组内项目监控（本部门工作台）
-        if str(p.get("custom_status") or "").strip() in ("", "已完成"):
-            p["alert"] = None
-            continue
-        try:
-            p["alert"] = _compute_project_alert(p)
-        except Exception:
-            p["alert"] = None
-
-
 def _natural_key(text):
     """自然排序键：将数字段转为整数，使 '2' 排在 '10' 前面。"""
     parts = re.split(r'(\d+)', str(text))
@@ -541,12 +473,6 @@ class ScanMixin:
                         proj["delivery_stats"] = self.get_delivery_stats(proj["name"])
                     except Exception:
                         proj["delivery_stats"] = {"found": False, "total_episodes": 0, "items": [], "overall_pct": 0}
-
-        # 对组内进行中项目计算异常提醒（超期未推进等）
-        try:
-            _attach_alerts(group_all)
-        except Exception as e:
-            logger.warning("计算项目异常提醒失败: %s", e)
 
         return {
             "production": production,

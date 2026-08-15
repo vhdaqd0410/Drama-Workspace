@@ -496,17 +496,6 @@ function projectCardHTML(p){
   const hasProd = !!p.production_path;
   const status = p.custom_status || '';
 
-  // === 异常提醒（后端计算 p.alert = [level, message]）===
-  let alertHTML = '';
-  if (p.alert && Array.isArray(p.alert) && p.alert[1]) {
-    const _lv = p.alert[0] === 'danger' ? 'danger' : 'warn';
-    const _bg = _lv === 'danger' ? '#fdecea' : '#fff8e6';
-    const _fg = _lv === 'danger' ? '#c5221f' : '#9a6b00';
-    const _bd = _lv === 'danger' ? '#f5c6c4' : '#f0dcae';
-    const _icon = _lv === 'danger' ? '🔴' : '⚠️';
-    alertHTML = `<div style="margin:6px 12px 0;padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600;background:${_bg};color:${_fg};border:1px solid ${_bd}">${_icon} ${htm(p.alert[1])}</div>`;
-  }
-
   if (hasGroup && isGroup) {
     openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','group')">📁 组内NAS</button>`;
   } else if (hasProd) {
@@ -539,7 +528,6 @@ function projectCardHTML(p){
   ).join('');
   return `<select class="badge editable-badge ${badge.cls}" onchange="onStatusChange('${p.name.replace(/'/g,"\\'")}', this)" title="点击修改项目状态">${optsHtml}</select>`;
 })()}</div>
-    ${alertHTML}
     ${workflowHTML(p.custom_status)}
     ${syncProgressHTML}
     ${progressHTML}
