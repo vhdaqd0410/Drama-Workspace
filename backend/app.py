@@ -25,6 +25,7 @@ from flask import Flask, render_template, jsonify, request, send_file
 from db import Database
 from sync_engine import SyncEngine
 from watcher import Watcher
+from qa_engine import qa_engine
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -325,13 +326,24 @@ def api_deliver_folder(project_name):
     if not folder_names:
         return jsonify({"ok": False, "message": "未选择文件夹"})
 
+    # 标准化：去除每个文件夹名的首尾空白/不可见字符，防止前后空格导致匹配失败
+    folder_names = [(fn or "").strip() for fn in folder_names if (fn or "").strip()]
+
     if mode == "delivery":
-        if len(folder_names) == 1:
-            ok, msg = sync_engine.deliver_delivery_folder(project_name, folder_names[0])
+        delivery_folder_name = os.path.basename(sync_engine._delivery_folder.rstrip("\/")).strip()
+        # 宽松判断：只要 folder_names 中包含 delivery 虚拟根文件夹（无论是单独还是和其他混合），
+        # 都统一走整目录交付 deliver_to_production（复制整个 000交付 目录），避免把虚拟根文件夹
+        # 当成子文件夹传入导致 "000交付下不存在文件夹: 000交付" 的错误。
+        if delivery_folder_name in folder_names:
+            logger.info("[DELIV] 勾选虚拟根文件夹 %s（共 %s 项），触发整目录交付 deliver_to_production()",
+                        delivery_folder_name, len(folder_names))
+            ok, msg = sync_engine.deliver_to_production(project_name)
+            if not ok:
+                logger.warning("[DELIV] deliver_to_production 启动失败: %s", msg)
             return jsonify({"ok": ok, "message": msg})
-        else:
-            _bg(sync_engine.deliver_delivery_folders_batch, project_name, folder_names)
-            return jsonify({"ok": True, "message": "交付文件夹回传已启动 (" + str(len(folder_names)) + " 个)", "total": len(folder_names)})
+        # 其它情况：逐个子文件夹后台批量回传（00成片、01字幕等真实子文件夹）
+        _bg(sync_engine.deliver_delivery_folders_batch, project_name, folder_names)
+        return jsonify({"ok": True, "message": "交付文件夹回传已启动 (" + str(len(folder_names)) + " 个)，请查看系统复制进度窗口", "total": len(folder_names)})
     else:
         if len(folder_names) == 1:
             ok, msg = sync_engine.deliver_revision_folder(project_name, folder_names[0])
@@ -472,17 +484,43 @@ def api_project_open_folder(project_name):
     data = request.get_json(silent=True) or {}
     which = data.get("which", "source")
     path = None
-    if which == "source" or which == "editing":
+    err = None
+    proj = sync_engine.db.get_project(project_name) or None
+    if which == "path":
+        # 直接按给定路径打开
+        path = data.get("path") or ""
+    elif which == "source" or which == "editing":
         path, err = sync_engine.get_source_dir(project_name)
     elif which == "dest":
         path, err = sync_engine.get_dest_dir(project_name)
+    elif which == "group" or which == "prod":
+        # 'group' = 打开组内NAS项目根目录（即使还没有"01上映单集版"子目录）
+        #   - 但如果项目状态是「剪辑中」「审核中」「修改中」，优先打开 01上映单集版
+        # 'prod' = 打开制作部项目根目录（production_path 或 dest 的父级）
+        if which == "group":
+            if proj and proj.get("group_path"):
+                custom_status = proj.get("custom_status", "") or ""
+                # 剪辑中/审核中/修改中 → 优先打开 01上映单集版（成片所在目录）
+                if custom_status in ("剪辑中", "审核中", "修改中"):
+                    output_dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
+                    if output_dirs:
+                        path = output_dirs[0]
+                    else:
+                        path = proj["group_path"]
+                else:
+                    path = proj["group_path"]
+            else:
+                path, err = sync_engine.get_source_dir(project_name)
+        else:
+            if proj and proj.get("production_path"):
+                path = proj["production_path"]
+            else:
+                path, err = sync_engine.get_dest_dir(project_name)
     elif which == "production":
-        proj = sync_engine.db.get_project(project_name)
         path = proj.get("production_path", "") if proj else ""
         if not path or not os.path.isdir(path):
             path, err = sync_engine.get_dest_dir(project_name)
     elif which == "delivery":
-        proj = sync_engine.db.get_project(project_name)
         if proj and proj.get("production_path"):
             dirs = sync_engine._find_output_dirs(proj["production_path"], project_name)
             path = dirs[0] if dirs else proj["production_path"]
@@ -500,7 +538,6 @@ def api_project_open_folder(project_name):
         else:
             path = src
     elif which == "group_output":
-        proj = sync_engine.db.get_project(project_name)
         if proj and proj.get("group_path"):
             dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
             path = dirs[0] if dirs else proj["group_path"]
@@ -1059,7 +1096,7 @@ def _scan_qa_status(project_name):
 # ============================================================
 try:
     from enhanced_routes import _register_enhanced_routes
-    _register_enhanced_routes(app, db, qa_engine=None, sync_engine=sync_engine)
+    _register_enhanced_routes(app, db, qa_engine=qa_engine, sync_engine=sync_engine)
     print("[OK] enhanced_routes 已注册")
 except ImportError as e:
     print("[WARN] enhanced_routes 未加载:", e)

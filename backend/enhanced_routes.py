@@ -6,7 +6,7 @@ import base64 as _b64
 import json as _j
 import yaml as _y
 import logging as _logging
-from flask import request, jsonify, send_file
+from flask import request, jsonify, send_file, send_from_directory, abort
 import config as _cfg
 from utils import scan_dir
 from fenji_exporter import export_from_template, backup_template, list_templates as _list_templates
@@ -116,22 +116,195 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return jsonify({"ok": False, "message": str(e)}), 500
         return jsonify({"ok": True})
 
+    # ============================================================
+    # 新版 QA 路由（完全照搬独立视频质检工具的功能）
+    # ============================================================
+
+    @app.route("/api/qa/project_dir", methods=["GET"])
+    def api_qa_project_dir():
+        """根据项目名返回质检目录（优先 000交付 文件夹路径）。
+
+        Query: name=项目名
+        返回: {ok, project_path, project_name, source}
+            - project_path: 质检目录绝对路径（000交付 的父目录或项目根目录）
+            - source: "delivery" | "group" | "production" | "not_found"
+        """
+        name = request.args.get("name", "").strip()
+        if not name:
+            return jsonify({"ok": False, "message": "项目名不能为空"}), 400
+
+        # 1. 先从 DB 查项目记录
+        proj = None
+        try:
+            proj = db.get_project(name)
+        except Exception:
+            pass
+
+        group_path = ""
+        production_path = ""
+        if proj:
+            group_path = proj.get("group_path", "") or ""
+            production_path = proj.get("production_path", "") or ""
+
+        # 2. 如果 DB 没有，从 NAS 搜索根目录查找
+        if not group_path and not production_path:
+            for root, path_key in _nas_search_roots():
+                candidate = _os.path.join(root, name)
+                if _os.path.isdir(candidate):
+                    if path_key == "group_path":
+                        group_path = candidate
+                    else:
+                        production_path = candidate
+                    break
+
+        # 3. 优先查找 000交付 文件夹
+        for base in [group_path, production_path]:
+            if not base:
+                continue
+            delivery = _os.path.join(base, "000交付")
+            if _os.path.isdir(delivery):
+                return jsonify({
+                    "ok": True,
+                    "project_path": delivery,
+                    "project_name": name,
+                    "source": "delivery",
+                    "group_path": group_path,
+                    "production_path": production_path,
+                })
+
+        # 4. 没有 000交付，回退到项目根目录
+        for base in [group_path, production_path]:
+            if base and _os.path.isdir(base):
+                return jsonify({
+                    "ok": True,
+                    "project_path": base,
+                    "project_name": name,
+                    "source": "group" if base == group_path else "production",
+                    "group_path": group_path,
+                    "production_path": production_path,
+                })
+
+        return jsonify({"ok": False, "message": "未找到项目目录"}), 404
+
+    @app.route("/api/qa/browse_dirs", methods=["GET"])
+    def api_qa_browse_dirs():
+        """返回 NAS 根目录下的项目文件夹列表，供前端浏览选择。
+
+        Query: root=group|production (默认 group)
+        返回: {ok, dirs: [{name, path, has_delivery}]}
+        """
+        root_type = request.args.get("root", "group")
+        dirs = []
+        if root_type == "group":
+            group_root = _cfg.get("nas.group_root", "")
+            if group_root and _os.path.isdir(group_root):
+                try:
+                    for name in sorted(_os.listdir(group_root)):
+                        full = _os.path.join(group_root, name)
+                        if not _os.path.isdir(full):
+                            continue
+                        has_delivery = _os.path.isdir(_os.path.join(full, "000交付"))
+                        dirs.append({"name": name, "path": full, "has_delivery": has_delivery})
+                except OSError:
+                    pass
+        else:
+            for prod_root in (_cfg.get("nas.production_roots", []) or []):
+                if not prod_root or not _os.path.isdir(prod_root):
+                    continue
+                try:
+                    for name in sorted(_os.listdir(prod_root)):
+                        full = _os.path.join(prod_root, name)
+                        if not _os.path.isdir(full):
+                            continue
+                        has_delivery = _os.path.isdir(_os.path.join(full, "000交付"))
+                        dirs.append({"name": name, "path": full, "has_delivery": has_delivery})
+                except OSError:
+                    pass
+        return jsonify({"ok": True, "dirs": dirs})
+
+    @app.route("/api/qa/scan_dir", methods=["POST"])
+    def api_qa_scan_dir():
+        """POST JSON {project_path: "..."} → 返回文件夹布局（完全对应视频质检工具 auto_detect_folders）。
+
+        body 字段:
+            project_path (必填): 项目目录绝对路径
+        """
+        import qa_toolkits
+        data = request.get_json(silent=True) or {}
+        p = data.get("project_path") or ""
+        if not p or not _os.path.isdir(p):
+            return jsonify({"ok": False, "message": "路径不存在"}), 400
+        layout = qa_toolkits.auto_detect_folders(p)
+        suggested_name = qa_toolkits.auto_fill_project_name(p)
+        return jsonify({"ok": True, "layout": layout, "project_name_suggest": suggested_name})
+
+    @app.route("/api/qa/preview_frame", methods=["POST"])
+    def api_qa_preview_frame():
+        """POST JSON {video_path: "...", max_width: 720} → 返回 JPEG base64 + 尺寸。
+
+        用于 Web 端字幕区域框选预览图（独立工具 SubRegionPicker 的等价物）。
+        """
+        import qa_toolkits
+        data = request.get_json(silent=True) or {}
+        vp = data.get("video_path") or ""
+        if not vp or not _os.path.isfile(vp):
+            return jsonify({"ok": False, "message": "视频文件不存在"}), 400
+        frame, w, h = qa_toolkits.extract_preview_frame(vp, timestamp_fraction=0.25)
+        if frame is None:
+            return jsonify({"ok": False, "message": "无法提取帧，请检查 ffmpeg"}), 500
+        maxw = int(data.get("max_width") or 960)
+        jpeg_bytes = qa_toolkits.encode_frame_to_jpeg(frame, quality=85, max_width=maxw)
+        if jpeg_bytes is None:
+            return jsonify({"ok": False, "message": "JPEG 编码失败"}), 500
+        import base64
+        return jsonify({
+            "ok": True,
+            "video_width": int(w),
+            "video_height": int(h),
+            "jpeg": base64.b64encode(jpeg_bytes).decode("ascii"),
+            "mime": "image/jpeg",
+        })
+
     @app.route("/api/project/<path:project_name>/qa_start", methods=["POST"])
     def api_qa_start(project_name):
+        """新版质检启动接口（对应独立工具 开始检测 按钮）。
+
+        body 字段:
+            project_path (必填): 项目目录绝对路径
+            cp_folder, hardsub_folders[], srt_folder: 版本选择（通常来自 /api/qa/scan_dir 返回）
+            opt_blackframes / opt_hardsubs / opt_duration: 检测项开关
+            workers: 线程数
+            sub_region: [x, y, w, h] 或 null（字幕区域框选）
+            folder_layout: 可选，预扫描的 layout 数据
+        """
         data = request.get_json(silent=True) or {}
-        workers = int(data.get("workers", 4))
         project_path = data.get("project_path") or ""
-        if not project_path:
+        if not project_path or not _os.path.isdir(project_path):
             for root, _pk in _nas_search_roots():
                 candidate = _os.path.join(root, project_name)
                 if _os.path.isdir(candidate):
                     project_path = candidate
                     break
-        if not project_path:
+        if not project_path or not _os.path.isdir(project_path):
             return jsonify({"ok": False, "message": "找不到项目路径"}), 404
         if qa_engine is None:
             return jsonify({"ok": False, "message": "QA引擎未初始化"}), 500
-        ok = qa_engine.run(project_path, project_name, workers=workers)
+
+        opts = {
+            'cp_folder': data.get('cp_folder'),
+            'hardsub_folders': data.get('hardsub_folders'),
+            'srt_folder': data.get('srt_folder'),
+            'opt_blackframes': bool(data.get('opt_blackframes', True)),
+            'opt_hardsubs': bool(data.get('opt_hardsubs', True)),
+            'opt_duration': bool(data.get('opt_duration', True)),
+            'workers': int(data.get('workers', 4)),
+            'sub_region': data.get('sub_region'),
+        }
+        folder_layout = data.get('folder_layout') or None
+
+        ok = qa_engine.run(project_path, project_name,
+                           workers=opts['workers'],
+                           opts=opts, folder_layout=folder_layout)
         return jsonify({"ok": ok})
 
     @app.route("/api/project/<path:project_name>/qa_cancel", methods=["POST"])
@@ -140,12 +313,95 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             qa_engine.cancel(project_name)
         return jsonify({"ok": True})
 
+    @app.route("/api/project/<path:project_name>/qa_checkpoint_clear", methods=["POST"])
+    def api_qa_checkpoint_clear(project_name):
+        """清除项目目录下的断点续检 checkpoint（对应独立工具 清除缓存 按钮）。"""
+        import qa_toolkits
+        data = request.get_json(silent=True) or {}
+        p = data.get("project_path") or ""
+        if not p or not _os.path.isdir(p):
+            for root, _pk in _nas_search_roots():
+                candidate = _os.path.join(root, project_name)
+                if _os.path.isdir(candidate):
+                    p = candidate
+                    break
+        if not p or not _os.path.isdir(p):
+            return jsonify({"ok": False, "message": "找不到项目路径"}), 404
+        qa_toolkits.clear_checkpoint(p)
+        return jsonify({"ok": True})
+
     @app.route("/api/project/<path:project_name>/qa_status", methods=["GET"])
     def api_qa_status(project_name):
         if qa_engine is None:
-            return jsonify({"ok": False})
+            return jsonify({"ok": False, "message": "QA引擎未初始化"}), 500
+        # get_status 返回 {is_running, progress, current_video, total, done,
+        # passed, warnings, failed, results, log, report_html, qa_result_file}
         status = qa_engine.get_status(project_name)
-        return jsonify({"ok": True, "status": status})
+        return jsonify({"ok": True, **status})
+
+    @app.route("/api/project/<path:project_name>/qa_report", methods=["GET"])
+    def api_qa_report_download(project_name):
+        """下载 / 预览上一次质检生成的 HTML 报告或 JSON 数据。
+
+        Query:
+            fmt: 'html'（默认，返回 HTML 并内联浏览器显示） | 'json'（下载 JSON）
+            dl:  1 时强制下载（Content-Disposition: attachment）
+        """
+        import qa_toolkits
+        fmt = request.args.get('fmt', 'html').lower()
+        force_dl = request.args.get('dl') == '1'
+        if qa_engine is None:
+            return jsonify({"ok": False, "message": "QA引擎未初始化"}), 500
+
+        cached = qa_engine.get_last_result(project_name)
+        if not cached:
+            return jsonify({"ok": False, "message": "暂无质检结果，请先运行质检"}), 404
+
+        if fmt == 'json':
+            payload = qa_toolkits.generate_report_json(
+                cached['project_path'], cached['project_name'],
+                cached['results'], cached.get('extra_data'),
+            )
+            # 用 BytesIO 包装，文件名自动加时间戳
+            from datetime import datetime as _dt
+            fname = f"质检数据_{project_name}_{_dt.now().strftime('%Y%m%d_%H%M%S')}.json"
+            buf = _io.BytesIO(_j.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+            buf.seek(0)
+            return send_file(buf, as_attachment=force_dl or True,
+                             download_name=fname, mimetype="application/json")
+
+        # 默认 html
+        html_path = cached.get('html_path')
+        if not html_path or not _os.path.isfile(html_path):
+            return jsonify({"ok": False, "message": "HTML 报告不存在或未生成"}), 404
+        directory = _os.path.dirname(html_path)
+        filename = _os.path.basename(html_path)
+        return send_from_directory(directory, filename, as_attachment=force_dl)
+
+    @app.route("/api/project/<path:project_name>/qa_lastresult", methods=["GET"])
+    def api_qa_lastresult(project_name):
+        """取上一次质检结果缓存（含 raw results / extra_data / 报告路径）。"""
+        if qa_engine is None:
+            return jsonify({"ok": False, "message": "QA引擎未初始化"}), 500
+        cached = qa_engine.get_last_result(project_name)
+        if not cached:
+            return jsonify({"ok": False, "message": "暂无缓存结果"}), 404
+        # results 可能很大：只保留摘要 + 报告路径 + 统计
+        summary = {
+            'total': len(cached['results']),
+            'passed': sum(1 for r in cached['results'] if r.get('status') == 'pass'),
+            'warnings': sum(1 for r in cached['results'] if r.get('status') == 'warn'),
+            'failed': sum(1 for r in cached['results'] if r.get('status') == 'fail'),
+        }
+        return jsonify({
+            "ok": True,
+            "summary": summary,
+            "html_path": cached.get('html_path'),
+            "qa_result_file": cached.get('qa_result_file'),
+            "extra_data": cached.get('extra_data'),
+            "timestamp": cached.get('timestamp'),
+            "results": cached['results'],
+        })
 
     @app.route("/api/project/<path:project_name>/qa_history", methods=["GET"])
     def api_qa_history(project_name):

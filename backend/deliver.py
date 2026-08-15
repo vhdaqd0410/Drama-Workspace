@@ -747,19 +747,23 @@ class DeliverMixin:
         """
         proj = self.db.get_project(project_name)
         if not proj:
+            logger.warning("[DELIV] deliver_to_production: 项目不存在 name=%s", project_name)
             return False, "项目不存在"
 
         group_path = proj.get("group_path", "") or ""
         prod_path = proj.get("production_path", "") or ""
         if not prod_path:
+            logger.warning("[DELIV] deliver_to_production: 项目无 production_path name=%s group_path=%s", project_name, group_path)
             return False, "该项目无制作部NAS路径，无法一键交付"
 
         folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
         src = os.path.join(group_path, folder_name)
-        if not os.path.isdir(src):
-            return False, "组内NAS项目下不存在 %s 目录" % folder_name
-
         dst = os.path.join(prod_path, folder_name)
+        logger.info("[DELIV] deliver_to_production 准备: project=%s src=%s dst=%s", project_name, src, dst)
+
+        if not os.path.isdir(src):
+            logger.warning("[DELIV] deliver_to_production: 源目录不存在 src=%s", src)
+            return False, "组内NAS项目下不存在 %s 目录" % folder_name
 
         with self._lock:
             existing = self._deliver_tasks.get(project_name)
@@ -810,8 +814,8 @@ class DeliverMixin:
 
     def deliver_delivery_folder(self, project_name, folder_name):
         """交付文件夹回传：把组内NAS项目下的 000交付/[folder_name] 整个 Shell 复制到制作部。
+        使用 VBS + wscript.exe 弹出系统原生复制进度对话框（同素材同步），并等待复制完成。
         完成后自动把项目状态变为"待质检"。
-        folder_name 示例: "00成片"、"1.有音乐无字幕版本"、"3.字幕文件" 等。
         """
         proj = self.db.get_project(project_name)
         if not proj:
@@ -822,11 +826,18 @@ class DeliverMixin:
         if not prod_path:
             return False, "该项目无制作部NAS路径"
 
-        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/"))
+        folder_name = (folder_name or "").strip()
+        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/")).strip()
+
+        # 如果传入的是 delivery 虚拟根文件夹本身，直接走整目录交付
+        if folder_name == delivery_folder_name:
+            logger.info("[DELIV] deliver_delivery_folder 收到虚拟根 %s，转调 deliver_to_production", folder_name)
+            return self.deliver_to_production(project_name)
+
         src_parent = os.path.join(group_path, delivery_folder_name)
         src_folder = os.path.join(src_parent, folder_name)
         if not os.path.isdir(src_folder):
-            return False, "组内NAS 000交付 下不存在文件夹: " + folder_name
+            return False, "组内NAS " + delivery_folder_name + " 下不存在文件夹: " + folder_name
 
         dst_parent = os.path.join(prod_path, delivery_folder_name)
 
@@ -839,14 +850,38 @@ class DeliverMixin:
             except Exception:
                 pass
 
-        logger.info("交付文件夹回传: %s -> %s", src_folder, dst_parent)
+        # 统计源文件数（用于进度追踪）
+        src_count, src_size = self._count_dir_stats(src_folder)
+
+        logger.info("交付文件夹回传(VBS): %s -> %s (%d 文件)", src_folder, dst_parent, src_count)
         self.db.add_sync_log(
             project_name, "交付文件夹回传启动", "group_delivery->prod_delivery",
             file_path=src_folder, status="info",
-            message="源: " + src_folder + " -> 目标父目录: " + dst_parent)
+            message="源: " + src_folder + " -> 目标: " + dst_parent + " (" + str(src_count) + " 文件)")
+
+        # 设置进度追踪
+        with self._lock:
+            self._deliver_tasks[project_name] = {
+                "task_type": "delivery_folder",
+                "status": "running",
+                "total": src_count,
+                "current": 0,
+                "pct": 0,
+                "message": "正在回传: " + folder_name,
+                "src": src_folder,
+                "dst": dst_parent,
+                "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+        # 启动进度轮询线程
+        threading.Thread(
+            target=self._poll_deliver_progress,
+            args=(project_name,),
+            daemon=True).start()
 
         try:
-            _shell_copy_folder(src_folder, dst_parent)
+            # 使用 _copy_dir（内部优先 COM/VBS → robocopy fallback，弹系统进度对话框）
+            ok, msg = self._copy_dir(src_folder, dst_parent, exclude_patterns=None)
 
             file_count = 0
             total_size = 0
@@ -860,29 +895,62 @@ class DeliverMixin:
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             dst_folder = os.path.join(dst_parent, folder_name)
-            self.db.add_delivery_log(
-                project_name, folder_name + "/(整个交付文件夹)",
-                src_folder, dst_folder, total_size,
-                "success", "交付文件夹回传成功: " + folder_name + " (" + str(file_count) + " 个文件)")
 
-            # 关键：回传完成后自动变状态为"待质检"
-            self.set_custom_status(project_name, "待质检")
+            if ok:
+                self.db.add_delivery_log(
+                    project_name, folder_name + "/(整个交付文件夹)",
+                    src_folder, dst_folder, total_size,
+                    "success", "交付文件夹回传成功: " + folder_name + " (" + str(file_count) + " 个文件)")
 
-            self.db.update_project_status(
-                project_name, delivery_status="delivered",
-                last_delivered_at=now)
+                # 回传完成后自动变状态为"待质检"
+                self.set_custom_status(project_name, "待质检")
+                self.db.update_project_status(
+                    project_name, delivery_status="delivered",
+                    last_delivered_at=now,
+                    sync_progress="交付完成: " + folder_name + " (" + str(file_count) + " 文件)")
 
-            return True, "交付文件夹回传成功: " + folder_name + " (" + str(file_count) + " 个文件)"
+                with self._lock:
+                    task = self._deliver_tasks.get(project_name, {})
+                    task["status"] = "done"
+                    task["pct"] = 100
+                    task["current"] = src_count
+                    task["message"] = "交付完成: " + folder_name
+                    task["finished_at"] = now
+                self._sse_publish({"type": "deliver", "project": project_name, "status": "done"})
+                self._notify_desktop("✅ 交付文件夹回传完成", project_name + " / " + folder_name)
+
+                return True, "交付文件夹回传成功: " + folder_name + " (" + str(file_count) + " 个文件)"
+            else:
+                self.db.add_delivery_log(
+                    project_name, folder_name + "/(整个交付文件夹)",
+                    src_folder, dst_folder, 0,
+                    "error", "回传失败: " + msg)
+                with self._lock:
+                    task = self._deliver_tasks.get(project_name, {})
+                    task["status"] = "error"
+                    task["message"] = "回传失败: " + msg
+                self._sse_publish({"type": "deliver", "project": project_name, "status": "error"})
+                return False, "回传失败: " + msg
         except Exception as e:
             logger.exception("交付文件夹回传失败")
             self.db.add_delivery_log(
                 project_name, folder_name + "/(整个交付文件夹)",
                 src_folder, dst_parent, 0,
                 "error", str(e))
+            with self._lock:
+                task = self._deliver_tasks.get(project_name, {})
+                task["status"] = "error"
+                task["message"] = "回传异常: " + str(e)
+            self._sse_publish({"type": "deliver", "project": project_name, "status": "error"})
             return False, "回传失败: " + str(e)
 
     def deliver_delivery_folders_batch(self, project_name, folder_names):
-        """批量回传多个交付子文件夹 — 逐个弹系统 Shell 进度对话框"""
+        """批量回传多个交付子文件夹 — 后台逐个用 VBS/COM 弹系统进度对话框。
+        所有文件夹共用一个进度追踪，前端可通过 sync_progress 看总进度。
+
+        注意：folder_names 如果包含 delivery 虚拟根文件夹 ("000交付")，会自动转调整目录交付。
+        本函数只接受"000交付"目录下的真实子文件夹：成片、字幕、截图等。
+        """
         proj = self.db.get_project(project_name)
         if not proj:
             return [{"name": n, "ok": False, "message": "项目不存在", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
@@ -892,25 +960,154 @@ class DeliverMixin:
         if not prod_path:
             return [{"name": n, "ok": False, "message": "该项目无制作部路径", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
 
-        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/"))
+        # 标准化：去除每个文件夹名的首尾空白
+        folder_names = [(fn or "").strip() for fn in folder_names if (fn or "").strip()]
+        if not folder_names:
+            return [{"name": "(空)", "ok": False, "message": "文件夹名称为空", "index": 1, "total": 1}]
+
+        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/")).strip()
+
+        # 安全校验 + 宽松匹配：如果传入了虚拟根文件夹本身，直接走整目录交付
+        if delivery_folder_name in folder_names:
+            logger.info("[DELIV] deliver_delivery_folders_batch 检测到虚拟根 %s，转调 deliver_to_production", delivery_folder_name)
+            ok, msg = self.deliver_to_production(project_name)
+            return [{"name": n, "ok": ok, "message": msg or ("整目录交付：" + str(ok)),
+                     "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
+
         src_parent = os.path.join(group_path, delivery_folder_name)
         dst_parent = os.path.join(prod_path, delivery_folder_name)
 
+        # 统计所有源文件夹的总文件数
+        total_files = 0
+        valid_folders = []
+        invalid_names = []
+        for fn in folder_names:
+            sf = os.path.join(src_parent, fn)
+            if os.path.isdir(sf):
+                fc, _ = self._count_dir_stats(sf)
+                total_files += fc
+                valid_folders.append(fn)
+            else:
+                invalid_names.append(fn)
+
+        if not valid_folders:
+            # 全部不存在：给出清晰提示
+            msgs = []
+            for n in invalid_names:
+                if n == delivery_folder_name:
+                    msgs.append(n + " 是交付根文件夹名，请使用整目录交付")
+                else:
+                    msgs.append(n + " 在 " + delivery_folder_name + " 下不存在")
+            return [{"name": folder_names[i], "ok": False,
+                     "message": msgs[i], "index": i + 1, "total": len(folder_names)}
+                    for i in range(len(folder_names))]
+
+        # 设置进度追踪（所有文件夹共用一个）
+        with self._lock:
+            existing = self._deliver_tasks.get(project_name)
+            if existing and existing.get("status") in ("running", "starting"):
+                return [{"name": n, "ok": False, "message": "已有回传任务在进行中", "index": 1, "total": len(folder_names)}]
+            self._deliver_tasks[project_name] = {
+                "task_type": "delivery_folders_batch",
+                "status": "running",
+                "total": total_files,
+                "current": 0,
+                "pct": 0,
+                "message": "批量回传 " + str(len(valid_folders)) + " 个文件夹...",
+                "src": src_parent,
+                "dst": dst_parent,
+                "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+        self.db.update_project_status(project_name, sync_progress="回传 0/" + str(total_files) + " 文件")
+        self._sse_publish({"type": "deliver", "project": project_name, "status": "running"})
+
+        # 后台线程逐个回传
+        threading.Thread(
+            target=self._run_delivery_folders_batch,
+            args=(project_name, valid_folders, src_parent, dst_parent, total_files),
+            daemon=True).start()
+        # 进度轮询线程
+        threading.Thread(
+            target=self._poll_deliver_progress,
+            args=(project_name,),
+            daemon=True).start()
+
+        return [{"name": n, "ok": True, "message": "已加入批量回传队列", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
+
+    def _run_delivery_folders_batch(self, project_name, folder_names, src_parent, dst_parent, total_files):
+        """后台执行：逐个文件夹用 VBS/COM 弹系统进度对话框复制，共用一个进度条。"""
         results = []
         any_ok = False
+        copied_files = 0
+
         for idx, fn in enumerate(folder_names):
             src_folder = os.path.join(src_parent, fn)
             if not os.path.isdir(src_folder):
                 results.append({"name": fn, "ok": False, "message": "000交付 下不存在该文件夹", "index": idx + 1, "total": len(folder_names)})
                 continue
-            ok, msg = self.deliver_delivery_folder(project_name, fn)
+
+            # 更新进度消息
+            with self._lock:
+                task = self._deliver_tasks.get(project_name, {})
+                task["message"] = "回传中 (" + str(idx + 1) + "/" + str(len(folder_names)) + "): " + fn
+
+            self.db.update_project_status(
+                project_name,
+                sync_progress="回传 " + str(copied_files) + "/" + str(total_files) + " — " + fn)
+
+            logger.info("批量交付 [%d/%d]: %s", idx + 1, len(folder_names), fn)
+
+            # 直接调 _copy_dir，不走 deliver_delivery_folder（避免覆盖 batch 的 task 追踪）
+            try:
+                ok, msg = self._copy_dir(src_folder, dst_parent, exclude_patterns=None)
+            except Exception as e:
+                ok, msg = False, str(e)
+
             if ok:
                 any_ok = True
+                # 统计该文件夹的文件数
+                fc, fs = self._count_dir_stats(src_folder)
+                copied_files += fc
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.db.add_delivery_log(
+                    project_name, fn + "/(整个交付文件夹)",
+                    src_folder, os.path.join(dst_parent, fn), fs,
+                    "success", "批量回传成功: " + fn + " (" + str(fc) + " 文件)")
+                with self._lock:
+                    task = self._deliver_tasks.get(project_name, {})
+                    task["current"] = copied_files
+                    task["pct"] = min(round(copied_files / total_files * 100) if total_files > 0 else 0, 99)
+            else:
+                self.db.add_delivery_log(
+                    project_name, fn + "/(整个交付文件夹)",
+                    src_folder, dst_parent, 0,
+                    "error", "回传失败: " + msg)
+                logger.warning("文件夹回传失败: %s — %s", fn, msg)
             results.append({"name": fn, "ok": ok, "message": msg, "index": idx + 1, "total": len(folder_names)})
+
+        # 完成
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._lock:
+            task = self._deliver_tasks.get(project_name, {})
+            task["status"] = "done" if any_ok else "error"
+            task["pct"] = 100 if any_ok else task.get("pct", 0)
+            task["current"] = total_files if any_ok else copied_files
+            task["message"] = "批量回传完成: " + str(len(folder_names)) + " 个文件夹"
+            task["finished_at"] = now
 
         if any_ok:
             self.set_custom_status(project_name, "待质检")
-        return results
+            self.db.update_project_status(
+                project_name,
+                delivery_status="delivered",
+                last_delivered_at=now,
+                sync_progress="批量回传完成 (" + str(len(folder_names)) + " 个文件夹)")
+            self._sse_publish({"type": "deliver", "project": project_name, "status": "done"})
+            self._notify_desktop("✅ 批量交付完成", project_name + " — " + str(len(folder_names)) + " 个文件夹已回传")
+        else:
+            self.db.update_project_status(project_name, sync_progress="批量回传失败")
+            self._sse_publish({"type": "deliver", "project": project_name, "status": "error"})
 
     def deliver_initial_version(self, project_name):
         """把组内 NAS 的 01上映单集版 目录整体推送到制作部 NAS，完成后状态自动变为"审核中"。
@@ -1124,94 +1321,56 @@ class DeliverMixin:
             task = self._deliver_tasks.get(project_name, {})
             task["status"] = "running"
             task["message"] = "正在复制..."
-        proc = None
-        use_com = self._is_desktop_opt("CAN_COM")
+        self.db.update_project_status(project_name, sync_progress="正在复制 000交付 到制作部（请查看系统复制进度对话框）")
         try:
-            if use_com:
-                ok, msg = self._copy_desktop_com(src, dst, timeout=3600)
-                if ok:
-                    with self._lock:
-                        task["current"] = task["total"]
-                        task["pct"] = 100
-                        self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
-                        task["status"] = "done"
-                        task["message"] = "交付完成（系统复制）"
-                        task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    self.db.update_project_status(
-                        project_name,
-                        delivery_status="delivered",
-                        last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        custom_status="已完成",
-                    )
-                    self.db.add_sync_log(
-                        project_name, "一键交付完成", "group->production",
-                        file_path=src, status="success",
-                        message="已交付到: " + dst + "（Shell 系统复制）")
-                    self._notify_desktop("✅ 一键交付完成", project_name + " 已全部推送到制作部")
-                else:
-                    logger.info("一键交付 COM 失败 (%s), fallback robocopy", msg)
-                    raise RuntimeError("COM 复制失败，fallback robocopy: " + msg)
-            else:
-                cmd = ["robocopy", src, dst] + ROBOCOPY_FAST
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # 使用和同步素材完全相同的 _copy_dir 逻辑：
+            # 1. 桌面版优先 pywin32 COM 直调 Shell.Application.CopyHere → 弹系统进度对话框
+            # 2. 失败 fallback 到 VBS + wscript.exe → 同样弹系统进度对话框
+            # 3. 都不可用才 fallback robocopy（无进度兜底）
+            ok, msg = self._copy_dir(src, dst, exclude_patterns=None)
+
+            if ok:
                 with self._lock:
-                    task["proc_pid"] = proc.pid
-                stdout, stderr = proc.communicate(timeout=3600)
-                rc = proc.returncode
-                success = rc < 8
-                if success:
-                    with self._lock:
-                        task["current"] = task["total"]
-                        task["pct"] = 100
-                        self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
-                        task["status"] = "done"
-                        task["message"] = "交付完成"
-                        task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    self.db.update_project_status(
-                        project_name,
-                        delivery_status="delivered",
-                        last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        custom_status="已完成",
-                    )
-                    self.db.add_sync_log(
-                        project_name, "一键交付完成", "group->production",
-                        file_path=src, status="success",
-                        message="已交付到: " + dst + "，robocopy rc=" + str(rc))
-                    self._notify_desktop("✅ 一键交付完成", project_name + " 已全部推送到制作部")
-                else:
-                    err = stderr.decode("gbk", errors="replace")[:500] \
-                        if stderr else "robocopy rc=%d" % rc
-                    with self._lock:
-                        task["status"] = "error"
-                        self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
-                        task["message"] = "交付失败: " + err
-                    self._cleanup_partial_dst(dst)
-                    self.db.add_sync_log(
-                        project_name, "一键交付失败", "group->production",
-                        file_path=src, status="error", message=err)
-                    self._notify_desktop("❌ 一键交付失败", project_name + ": " + err, error=True)
-        except subprocess.TimeoutExpired:
-            if proc:
-                proc.kill()
-                proc.wait()
-            with self._lock:
-                task["status"] = "error"
-                self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
-                task["message"] = "交付超时（超过1小时）"
-            self._cleanup_partial_dst(dst)
-            self._notify_desktop("⚠️ 一键交付超时", project_name, error=True)
+                    task["current"] = task["total"]
+                    task["pct"] = 100
+                    self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
+                    task["status"] = "done"
+                    task["message"] = "交付完成（系统复制）"
+                    task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.db.update_project_status(
+                    project_name,
+                    delivery_status="delivered",
+                    last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    custom_status="待质检",
+                    sync_progress="交付完成（系统复制）",
+                )
+                self.db.add_sync_log(
+                    project_name, "一键交付完成", "group->production",
+                    file_path=src, status="success",
+                    message="已交付到: " + dst + "（" + str(msg) + "）")
+                self._notify_desktop("✅ 一键交付完成", project_name + " 已全部推送到制作部")
+            else:
+                err = str(msg or "未知错误")
+                with self._lock:
+                    task["status"] = "error"
+                    self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
+                    task["message"] = "交付失败: " + err
+                self._cleanup_partial_dst(dst)
+                self.db.update_project_status(project_name, sync_progress="交付失败")
+                self.db.add_sync_log(
+                    project_name, "一键交付失败", "group->production",
+                    file_path=src, status="error", message=err)
+                self._notify_desktop("❌ 一键交付失败", project_name + ": " + err, error=True)
         except Exception as e:
-            if proc:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
             with self._lock:
                 task["status"] = "error"
                 self._sse_publish({"type":"deliver","project":project_name,"status":"error"})
                 task["message"] = "交付异常: " + str(e)
-            if not use_com:
-                self._cleanup_partial_dst(dst)
+            self._cleanup_partial_dst(dst)
+            self.db.update_project_status(project_name, sync_progress="交付异常: " + str(e))
+            self.db.add_sync_log(
+                project_name, "一键交付异常", "group->production",
+                file_path=src, status="error", message=str(e))
             self._notify_desktop("❌ 一键交付异常", project_name + ": " + str(e), error=True)
         finally:
             run_id = task.get("run_id")

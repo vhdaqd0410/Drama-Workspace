@@ -57,16 +57,112 @@ async function deliverFolders(){
   var name = _deliverablesState.projectName;
   var sel = Object.keys(_deliverablesState.selectedFolders||{}).filter(function(k){ return _deliverablesState.selectedFolders[k]; });
   if(sel.length === 0){ toast('请先选择文件夹','warning'); return; }
-  toast('⚡ 文件夹回传已启动 ' + sel.length + ' 个...', 'info');
+
+  // 判断是否勾选了 delivery 模式根目录的虚拟"000交付"文件夹
+  var mode = _deliverablesState.mode || 'revising';
+  var subp = _deliverablesState.subpath || '';
+  var isDeliveryRoot = (mode === 'delivery' && !subp);
+
+  // 在模态框顶部插入进度条
+  var progBarId = 'deliv-folder-prog';
+  var existing = document.getElementById(progBarId);
+  if(existing) existing.remove();
+  var modalWrap = document.querySelector('.deliv-modal-wrap');
+  if(modalWrap){
+    var bar = document.createElement('div');
+    bar.id = progBarId;
+    bar.style.cssText = 'padding:10px 16px;background:#e8f4fd;border-bottom:1px solid #c7e2fb;font-size:12px;display:flex;align-items:center;gap:10px';
+    bar.innerHTML = '<span style="white-space:nowrap">⚡ 文件夹回传</span>'
+      + '<div style="flex:1;height:8px;background:#fff;border-radius:4px;overflow:hidden;border:1px solid #c7e2fb"><div class="deliv-folder-fill" style="width:0%;height:100%;background:linear-gradient(90deg,#2E7D32,#27ae60);transition:width .3s"></div></div>'
+      + '<span class="deliv-folder-text" style="color:#2E7D32;font-weight:600;white-space:nowrap">准备中...</span>';
+    modalWrap.insertBefore(bar, modalWrap.children[1] || modalWrap.firstChild);
+  }
+
+  var toastMsg = isDeliveryRoot
+    ? '⚡ 000交付 全量回传启动：将复制整个 000交付 文件夹到制作部（' + sel.join(', ') + '），请查看系统复制进度窗口...'
+    : '⚡ 文件夹回传已启动 ' + sel.length + ' 个...';
+  toast(toastMsg, 'info');
   try{
-    var mode = _deliverablesState.mode || 'revising';
-  var r = await api('POST', '/api/deliver_folder/' + encodeURIComponent(name), { folder_names: sel, mode: mode });
+    var r = await api('POST', '/api/deliver_folder/' + encodeURIComponent(name), { folder_names: sel, mode: mode });
     toast(r.message || '文件夹回传任务已提交', 'success');
     _deliverablesState.selectedFolders = {};
     _deliverablesState.selected = {};
   }catch(e){
     toast('❌ 文件夹回传失败: ' + e.message, 'error');
+    var barEl = document.getElementById(progBarId);
+    if(barEl){ barEl.style.background = '#fde2e2'; barEl.querySelector('.deliv-folder-text').style.color = '#c5221f'; barEl.querySelector('.deliv-folder-text').textContent = '❌ ' + e.message; }
+    return;
   }
+
+  // 轮询进度（和 deliverBatch 类似，读 sync_progress 字段）
+  var pollCount = 0;
+  var maxPolls = 300; // 最多等 10 分钟
+  var startTs = Date.now();
+  var poll = setInterval(async function(){
+    pollCount++;
+    if(pollCount > maxPolls){
+      clearInterval(poll);
+      var barEl2 = document.getElementById(progBarId);
+      if(barEl2){ barEl2.querySelector('.deliv-folder-text').textContent = '⏱ 超时'; }
+      return;
+    }
+    try{
+      var d = await api('GET', '/api/projects');
+      var flat = (d.production || []).concat(d.group_all || []);
+      var target = flat.find(function(x){ return x.name === name; });
+      if(!target) return;
+
+      var sp = target.sync_progress || '';
+      var pct = 0;
+      var label = sp;
+
+      // 解析 "回传 X/Y 文件" 格式
+      var m = sp.match(/回传\s*(\d+)\s*\/\s*(\d+)/);
+      if(m){
+        var cur = parseInt(m[1]);
+        var tot = parseInt(m[2]);
+        pct = tot > 0 ? Math.round(cur * 100 / tot) : 0;
+        label = cur + ' / ' + tot + ' 文件';
+      }else if(sp.indexOf('正在复制') >= 0){
+        // 整目录复制（系统进度对话框已在显示详细进度），显示 0~100% 的平滑伪进度
+        var elapsedSec = (Date.now() - startTs) / 1000;
+        // 假设最多 60 分钟，log 增长曲线
+        pct = Math.min(95, Math.round(3 + 95 * (1 - Math.exp(-elapsedSec / 240))));
+        label = '📋 正在全量复制（请查看系统复制进度窗口）';
+      }
+
+      // 更新进度条 UI
+      var barFill = document.querySelector('#' + progBarId + ' .deliv-folder-fill');
+      var barText = document.querySelector('#' + progBarId + ' .deliv-folder-text');
+      if(barFill) barFill.style.width = Math.max(2, pct) + '%';
+      if(barText) barText.textContent = label || (pct + '%');
+
+      // 判断完成
+      var st = target.delivery_status || target.sync_status || '';
+      if(sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0){
+        clearInterval(poll);
+        var barEl3 = document.getElementById(progBarId);
+        if(barEl3){
+          barEl3.style.background = '#e2efda';
+          if(barFill) barFill.style.width = '100%';
+          if(barText){ barText.style.color = '#006100'; barText.textContent = '✅ 回传完成'; }
+        }
+        setTimeout(function(){
+          toast('✅ 文件夹回传完成', 'success');
+          refreshDeliverablesList();
+          if(typeof renderDashboard === 'function') renderDashboard();
+        }, 500);
+      } else if(sp.indexOf('失败') >= 0 || sp.indexOf('超时') >= 0 || sp.indexOf('异常') >= 0){
+        clearInterval(poll);
+        var barEl4 = document.getElementById(progBarId);
+        if(barEl4){
+          barEl4.style.background = '#fde2e2';
+          if(barText){ barText.style.color = '#c5221f'; barText.textContent = '❌ ' + (sp || '回传失败'); }
+        }
+      }
+    }catch(err){}
+  }, 2000);
+
   renderDeliverablesModal();
 }
 

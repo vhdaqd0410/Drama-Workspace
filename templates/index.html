@@ -381,6 +381,82 @@ a{color:var(--blue);text-decoration:none}
 
 /* === 打开文件夹按钮组 === */
 .card-open-group { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* ============================================================
+   新版质检 Tab 样式（完全对齐独立视频质检工具 UI）
+   ============================================================ */
+.qa-main{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.qa-card{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:14px 18px}
+.qa-card-title{font-size:15px;font-weight:600;margin-bottom:10px;color:var(--text)}
+.qa-card-title-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.qa-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap}
+.qa-row-checks{gap:16px}
+.qa-label{font-size:13px;color:var(--text-sec);font-weight:500;width:80px;flex-shrink:0}
+.qa-label-wide{width:110px}
+.qa-label-right{width:auto;margin-left:12px;flex-shrink:0}
+.qa-input{padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:#fafafa;outline:none;font-size:13px;flex:1;min-width:0;transition:all .15s}
+.qa-input:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(0,113,227,.12)}
+.qa-input-mono{font-family:Menlo,Consolas,monospace;font-size:12px}
+.qa-input-num{flex:0 0 70px;max-width:70px;text-align:center}
+.qa-check{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--text);cursor:pointer;user-select:none}
+.qa-check input{accent-color:var(--blue);margin:0}
+.qa-btn{padding:6px 14px;font-size:13px}
+.qa-btn-accent{background:var(--blue);color:#fff;border-color:var(--blue)}
+.qa-btn-accent:hover{background:var(--blue-hover);border-color:var(--blue-hover);color:#fff}
+.qa-btn-plain{background:#fafafa;max-width:220px}
+.qa-hardsub-box{flex:1;display:flex;flex-wrap:wrap;gap:14px;padding:6px 8px;border:1px dashed var(--border);border-radius:6px;min-height:34px;align-items:center}
+.qa-info{font-size:13px;padding:4px 8px}
+.qa-info-dim{color:var(--text-sec)}
+.qa-info-ok{background:#dcfce7;color:#166534;border-radius:6px;font-weight:500}
+.qa-info-bad{background:#fee2e2;color:#991b1b;border-radius:6px;font-weight:500}
+
+.qa-btnrow{display:flex;gap:10px;align-items:center;margin-top:2px;flex-wrap:wrap}
+.qa-btn-big{padding:14px 36px;font-size:16px;font-weight:700;border-radius:10px;flex:1;justify-content:center}
+.qa-btn-start{background:linear-gradient(135deg,var(--blue),#5ac8fa)}
+.qa-btn-mid{padding:11px 18px;font-size:13px}
+.qa-export{margin-left:auto;display:flex;gap:8px}
+
+.qa-progress-wrap{margin:6px 0 2px}
+.qa-progress-label{font-size:12px;color:var(--text-sec);margin-bottom:4px}
+.qa-progress-bg{height:6px;background:#e5e5ea;border-radius:3px;overflow:hidden}
+.qa-progress-fill{height:100%;background:linear-gradient(90deg,var(--blue),#5ac8fa);border-radius:3px;transition:width .3s;width:0%}
+
+.qa-logbox{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0;overflow:hidden}
+.qa-log-inner{height:90px;padding:8px 14px;overflow-y:auto;font-family:Menlo,Consolas,monospace;font-size:11.5px;color:var(--text-sec);line-height:1.55}
+.qa-log-inner .log-l:hover{background:#fafafa}
+
+.qa-stats{font-size:12px;color:var(--text-sec)}
+.qa-stats b{font-weight:600;color:var(--text)}
+
+.qa-tablewrap{max-height:480px;overflow:auto;border-radius:8px;border:1px solid var(--border)}
+.qa-tree{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.qa-tree thead th{position:sticky;top:0;background:#f3f4f6;color:var(--text);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px;z-index:1}
+.qa-tree td{padding:8px 12px;border-bottom:1px solid #f0f2f5;color:var(--text);vertical-align:top}
+.qa-tree tbody tr:last-child td{border-bottom:none}
+.qa-tree tr.qa-pass td{background:#f0fdf4}
+.qa-tree tr.qa-warn td{background:#fffbeb}
+.qa-tree tr.qa-fail td{background:#fef2f2}
+.qa-tree td.center{text-align:center}
+.qa-tree .video-name{font-weight:600;font-family:Menlo,Consolas,monospace}
+.qa-tree .hs-badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11.5px;margin:1px 4px 1px 0;background:#f3f4f6;color:var(--text)}
+.qa-tree .hs-badge.ok{background:#dcfce7;color:#166534;font-weight:600}
+.qa-tree .hs-badge.bad{background:#fee2e2;color:#991b1b;font-weight:700}
+.qa-tree .bf-n{text-align:center;font-weight:600}
+.qa-tree .st{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11.5px;font-weight:600}
+.qa-tree .st.ok{background:#d1fae5;color:#065f46}
+.qa-tree .st.wn{background:#fef3c7;color:#92400e}
+.qa-tree .st.bd{background:#fee2e2;color:#991b1b}
+.qa-tree .dtl{color:var(--text-sec);font-size:12.5px;line-height:1.55;max-width:480px}
+
+.qa-canvaswrap{max-height:66vh;overflow:auto;background:#000;border-radius:6px;padding:8px;display:flex;align-items:center;justify-content:center}
+#qa2Canvas{background:#000;display:block;cursor:crosshair;border-radius:4px}
+.qa-tip{font-size:12.5px;color:var(--text-sec);line-height:1.6}
+.qa-coord-label{font-family:Menlo,Consolas,monospace;font-size:12.5px;color:var(--text-sec);padding:4px 8px;background:#fafafa;border-radius:6px}
+.qa-browse-item{padding:10px 12px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;transition:all .15s;display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.qa-browse-item:hover{border-color:var(--primary);background:#eff6ff}
+.qa-browse-name{font-weight:600;font-size:14px}
+.qa-browse-path{display:block;width:100%;font-size:11px;color:var(--text-sec);font-family:Menlo,Consolas,monospace;margin-top:2px}
+.qa-passfail-row{display:flex;align-items:center}
 </style>
 <style>
 .card-title-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
@@ -564,43 +640,175 @@ a{color:var(--blue);text-decoration:none}
   </div>
 </div>
 <div class="tab-panel" id="tab-qa">
-  <div class="qa-layout">
-    <div class="panel">
-      <h3>🔍 质检配置</h3>
-      <div class="form-group"><label>📁 项目</label><select id="qaProject" onchange="qaOnProjectChange()"><option value="">— 选择项目 —</option></select></div>
-      <div class="form-group"><label>📂 项目路径</label><input type="text" id="qaPath" placeholder="自动读取..."></div>
-      <div class="form-group"><label>⚡ Workers</label><input type="number" id="qaWorkers" value="4" min="1" max="16"></div>
-      <div style="display:flex;gap:10px;margin-top:14px">
-        <button class="btn btn-primary" id="qaStartBtn" onclick="qaStart()" style="flex:1">▶ 开始质检</button>
-        <button class="btn btn-danger" id="qaCancelBtn" onclick="qaCancel()" style="display:none;flex:1">✕ 取消</button>
+  <div class="qa-main">
+
+    <!-- ============ 卡片 1：项目设置 ============ -->
+    <div class="qa-card">
+      <div class="qa-card-title">📁 项目设置</div>
+      <div class="qa-row">
+        <label class="qa-label">项目目录</label>
+        <input type="text" id="qa2Dir" class="qa-input qa-input-mono"
+               placeholder="粘贴或选择项目根目录（含成片/无字幕版等子文件夹）">
+        <button class="btn btn-sm qa-btn" onclick="qa2BrowseDir()">浏览</button>
+        <select id="qa2Recent" class="btn btn-sm qa-btn qa-btn-plain"
+                style="max-width:200px" onchange="qa2PickRecent(this)" title="最近访问的目录">
+          <option value="">最近目录</option>
+        </select>
       </div>
-      <div class="progress-wrap">
-        <div class="progress-bar"><div class="progress-fill" id="qaProgressFill" style="width:0%"></div></div>
-        <div class="progress-text"><span id="qaProgressPct">0%</span><span id="qaProgressLabel">—</span></div>
+      <div class="qa-row">
+        <label class="qa-label">项目名称</label>
+        <input type="text" id="qa2ProjectName" class="qa-input" placeholder="选择目录后自动填充，可修改">
+        <label class="qa-label qa-label-right" for="qa2Workers">线程</label>
+        <input type="number" id="qa2Workers" min="1" max="16" value="4" class="qa-input qa-input-num">
       </div>
-      <div id="qaCounter" style="font-size:13px;color:var(--text-sec);text-align:center"></div>
-      <div style="margin-top:18px">
-        <div style="font-size:12px;font-weight:600;color:var(--text-sec);margin-bottom:8px">📜 历史质检</div>
-        <div id="qaHistory" style="max-height:200px;overflow-y:auto"></div>
+      <div class="qa-row qa-row-checks">
+        <label class="qa-label">检测项</label>
+        <label class="qa-check"><input type="checkbox" id="qa2OptFile" checked><span>📄 文件校验</span></label>
+        <label class="qa-check"><input type="checkbox" id="qa2OptBlack" checked><span>🖤 结尾黑帧</span></label>
+        <label class="qa-check"><input type="checkbox" id="qa2OptHard" checked><span>📝 硬字幕</span></label>
+        <label class="qa-check"><input type="checkbox" id="qa2OptDur" checked><span>⏱ 时长一致</span></label>
       </div>
     </div>
-    <div class="panel">
-      <h3>📊 质检结果</h3>
-      <div class="qa-summary">
-        <div class="qa-sum-card total"><div class="num" id="qaNumTotal">-</div><div class="lbl">总视频</div></div>
-        <div class="qa-sum-card passed"><div class="num" id="qaNumPassed">-</div><div class="lbl">通过</div></div>
-        <div class="qa-sum-card warn"><div class="num" id="qaNumWarn">-</div><div class="lbl">警告</div></div>
-        <div class="qa-sum-card failed"><div class="num" id="qaNumFailed">-</div><div class="lbl">失败</div></div>
+
+    <!-- ============ 卡片 2：文件夹映射 ============ -->
+    <div class="qa-card">
+      <div class="qa-card-title">🗂 文件夹映射 <span style="font-weight:400;font-size:12px;color:var(--text-sec)">（选择目录后自动填充，可手动调整）</span></div>
+      <div class="qa-row">
+        <label class="qa-label qa-label-wide">成片</label>
+        <select id="qa2CpFolder" class="qa-input"></select>
       </div>
-      <div style="overflow:auto;max-height:calc(100vh - 320px)">
-        <table class="issue-table" id="qaIssueTable">
-          <thead><tr><th style="width:35%">视频</th><th style="width:15%">状态</th><th>详情</th></tr></thead>
-          <tbody id="qaIssueBody"><tr><td colspan="3" style="text-align:center;color:var(--text-sec);padding:30px">暂无数据，开始质检后将实时更新</td></tr></tbody>
+      <div class="qa-row">
+        <label class="qa-label qa-label-wide">硬字幕版本</label>
+        <div id="qa2HardSubContainer" class="qa-hardsub-box">
+          <span style="color:var(--text-sec);font-size:13px">（选择目录后自动填充）</span>
+        </div>
+      </div>
+      <div class="qa-row">
+        <label class="qa-label qa-label-wide">字幕文件</label>
+        <span id="qa2SrtLabel" class="qa-info qa-info-dim">—</span>
+      </div>
+      <div class="qa-row">
+        <label class="qa-label qa-label-wide">文件校验</label>
+        <span id="qa2FileLabel" class="qa-info qa-info-dim">—</span>
+      </div>
+      <div class="qa-row" style="margin-top:8px">
+        <label class="qa-label qa-label-wide">字幕区域</label>
+        <span id="qa2SubRegionLabel" class="qa-info qa-info-dim"
+              style="flex:1">未框选（使用默认比例 68%~83%）</span>
+        <button class="btn btn-sm qa-btn" id="qa2SubRegionClear"
+                onclick="qa2ClearSubRegion()" style="display:none">清除</button>
+        <button class="btn btn-sm qa-btn qa-btn-accent" onclick="qa2OpenSubPicker()">
+          框选字幕区域
+        </button>
+      </div>
+    </div>
+
+    <!-- ============ 操作按钮行 ============ -->
+    <div class="qa-btnrow">
+      <button class="btn btn-primary qa-btn-big qa-btn-start" id="qa2StartBtn"
+              onclick="qa2Start()">▶  开始检测</button>
+      <button class="btn qa-btn-mid" id="qa2CancelBtn" onclick="qa2Cancel()" style="display:none">取消</button>
+      <button class="btn qa-btn-mid" onclick="qa2ClearCache()">清除缓存</button>
+      <div class="qa-export">
+        <button class="btn qa-btn-mid" id="qa2HtmlBtn" onclick="qa2ExportHtml()" disabled>HTML 报告</button>
+        <button class="btn qa-btn-mid" id="qa2JsonBtn" onclick="qa2ExportJson()" disabled>JSON 数据</button>
+      </div>
+    </div>
+
+    <!-- ============ 进度条 + 文字 ============ -->
+    <div class="qa-progress-wrap">
+      <div class="qa-progress-label" id="qa2ProgressLabel">就绪</div>
+      <div class="qa-progress-bg">
+        <div class="qa-progress-fill" id="qa2ProgressFill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- ============ 日志窗口 ============ -->
+    <div class="qa-logbox">
+      <div id="qa2Log" class="qa-log-inner"></div>
+    </div>
+
+    <!-- ============ 结果卡片 ============ -->
+    <div class="qa-card" id="qa2ResultBox">
+      <div class="qa-card-title-row">
+        <div class="qa-card-title">📋 检测结果</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div id="qa2Stats" class="qa-stats"></div>
+          <div class="qa-passfail-row" id="qa2PassFailRow" style="display:none;gap:8px">
+            <button class="btn btn-sm" style="background:#2E7D32;color:#fff;font-weight:600;padding:6px 16px"
+                    onclick="qa2PassToDelivery()">✅ 通过 → 回传</button>
+            <button class="btn btn-sm" style="background:#c5221f;color:#fff;font-weight:600;padding:6px 16px"
+                    onclick="qa2FailToRevising()">❌ 失败 → 修改</button>
+          </div>
+        </div>
+      </div>
+      <div class="qa-tablewrap">
+        <table class="qa-tree" id="qa2Tree">
+          <thead>
+            <tr>
+              <th style="width:11%;text-align:center">视频</th>
+              <th style="width:10%;text-align:center">黑帧</th>
+              <th style="min-width:200px">硬字幕</th>
+              <th style="width:11%;text-align:center">状态</th>
+              <th style="width:9%;text-align:center">耗时</th>
+              <th>详情</th>
+            </tr>
+          </thead>
+          <tbody id="qa2TreeBody">
+            <tr><td colspan="6" style="text-align:center;color:var(--text-sec);padding:32px">
+              选择项目目录并点击「开始检测」
+            </td></tr>
+          </tbody>
         </table>
       </div>
     </div>
   </div>
 </div>
+
+<!-- 字幕区域框选 Modal（Web 版 SubRegionPicker） -->
+<div class="modal-overlay" id="qa2SubModal">
+  <div class="modal" style="width:960px;max-width:95vw">
+    <div class="modal-head">
+      <h3>框选字幕区域 — 鼠标拖拽框出字幕位置</h3>
+      <span class="modal-close" onclick="qa2CloseSubPicker()">×</span>
+    </div>
+    <div class="modal-body" style="padding:12px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="qa-tip">
+          ① 在画面上按住鼠标左键拖出矩形框住字幕区域<br>
+          ② 可重复拖拽，新框替换旧框 &nbsp; ③ 点「确认」保存
+        </div>
+        <div>
+          <button class="btn" onclick="qa2CloseSubPicker()">取消</button>
+          <button class="btn btn-primary" onclick="qa2ConfirmSubRegion()">✓ 确认</button>
+        </div>
+      </div>
+      <div id="qa2SubCoord" class="qa-coord-label">未框选（字幕区域将用于所有版本的硬字幕检测）</div>
+      <div style="height:1px;background:var(--border);margin:6px 0 10px"></div>
+      <div class="qa-canvaswrap" id="qa2CanvasWrap">
+        <canvas id="qa2Canvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 浏览目录选择 Modal -->
+<div class="modal-overlay" id="qa2BrowseModal">
+  <div class="modal" style="width:680px;max-width:95vh">
+    <div class="modal-head">
+      <h3>📁 选择项目目录</h3>
+      <span class="modal-close" onclick="qa2CloseBrowse()">×</span>
+    </div>
+    <div class="modal-body" style="padding:12px 16px">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="btn btn-sm qa-btn qa-btn-accent" onclick="qa2LoadBrowseDirs('group')">组内NAS</button>
+        <button class="btn btn-sm qa-btn" onclick="qa2LoadBrowseDirs('production')">制作部NAS</button>
+      </div>
+      <div id="qa2BrowseList" style="max-height:60vh;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
 <div class="tab-panel" id="tab-activity">
     <div id="activityContent">加载中...</div>
   </div>
@@ -699,20 +907,20 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260815d"></script>
-<script src="/static/js/project.js?v=20260815d"></script>
-<script src="/static/js/tabs.js?v=20260815d"></script>
-<script src="/static/js/episode.js?v=20260815d"></script>
-<script src="/static/js/fenji-init.js?v=20260815d"></script>
-<script src="/static/js/fenji-assign.js?v=20260815d"></script>
-<script src="/static/js/qa.js?v=20260815d"></script>
-<script src="/static/js/team.js?v=20260815d"></script>
-<script src="/static/js/deliverables.js?v=20260815d"></script>
-<script src="/static/js/deliver-events.js?v=20260815d"></script>
-<script src="/static/js/deliver-batch.js?v=20260815d"></script>
-<script src="/static/js/preview.js?v=20260815d"></script>
-<script src="/static/js/deliver-patch.js?v=20260815d"></script>
-<script src="/static/js/app.js?v=20260815d"></script>
+<script src="/static/js/core.js?v=20260815m"></script>
+<script src="/static/js/project.js?v=20260815m"></script>
+<script src="/static/js/tabs.js?v=20260815m"></script>
+<script src="/static/js/episode.js?v=20260815m"></script>
+<script src="/static/js/fenji-init.js?v=20260815m"></script>
+<script src="/static/js/fenji-assign.js?v=20260815m"></script>
+<script src="/static/js/qa.js?v=20260815m"></script>
+<script src="/static/js/team.js?v=20260815m"></script>
+<script src="/static/js/deliverables.js?v=20260815m"></script>
+<script src="/static/js/deliver-events.js?v=20260815m"></script>
+<script src="/static/js/deliver-batch.js?v=20260815m"></script>
+<script src="/static/js/preview.js?v=20260815m"></script>
+<script src="/static/js/deliver-patch.js?v=20260815m"></script>
+<script src="/static/js/app.js?v=20260815m"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};
 if(window.__IS_DESKTOP__){

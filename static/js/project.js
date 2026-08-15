@@ -213,7 +213,26 @@ async function openFenmiaozhen(name){
 }
 
 async function openFenjiFor(name){switchTab('fenji');await loadFenjiProjects();$('fjProject').value=name;readFromProject()}
-async function qaStartFor(name){switchTab('qa');await loadQAProjects();$('qaProject').value=name;qaStart()}
+async function qaStartFor(name){
+  switchTab('qa');
+  // 调用后端获取项目目录（优先 000交付 文件夹）
+  try {
+    var d = await api('GET', '/api/qa/project_dir?name=' + encodeURIComponent(name));
+    if (d && d.ok && d.project_path) {
+      // 自动填入目录并触发扫描
+      qa2SetDir(d.project_path);
+      // 项目名称自动填
+      if (d.project_name) $('qa2ProjectName').value = d.project_name;
+      if (d.source === 'delivery') {
+        toast('已自动定位到 000交付 文件夹', 'success');
+      }
+    } else {
+      toast(d && d.message ? d.message : '未找到项目目录，请手动选择', 'warning');
+    }
+  } catch(e) {
+    toast('获取项目目录失败: ' + e.message, 'error');
+  }
+}
 async function editFenmiaozhenLink(name){
   const enc = encodeURIComponent(name);
   try {
@@ -238,7 +257,8 @@ async function editFenmiaozhenLink(name){
 function updateLightLists(){
   const fj=$('fjProject'),qa=$('qaProject');
   const opts='<option value="">— 选择项目 —</option>'+projects.map(p=>`<option value="${p.name}">${p.name}</option>`).join('');
-  fj.innerHTML=opts;qa.innerHTML=opts;
+  if(fj)fj.innerHTML=opts;
+  if(qa)qa.innerHTML=opts;
 }
 
 /* ============ Project Detail Modal ============ */

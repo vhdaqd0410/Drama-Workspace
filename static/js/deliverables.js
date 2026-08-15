@@ -282,7 +282,7 @@ function renderDeliverablesModal(){
       + (_deliverablesState.folders.length > 0 ? (function(){
           var _m = _deliverablesState.mode;
           var selFolders = _deliverablesState.selectedFolders || {};
-          var _sp = _deliverablesState.subpath || ''; var _spDeep = _sp.includes('\\') || _sp.includes('/'); var folderSelectable = ((_m === 'revising' && !_sp) || (_m === 'delivery' && _sp && !_spDeep));
+          var _sp = _deliverablesState.subpath || ''; var _spDeep = _sp.includes('\\') || _sp.includes('/'); var folderSelectable = ((_m === 'revising' && !_sp) || (_m === 'delivery' && !_spDeep));
           var allFoldersSel = folderSelectable && _deliverablesState.folders.length > 0 && _deliverablesState.folders.every(function(f){ return selFolders[f.name]; });
           var folderRows = _deliverablesState.folders.map(function(f){
             var checked = selFolders[f.name] ? 'checked' : '';
