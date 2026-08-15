@@ -12,13 +12,19 @@ async function loadConfig(){
   // 加载快捷键配置
   try{
     const d = await api('GET', '/api/settings');
-    if(d && d.ok && d.settings && d.settings.search_shortcut){
-      const sel = document.getElementById('cfgSearchShortcut');
-      if(sel) sel.value = d.settings.search_shortcut;
-    }
-    if(d && d.ok && d.settings && d.settings.wakeup_shortcut){
-      const sel2 = document.getElementById('cfgWakeupShortcut');
-      if(sel2) sel2.value = d.settings.wakeup_shortcut;
+    if(d && d.ok && d.settings){
+      if(d.settings.search_shortcut){
+        const sel = document.getElementById('cfgSearchShortcut');
+        if(sel) sel.value = d.settings.search_shortcut;
+      }
+      if(d.settings.wakeup_shortcut){
+        const sel2 = document.getElementById('cfgWakeupShortcut');
+        if(sel2) sel2.value = d.settings.wakeup_shortcut;
+      }
+      if(d.settings.global_search_shortcut){
+        const sel3 = document.getElementById('cfgGlobalSearchShortcut');
+        if(sel3) sel3.value = d.settings.global_search_shortcut;
+      }
     }
   }catch(_){}
 }
@@ -50,6 +56,15 @@ async function saveWakeupShortcut(){
   try{
     await api('PUT', '/api/settings', { wakeup_shortcut: val });
     toast('⚡ 全局唤醒快捷键已保存' + (val ? ': ' + val : '（默认自动选择）') + '，重启软件生效', 'info');
+  }catch(e){ toast('保存失败: '+e.message,'error'); }
+}
+async function saveGlobalSearchShortcut(){
+  const sel = document.getElementById('cfgGlobalSearchShortcut');
+  if(!sel) return;
+  const val = sel.value;
+  try{
+    await api('PUT', '/api/settings', { global_search_shortcut: val });
+    toast('🌐 全局搜索快捷键已保存' + (val ? ': ' + val : '（默认 Ctrl+Alt+S）') + '，重启软件生效', 'info');
   }catch(e){ toast('保存失败: '+e.message,'error'); }
 }
 async function migrateOld(){

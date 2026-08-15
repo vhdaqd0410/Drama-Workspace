@@ -47,6 +47,13 @@ a{color:var(--blue);text-decoration:none}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
 .card{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:18px;transition:box-shadow .2s}
 .card:hover{box-shadow:var(--shadow-lg)}
+/* 搜索结果定位高亮动画 */
+@keyframes searchHighlightPulse{
+  0%{box-shadow:0 0 0 0 rgba(255,149,0,.7)}
+  50%{box-shadow:0 0 0 10px rgba(255,149,0,0);background:#fff8e1}
+  100%{box-shadow:0 0 0 0 rgba(255,149,0,0)}
+}
+.card.search-highlight{animation:searchHighlightPulse 1.2s ease 2;border:2px solid #ff9500;background:#fff8e1}
 .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .card-title{font-size:15px;font-weight:600;flex:1;min-width:0;display:flex;align-items:center;gap:2px}
 .badge{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
@@ -837,7 +844,21 @@ a{color:var(--blue);text-decoration:none}
     </div>
     <div class="panel settings-section"><h3>⚡ 快捷键设置</h3>
       <div class="form-group">
-        <label>全局搜索项目</label>
+        <label>🌐 全局搜索项目</label>
+        <select id="cfgGlobalSearchShortcut" onchange="saveGlobalSearchShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
+          <option value="">Ctrl+Alt+S（默认）</option>
+          <option value="ctrl+alt+s">Ctrl+Alt+S</option>
+          <option value="ctrl+shift+s">Ctrl+Shift+S</option>
+          <option value="ctrl+alt+p">Ctrl+Alt+P</option>
+          <option value="ctrl+shift+p">Ctrl+Shift+P</option>
+          <option value="alt+f">Alt+F</option>
+          <option value="ctrl+shift+f">Ctrl+Shift+F</option>
+          <option value="ctrl+alt+g">Ctrl+Alt+G</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">软件在后台时，从任意程序按此快捷键可唤起搜索框。⚠️ 修改后需重启软件生效。</div>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label>📄 页面内搜索</label>
         <select id="cfgSearchShortcut" onchange="saveShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
           <option value="">Ctrl+K / Ctrl+F（默认）</option>
           <option value="ctrl+space">Ctrl+Space</option>
@@ -846,10 +867,10 @@ a{color:var(--blue);text-decoration:none}
           <option value="ctrl+e">Ctrl+E</option>
           <option value="ctrl+p">Ctrl+P</option>
         </select>
-        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">选择后立即生效，支持模糊搜索</div>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">软件窗口内搜索，选择后立即生效，支持模糊搜索</div>
       </div>
       <div class="form-group" style="margin-top:12px">
-        <label>全局唤醒窗口</label>
+        <label>🪟 全局唤醒窗口</label>
         <select id="cfgWakeupShortcut" onchange="saveWakeupShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
           <option value="">默认（自动选择）</option>
           <option value="ctrl+shift+b">Ctrl+Shift+B</option>
@@ -944,14 +965,14 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260815i"></script>
+<script src="/static/js/core.js?v=20260815j"></script>
 <script src="/static/js/project.js?v=20260815r"></script>
 <script src="/static/js/tabs.js?v=20260815n"></script>
 <script src="/static/js/episode.js?v=20260815s"></script>
 <script src="/static/js/fenji-init.js?v=20260815n"></script>
 <script src="/static/js/fenji-assign.js?v=20260815n"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
-<script src="/static/js/team.js?v=20260815o"></script>
+<script src="/static/js/team.js?v=20260815p"></script>
 <script src="/static/js/deliverables.js?v=20260815m"></script>
 <script src="/static/js/deliver-events.js?v=20260815n"></script>
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>

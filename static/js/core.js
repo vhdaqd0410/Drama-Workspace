@@ -52,6 +52,11 @@ function initDesktopSSE(){
             toast('❌ '+payload.project+' 回传失败','error');
           }
           _scheduleSseRefresh();
+        } else if(payload.type==='search'){
+          // 全局搜索热键按下 → 打开搜索框
+          if(typeof openSearchModal === 'function'){
+            setTimeout(function(){ openSearchModal(); }, 120);
+          }
         }
       }catch(_){}
     };
@@ -229,9 +234,41 @@ function jumpToProjectItem(el){
   jumpToProject(name);
 }
 function jumpToProject(name){
-  if(typeof openProjectDetail === 'function'){
-    openProjectDetail(name);
-  }
+  // 切到 dashboard tab
+  try{ switchTab('dashboard'); }catch(_){}
+  // 清除所有筛选，确保卡片可见
+  try{
+    if($('globalSearch'))$('globalSearch').value='';
+    if($('filterDept'))$('filterDept').value='';
+    if($('filterStatus'))$('filterStatus').value='';
+    if($('filterMonth'))$('filterMonth').value='';
+  }catch(_){}
+  // 重新渲染确保卡片存在
+  try{ renderDashboard(); }catch(_){}
+
+  setTimeout(function(){
+    // 定位项目卡片：通过卡片标题查找
+    var cards = document.querySelectorAll('.card');
+    var target = null;
+    for(var i=0;i<cards.length;i++){
+      var tn = cards[i].querySelector('.card-title-name');
+      if(tn && (tn.getAttribute('title') === name || tn.textContent === name)){
+        target = cards[i];
+        break;
+      }
+    }
+    if(!target){
+      toast('未找到项目卡片（可能需展开分组）', 'info');
+      return;
+    }
+    // 滚动到卡片
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // 高亮动画
+    target.classList.add('search-highlight');
+    // 移除旧的高亮（清理）
+    document.querySelectorAll('.card.search-highlight').forEach(function(c){ if(c!==target) c.classList.remove('search-highlight'); });
+    setTimeout(function(){ target.classList.remove('search-highlight'); }, 3000);
+  }, 300);
 }
 
 

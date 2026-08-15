@@ -353,7 +353,6 @@ def _trigger_api(action):
 _MOD_ALT = 0x0001
 _MOD_CTRL = 0x0002
 _MOD_SHIFT = 0x0004
-_HOTKEY_ID = 0x5E11   # 自定义热键 ID
 
 # 键名 → 虚拟键码（覆盖常用键）
 _VK_MAP = {
@@ -410,8 +409,8 @@ def _parse_hotkey_str(s):
     return (label, mod, vk)
 
 
-def _read_wakeup_shortcut():
-    """从数据库读取用户配置的全局唤醒快捷键。"""
+def _read_shortcut(setting_key):
+    """从数据库读取用户配置的快捷键。"""
     try:
         import sqlite3 as _sq
         _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -419,7 +418,7 @@ def _read_wakeup_shortcut():
         conn = _sq.connect(_db_path, timeout=3)
         try:
             row = conn.execute(
-                "SELECT value FROM app_settings WHERE key='wakeup_shortcut'"
+                "SELECT value FROM app_settings WHERE key=?", (setting_key,)
             ).fetchone()
             return row[0] if row else ''
         finally:
@@ -428,34 +427,50 @@ def _read_wakeup_shortcut():
         return ''
 
 
+def _register_one_hotkey(user32, hotkey_id, cfg_key, candidates, what):
+    """注册一个全局热键。返回 (label, mod, vk) 或 None。"""
+    user_cfg = _read_shortcut(cfg_key)
+    parsed = _parse_hotkey_str(user_cfg)
+    lst = [parsed] if parsed else candidates
+    for label, mod, vk in lst:
+        if user32.RegisterHotKey(None, hotkey_id, mod, vk):
+            return (label, mod, vk)
+    return None
+
+
 def _run_global_hotkey():
-    """后台线程：注册系统级全局热键，按下列唤回主窗口。"""
+    """后台线程：注册两个系统级全局热键（唤醒窗口 + 全局搜索）。"""
     try:
         import ctypes
         from ctypes import wintypes
         user32 = ctypes.windll.user32
 
-        # 优先用用户配置的快捷键；否则用默认候选列表
-        user_cfg = _read_wakeup_shortcut()
-        parsed = _parse_hotkey_str(user_cfg)
+        # 热键 ID
+        HOTKEY_ID_WAKE = 0x5E11
+        HOTKEY_ID_SEARCH = 0x5E12
 
-        candidates = []
-        if parsed:
-            candidates = [parsed]
+        # 全局唤醒热键（配置 wakeup_shortcut，否则默认候选）
+        wake = _register_one_hotkey(user32, HOTKEY_ID_WAKE, 'wakeup_shortcut',
+                                    _HOTKEY_CANDIDATES, '唤醒窗口')
+        if wake:
+            print(f"[hotkey] 全局唤醒热键已注册: {wake[0]}")
         else:
-            candidates = _HOTKEY_CANDIDATES
+            print("[hotkey] 全局唤醒热键注册失败（可能被占用）")
 
-        registered = None
-        for label, mod, vk in candidates:
-            if user32.RegisterHotKey(None, _HOTKEY_ID, mod, vk):
-                registered = (label, mod, vk)
-                break
-        if registered is None:
-            print("[hotkey] 全局热键注册失败（可能被其他程序占用）")
-            return
-
-        label, mod, vk = registered
-        print(f"[hotkey] 全局热键已注册: {label}")
+        # 全局搜索热键（配置 global_search_shortcut，否则默认 Ctrl+Alt+S）
+        search_candidates = [
+            ("Ctrl+Alt+S", _MOD_ALT | _MOD_CTRL, 0x53),   # S
+            ("Ctrl+Shift+S", _MOD_CTRL | _MOD_SHIFT, 0x53),
+            ("Ctrl+Alt+P", _MOD_ALT | _MOD_CTRL, 0x50),   # P
+            ("Ctrl+Shift+P", _MOD_CTRL | _MOD_SHIFT, 0x50),
+            ("Alt+F", _MOD_ALT, 0x46),                     # F
+        ]
+        search = _register_one_hotkey(user32, HOTKEY_ID_SEARCH, 'global_search_shortcut',
+                                      search_candidates, '全局搜索')
+        if search:
+            print(f"[hotkey] 全局搜索热键已注册: {search[0]}")
+        else:
+            print("[hotkey] 全局搜索热键注册失败（可能被占用）")
 
         # 最小消息循环，等待 WM_HOTKEY
         msg = wintypes.MSG()
@@ -464,17 +479,45 @@ def _run_global_hotkey():
             ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
             if ret <= 0:
                 break
-            if msg.message == WM_HOTKEY and msg.wParam == _HOTKEY_ID:
-                print(f"[hotkey] {label} 按下，唤回窗口")
-                try:
-                    _show_window()
-                    _update_tray_label()
-                except Exception:
-                    pass
+            if msg.message == WM_HOTKEY:
+                hwnd = msg.hwnd
+                wparam = msg.wParam
+                if wparam == HOTKEY_ID_WAKE and wake:
+                    print(f"[hotkey] {wake[0]} 按下，唤回窗口")
+                    try:
+                        _show_window()
+                        _update_tray_label()
+                    except Exception:
+                        pass
+                elif wparam == HOTKEY_ID_SEARCH and search:
+                    print(f"[hotkey] {search[0]} 按下，唤起全局搜索")
+                    try:
+                        _trigger_global_search()
+                    except Exception:
+                        pass
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
     except Exception as e:
         print(f"[hotkey] 全局热键线程异常: {e}")
+
+
+def _trigger_global_search():
+    """按下全局搜索热键：确保窗口显示，并通知前端打开搜索框。"""
+    try:
+        # 先确保窗口显示（后台/托盘时唤回）
+        try:
+            _show_window()
+            _update_tray_label()
+        except Exception:
+            pass
+        # 通过 HTTP 调用后端接口，发布 SSE 事件给前端
+        import urllib.request
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{_SERVER_PORT}/api/_self/global_search",
+            method="POST")
+        urllib.request.urlopen(req, timeout=3)
+    except Exception as e:
+        print(f"[hotkey] 触发全局搜索失败: {e}")
 
 
 # ============================================================
@@ -520,6 +563,28 @@ def _register_quit_api(flask_app):
         print("👋 /api/quit 被调用")
         threading.Thread(target=_do_quit, daemon=True).start()
         return jsonify({"ok": True})
+
+    # 全局搜索热键触发接口：发布 SSE search 事件，前端收到后打开搜索框
+    @flask_app.route("/api/_self/global_search", methods=["POST"])
+    def _api_global_search():
+        try:
+            from flask import jsonify
+            # 先确保窗口显示（后台/托盘时唤回）
+            try:
+                _show_window()
+                _update_tray_label()
+            except Exception:
+                pass
+            # 发布 SSE 事件，通知前端打开搜索框
+            try:
+                from backend.sync_engine import SyncEngine
+                from backend.app import sync_engine
+                sync_engine._sse_publish({"type": "search"})
+            except Exception:
+                pass
+            return jsonify({"ok": True})
+        except Exception:
+            return '{"ok":true}', 200
 
 
 # ============================================================
