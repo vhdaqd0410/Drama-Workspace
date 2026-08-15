@@ -848,17 +848,24 @@ function naturalCmp(a, b) {
 }
 
 // ---------- 导出 HTML / JSON ----------
+// window.open 打开的 URL 不走 fetch 拦截器，需手动补 API key，否则被 /api 鉴权拦截
+function _qaApiUrl(path){
+  var key = window.__API_KEY__ || '';
+  if(!key) return path;
+  var sep = path.indexOf('?') >= 0 ? '&' : '?';
+  return path + sep + 'key=' + encodeURIComponent(key);
+}
 function qa2ExportHtml(silent) {
     var projectName = qa2State.tmpProjectName;
     if (!projectName) { if (!silent) toast('暂无可导出的报告', 'warning'); return; }
     // 自动打开：用 dl=0 让浏览器内联显示（HTML 页面）；手动点击下载用 dl=1 强制下载
     var dl = silent ? '0' : '1';
-    window.open('/api/project/' + encodeURIComponent(projectName) + '/qa_report?fmt=html&dl=' + dl, '_blank');
+    window.open(_qaApiUrl('/api/project/' + encodeURIComponent(projectName) + '/qa_report?fmt=html&dl=' + dl), '_blank');
 }
 function qa2ExportJson() {
     var projectName = qa2State.tmpProjectName;
     if (!projectName) { toast('暂无可导出的数据', 'warning'); return; }
-    window.open('/api/project/' + encodeURIComponent(projectName) + '/qa_report?fmt=json&dl=1', '_blank');
+    window.open(_qaApiUrl('/api/project/' + encodeURIComponent(projectName) + '/qa_report?fmt=json&dl=1'), '_blank');
 }
 
 // ---------- 质检通过 → 跳转交付回传 ----------
