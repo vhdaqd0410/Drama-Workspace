@@ -102,7 +102,13 @@ async function onStatusChange(pname, sel){
       sel.className = 'badge editable-badge ' + newCls;
       sel.disabled = (newStatus === '已完成') ? true : false;
       sel.title = '点击修改项目状态';
-      // 同步更新内存中的状态值，然后重渲染（自动排序）
+      // 改成"已完成"时，后端会把项目移动到 00已完成 目录并归入已完成分组，
+      // 前端必须重新拉取全量数据才能让项目出现在"已完成"分组（而不是停留在原分组）
+      if(newStatus === '已完成'){
+        await loadProjects();
+        return;
+      }
+      // 其它状态：同步更新内存中的状态值，然后重渲染（自动排序）
       const target = (projects||[]).find(x => x.name === pname);
       if(target) target.custom_status = newStatus;
       (allSections||[]).forEach(sec => (sec.projects||[]).forEach(p => { if(p.name===pname) p.custom_status=newStatus; }));
