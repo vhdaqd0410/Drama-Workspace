@@ -38,6 +38,60 @@ function fjClearAll(){
   $('fjStats').innerHTML = '';
   fjSaveSession();
 }
+
+// ===== 人员模板（勾选人员保存为模板，下拉复用）=====
+let fjPersonTemplates = {};   // { "模板名": ["人员1", ...] }
+async function fjLoadPersonTemplates(){
+  try{
+    const d = await api('GET', '/api/fenji/person_templates');
+    if(d && d.ok && d.templates) fjPersonTemplates = d.templates || {};
+    fjRenderPersonTplSelect();
+  }catch(_){ fjPersonTemplates = {}; }
+}
+function fjRenderPersonTplSelect(){
+  const sel = $('fjPersonTplSelect');
+  if(!sel) return;
+  const names = Object.keys(fjPersonTemplates);
+  sel.innerHTML = '<option value="">— 人员模板 —</option>' +
+    names.map(n => `<option value="${n}">${n} (${(fjPersonTemplates[n]||[]).length}人)</option>`).join('');
+  const count = $('fjPersonTplCount');
+  if(count) count.textContent = `共 ${names.length} 个模板`;
+}
+function fjApplyPersonTemplate(){
+  const sel = $('fjPersonTplSelect');
+  if(!sel || !sel.value){ toast('请选择模板','warning'); return; }
+  const persons = fjPersonTemplates[sel.value] || [];
+  if(!persons.length){ toast('模板为空','warning'); return; }
+  // 应用模板：把人员加入 fjPersons，并全选
+  persons.forEach(p => { if(!fjPersons.includes(p)) fjPersons.push(p); });
+  fjSelected = fjPersons.filter(p => persons.includes(p));
+  fjSave(FJ_KEY_PERSONS, fjPersons);
+  fjRenderChips(); fjRenderHeadTail(); fjRenderTable(); fjUpdateValidation(); fjSaveSession();
+  toast(`👥 已应用人员模板「${sel.value}」(${fjSelected.length}人)`,'success');
+}
+async function fjSavePersonTemplate(){
+  if(!fjSelected.length){ toast('请先勾选人员再保存模板','warning'); return; }
+  const name = prompt('给这个人员模板起个名字：');
+  if(!name || !name.trim()) return;
+  const tplName = name.trim();
+  try{
+    const d = await api('POST', '/api/fenji/person_templates', { name: tplName, persons: fjSelected.slice() });
+    if(d && d.ok){
+      fjPersonTemplates = d.templates || {};
+      fjRenderPersonTplSelect();
+      toast(`✅ 已保存人员模板「${tplName}」(${fjSelected.length}人)`,'success');
+    } else { toast(d && d.msg || '保存失败','error'); }
+  }catch(e){ toast('保存失败: '+e.message,'error'); }
+}
+async function fjDeletePersonTemplate(){
+  const sel = $('fjPersonTplSelect');
+  if(!sel || !sel.value){ toast('请选择要删除的模板','warning'); return; }
+  if(!confirm(`删除人员模板「${sel.value}」？`)) return;
+  try{
+    const d = await api('DELETE', '/api/fenji/person_templates', { name: sel.value });
+    if(d && d.ok){ fjPersonTemplates = d.templates || {}; fjRenderPersonTplSelect(); toast('已删除','info'); }
+  }catch(_){}
+}
 function fjAddPerson(){
   const input = $('fjNewPerson');
   const v = (input.value||'').trim();
@@ -508,6 +562,8 @@ function fjMaybeSaveHist(){
   // Keep max 200 entries
   if(fjHist.length > 200) fjHist = fjHist.slice(0,200);
   fjSave(FJ_KEY_HISTORY, fjHist);
+  // 同步保存到后端（WebView 可能清空 localStorage）
+  try{ api('PUT', '/api/settings', { fj_history: JSON.stringify(fjHist) }); }catch(_){}
   fjRenderHistSelect();
 }
 
@@ -524,6 +580,8 @@ function fjSaveSession(){
       htNum: parseInt($('fjHeadTailNum')?.value)||3,
     };
     localStorage.setItem(FJ_KEY_SESSION, JSON.stringify(sess));
+    // 有分配内容时同步保存历史（手动调整也能保留）
+    if(Object.keys(fjRanges).length > 0) fjMaybeSaveHist();
   }catch(e){}
 }
 function fjRestoreSession(){
@@ -608,18 +666,12 @@ async function openFenjiFor(name){
   fjUpdateTplBadge();
   fjUpdateTargetBadge();
 }
-function fjUpdateTplBadge(){
-  const b = document.getElementById('fjTplBadge');
-  if(!b) return;
-  const t = fjExportState.selectedTemplate || localStorage.getItem('fj_selected_template') || '';
-  b.textContent = t ? t : '未选';
-}
 
 // ===== 模板管理 + 导出到 Excel =====
 let fjExportState = {
   templates: [],
-  selectedTemplate: localStorage.getItem('fj_selected_template') || '',
-  targetPath: localStorage.getItem('fj_target_path') || '',
+  selectedTemplate: '',
+  targetPath: '',
   templateB64: '',
   previewBlob: null,
   previewB64: '',
@@ -627,6 +679,38 @@ let fjExportState = {
   previewProjectPath: '',
   lastBackup: null,
 };
+
+// ===== 用户设置持久化（改用后端存储，重开软件自动恢复）=====
+async function fjLoadPersistedSettings(){
+  try{
+    const d = await api('GET', '/api/settings');
+    if(d && d.ok && d.settings){
+      const s = d.settings;
+      // 从后端恢复模板选择/目标路径（localStorage 可能被 WebView 清空）
+      if(s.fj_selected_template) fjExportState.selectedTemplate = s.fj_selected_template;
+      if(s.fj_target_path) fjExportState.targetPath = s.fj_target_path;
+      if(s.fj_selected_template) { try{ localStorage.setItem('fj_selected_template', s.fj_selected_template); }catch(_){} }
+      if(s.fj_target_path) { try{ localStorage.setItem('fj_target_path', s.fj_target_path); }catch(_){} }
+      // 从后端恢复历史记录
+      if(s.fj_history && Array.isArray(JSON.parse(s.fj_history))){
+        const hist = JSON.parse(s.fj_history);
+        if(hist.length > 0){
+          fjHist = hist;
+          try{ localStorage.setItem(FJ_KEY_HISTORY, JSON.stringify(hist)); }catch(_){}
+        }
+      }
+      fjUpdateTplBadge();
+      fjUpdateTargetBadge();
+      fjRenderHistSelect();
+    }
+  }catch(e){}
+}
+async function fjSaveSetting(key, value){
+  // 同时写后端 + localStorage（双保险）
+  try{ localStorage.setItem(key, value); }catch(_){}
+  const body = {}; body[key] = value;
+  try{ await api('PUT', '/api/settings', body); }catch(_){}
+}
 
 function fjUpdateTplBadge(){
   const b = document.getElementById('fjTplBadge');
@@ -697,7 +781,7 @@ async function fjUploadTemplate(){
     const data = await api('POST', '/api/fenji/upload_template', fd);
     toast(`✅ 已上传 ${data.name}`, 'success');
     fjExportState.selectedTemplate = data.name;
-    localStorage.setItem('fj_selected_template', data.name);
+    await fjSaveSetting('fj_selected_template', data.name);
     await fjLoadTemplates();
     // 刷新 modal 内容
     fjPickTemplate();
@@ -720,23 +804,45 @@ function fjConfirmTemplate(){
   const sel = document.getElementById('fjTplSelect');
   if(!sel || !sel.value){ toast('请先选择模板','warning'); return; }
   fjExportState.selectedTemplate = sel.value;
-  localStorage.setItem('fj_selected_template', sel.value);
+  fjSaveSetting('fj_selected_template', sel.value);
   document.getElementById('fjTplModal')?.remove();
   fjUpdateTplBadge();
   toast('📄 已选模板: ' + sel.value, 'success');
 }
 
-// ===== 目标文件设置 =====
-function fjPickTargetPath(){
+// ===== 目标文件设置（支持手动输入 + 选择文件上传）=====
+async function fjPickTargetPath(){
   const cur = fjExportState.targetPath || '';
+  // 加载已上传的目标文件列表
+  let uploaded = [];
+  try{ const d = await api('GET', '/api/fenji/targets'); uploaded = (d && d.targets) || []; window._fjTargetDir = (d && d.dir) || ''; }catch(_){}
+  const uploadedOpts = uploaded.length
+    ? uploaded.map(n => {
+        const active = cur && cur.replace(/\\/g,'/').split('/').pop() === n ? 'selected' : '';
+        return `<option value="${n}" ${active}>${n}</option>`;
+      }).join('')
+    : '';
   const html = `
-    <div style="display:flex;flex-direction:column;gap:14px;min-width:400px">
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:460px">
       <div style="color:var(--text-sec);font-size:13px">
-        指定一个固定路径的 Excel 文件，每次分集完数据会直接追加进去。<br>
-        用同一个模板的话，所有剧的数据都会累积在这个文件里。
+        指定一个固定 Excel 文件，每次分集完数据会直接追加进去。<br>
+        可手动输入网络路径，或用下方按钮上传本地文件作为累积目标。
+      </div>
+      ${uploaded.length ? `<div style="display:flex;gap:8px;align-items:center">
+        <label style="min-width:70px">已上传</label>
+        <select id="fjTargetUploaded" style="flex:1;padding:6px;border-radius:4px;border:1px solid var(--bg-border)">
+          <option value="">— 选择已上传文件 —</option>${uploadedOpts}
+        </select>
+        <button class="btn btn-sm" onclick="fjPickUploadedTarget()">使用</button>
+        <button class="btn btn-sm danger" onclick="fjDeleteUploadedTarget()" title="删除已上传文件">✕</button>
+      </div>` : ''}
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="min-width:70px">上传文件</label>
+        <input type="file" id="fjTargetFile" accept=".xlsx,.xlsm,.xls" style="flex:1">
+        <button class="btn btn-sm" onclick="fjUploadTarget()">📤 上传为目标</button>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <label style="min-width:70px">目标文件</label>
+        <label style="min-width:70px">或手动路径</label>
         <input type="text" id="fjTargetInput" value="${cur.replace(/"/g,'&quot;')}" placeholder="例如 O:\\分集汇总\\8月汇总.xlsx" style="flex:1;padding:6px;border-radius:4px;border:1px solid var(--bg-border);background:var(--bg)">
       </div>
       ${cur ? `<div style="color:var(--text-sec);font-size:12px">当前: ${cur}</div>` : ''}
@@ -753,24 +859,57 @@ function fjPickTargetPath(){
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000';
     document.body.appendChild(modal);
   }
-  modal.innerHTML = `<div style="background:var(--bg-elev);padding:20px;border-radius:10px;min-width:460px;border:1px solid var(--border)">
+  modal.innerHTML = `<div style="background:var(--bg-elev);padding:20px;border-radius:10px;min-width:520px;border:1px solid var(--border)">
     <div style="margin-bottom:14px"><h3 style="margin:0">⚙️ 设置目标文件</h3></div>${html}</div>`;
   modal.style.display = 'flex';
   modal.onclick = e => { if(e.target === modal) modal.remove(); };
+}
+async function fjUploadTarget(){
+  const input = document.getElementById('fjTargetFile');
+  if(!input || !input.files[0]){ toast('请先选择文件','warning'); return; }
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  try{
+    const d = await api('POST', '/api/fenji/upload_target', fd);
+    fjExportState.targetPath = d.path;
+    await fjSaveSetting('fj_target_path', d.path);
+    document.getElementById('fjTargetModal')?.remove();
+    fjUpdateTargetBadge();
+    toast('✅ 已上传并设为目标: ' + d.name, 'success');
+  }catch(e){ toast('上传失败: '+e.message,'error'); }
+}
+function fjPickUploadedTarget(){
+  const sel = document.getElementById('fjTargetUploaded');
+  if(!sel || !sel.value){ toast('请选择文件','warning'); return; }
+  const name = sel.value;
+  const path = window._fjTargetDir ? (window._fjTargetDir + '\\' + name) : name;
+  fjExportState.targetPath = path;
+  fjSaveSetting('fj_target_path', path);
+  document.getElementById('fjTargetModal')?.remove();
+  fjUpdateTargetBadge();
+  toast('✅ 已设为目标: ' + name, 'success');
+}
+async function fjDeleteUploadedTarget(){
+  const sel = document.getElementById('fjTargetUploaded');
+  if(!sel || !sel.value){ toast('请选择文件','warning'); return; }
+  if(!confirm('删除已上传的目标文件？')) return;
+  try{ await api('DELETE', '/api/fenji/targets', { name: sel.value }); }catch(_){}
+  fjPickTargetPath();
+  toast('已删除', 'info');
 }
 function fjSaveTarget(){
   const v = document.getElementById('fjTargetInput')?.value?.trim() || '';
   if(!v){ toast('请输入完整的文件路径','warning'); return; }
   if(!/\.xlsx?$/i.test(v)){ toast('目标文件必须是 .xlsx 或 .xls','warning'); return; }
   fjExportState.targetPath = v;
-  localStorage.setItem('fj_target_path', v);
+  fjSaveSetting('fj_target_path', v);
   document.getElementById('fjTargetModal')?.remove();
   fjUpdateTargetBadge();
   toast('✅ 目标已设: ' + v.split(/[\\\/]/).pop(), 'success');
 }
 function fjClearTarget(){
   fjExportState.targetPath = '';
-  localStorage.removeItem('fj_target_path');
+  fjSaveSetting('fj_target_path', '');
   document.getElementById('fjTargetModal')?.remove();
   fjUpdateTargetBadge();
   toast('已清除目标路径', 'info');

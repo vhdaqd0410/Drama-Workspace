@@ -31,6 +31,10 @@ async function loadFenjiProjects(){
       }
     }
   }catch(e){ updateLightLists(); }
+  // 从后端恢复模板/目标路径（重开软件自动恢复）
+  try{ if(typeof fjLoadPersistedSettings === 'function') await fjLoadPersistedSettings(); }catch(_){}
+  // 加载人员模板
+  try{ if(typeof fjLoadPersonTemplates === 'function') await fjLoadPersonTemplates(); }catch(_){}
   fjRenderChips();
   fjRenderHeadTail();
   fjRenderHistSelect();

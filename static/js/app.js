@@ -1,6 +1,14 @@
 // DOMContentLoaded 入口
 document.addEventListener('DOMContentLoaded',async ()=>{
   try{
+    // 加载用户设置（快捷键配置等），失败不阻塞
+    try{
+      const _set = await fetch('/api/settings').then(r=>r.json());
+      if(_set && _set.ok && _set.settings){
+        if(_set.settings.search_shortcut) window._shortcutConfig = { search: _set.settings.search_shortcut };
+      }
+    }catch(_){}
+
     // ===== 分秒帧配置初始化 =====
     try { window._fmConfig = await fetch('/api/fenmiaozhen/config').then(r => r.json()); } catch(_) { window._fmConfig = null; }
 

@@ -565,7 +565,14 @@ a{color:var(--blue);text-decoration:none}
         <button class="btn btn-sm" onclick="fjOpenHistList()" title="全部历史记录">🔍 全部</button>
       </div>
 
-      <div class="fj-section-title">👥 选择剪辑师 <span id="fjSelCount" style="color:var(--blue);font-size:12px">(已选 0 人)</span></div>
+      <div class="fj-section-title">👥 选择剪辑师 <span id="fjSelCount" style="color:var(--blue);font-size:12px">(已选 0 人)</span>
+        <span style="margin-left:12px;display:inline-flex;align-items:center;gap:6px">
+          <select id="fjPersonTplSelect" onchange="fjApplyPersonTemplate()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bg-border);font-size:12px"><option value="">— 人员模板 —</option></select>
+          <button class="btn btn-sm" onclick="fjSavePersonTemplate()" title="将当前勾选的人员保存为模板">💾 存模板</button>
+          <button class="btn btn-sm danger" onclick="fjDeletePersonTemplate()" title="删除选中模板">✕</button>
+          <span id="fjPersonTplCount" style="font-size:11px;color:var(--text-sec)"></span>
+        </span>
+      </div>
       <div class="fj-chip-wrap" id="fjChipWrap">点击选择参与人员</div>
       <div class="fj-chip-actions">
         <button class="btn btn-sm" onclick="fjSelectAll()">☑ 全选</button>
@@ -828,6 +835,20 @@ a{color:var(--blue);text-decoration:none}
       <div class="form-group"><label>ffmpeg 路径</label><input type="text" id="cfgFfmpeg"></div>
       <div class="form-group"><label>ffprobe 路径</label><input type="text" id="cfgFfprobe"></div>
     </div>
+    <div class="panel settings-section"><h3>⚡ 快捷键设置</h3>
+      <div class="form-group">
+        <label>全局搜索项目</label>
+        <select id="cfgSearchShortcut" onchange="saveShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
+          <option value="">Ctrl+K / Ctrl+F（默认）</option>
+          <option value="ctrl+space">Ctrl+Space</option>
+          <option value="ctrl+g">Ctrl+G</option>
+          <option value="alt+s">Alt+S</option>
+          <option value="ctrl+e">Ctrl+E</option>
+          <option value="ctrl+p">Ctrl+P</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">选择后立即生效，支持模糊搜索</div>
+      </div>
+    </div>
     <div class="panel settings-section" style="grid-column:1/-1"><h3>👤 分集默认</h3>
       <div class="form-group"><label>建议剪辑师名字 (每行一个)</label><textarea id="cfgNames"></textarea></div>
     </div>
@@ -909,20 +930,20 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260815d"></script>
+<script src="/static/js/core.js?v=20260815f"></script>
 <script src="/static/js/project.js?v=20260815r"></script>
-<script src="/static/js/tabs.js?v=20260815m"></script>
+<script src="/static/js/tabs.js?v=20260815n"></script>
 <script src="/static/js/episode.js?v=20260815s"></script>
-<script src="/static/js/fenji-init.js?v=20260815m"></script>
-<script src="/static/js/fenji-assign.js?v=20260815m"></script>
+<script src="/static/js/fenji-init.js?v=20260815n"></script>
+<script src="/static/js/fenji-assign.js?v=20260815n"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
-<script src="/static/js/team.js?v=20260815m"></script>
+<script src="/static/js/team.js?v=20260815n"></script>
 <script src="/static/js/deliverables.js?v=20260815m"></script>
 <script src="/static/js/deliver-events.js?v=20260815m"></script>
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>
 <script src="/static/js/preview.js?v=20260815m"></script>
 <script src="/static/js/deliver-patch.js?v=20260815m"></script>
-<script src="/static/js/app.js?v=20260815m"></script>
+<script src="/static/js/app.js?v=20260815n"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};
 if(window.__IS_DESKTOP__){

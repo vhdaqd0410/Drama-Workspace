@@ -178,6 +178,10 @@ class Database:
                 skills TEXT DEFAULT '[]',
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )""")
+            c.execute("""CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT DEFAULT ''
+            )""")
             # Migration: add columns if missing
             try:
                 c.execute("ALTER TABLE team_members ADD COLUMN title TEXT DEFAULT ''")
@@ -651,6 +655,44 @@ class Database:
             conn.execute(
                 f"UPDATE team_members SET {fields} WHERE name=?", values
             )
+
+    # ==================== 用户设置（持久化到后端） ====================
+
+    def get_setting(self, key, default=""):
+        """读取用户设置（key-value）。"""
+        try:
+            with self.get_conn() as conn:
+                row = conn.execute(
+                    "SELECT value FROM app_settings WHERE key=?", (key,)
+                ).fetchone()
+                return row[0] if row else default
+        except Exception:
+            return default
+
+    def set_setting(self, key, value):
+        """写入用户设置（key-value），不存在则插入。"""
+        if value is None:
+            value = ""
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False)
+        try:
+            with self.get_conn() as conn:
+                conn.execute(
+                    """INSERT INTO app_settings(key, value) VALUES(?, ?)
+                       ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+                    (key, str(value)),
+                )
+        except Exception:
+            pass
+
+    def get_all_settings(self):
+        """返回全部用户设置 dict。"""
+        try:
+            with self.get_conn() as conn:
+                rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+                return {r[0]: r[1] for r in rows}
+        except Exception:
+            return {}
 
 
 db = Database()

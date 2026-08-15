@@ -73,13 +73,41 @@ function _scheduleSseRefresh(delay){
 }
 
 /* ============ 全局快捷键 ============ */
+// 快捷键配置（从后端设置加载，可在设置界面修改）
+window._shortcutConfig = { search: '' };  // search: 如 'ctrl+space' / 'ctrl+g' / ''=默认ctrl+k/f
+function _getSearchShortcut(){
+  var s = window._shortcutConfig && window._shortcutConfig.search;
+  return s ? String(s).toLowerCase().trim() : '';
+}
+// 解析快捷键配置字符串，判断当前按键是否匹配
+function _matchShortcut(e, shortcutStr){
+  if(!shortcutStr) return false;
+  var parts = String(shortcutStr).toLowerCase().split('+').map(function(x){return x.trim();});
+  var key = e.key ? e.key.toLowerCase() : '';
+  // 特殊键
+  if(key === ' ') key = 'space';
+  if(key.length === 1 && e.code && e.code.indexOf('Key')===0) key = e.code.slice(3).toLowerCase();
+  var hasCtrl = parts.indexOf('ctrl')>=0 || parts.indexOf('control')>=0;
+  var hasAlt = parts.indexOf('alt')>=0;
+  var hasShift = parts.indexOf('shift')>=0;
+  var hasMeta = parts.indexOf('meta')>=0;
+  if(hasCtrl !== (e.ctrlKey||e.metaKey)) return false;
+  if(hasAlt !== e.altKey) return false;
+  if(hasShift !== e.shiftKey) return false;
+  // 取主键（最后一个非修饰键）
+  var main = parts[parts.length-1];
+  return key === main;
+}
+
 function bindShortcuts(){
   document.addEventListener('keydown', function(e){
     var tag = (e.target.tagName || '').toUpperCase();
     var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
+    var searchSc = _getSearchShortcut();
 
-    // Ctrl+K / Ctrl+F 始终优先触发（覆盖浏览器默认页面查找）
-    if((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'f')){
+    // 打开全局搜索：优先用配置的快捷键；未配置时用默认 Ctrl+K / Ctrl+F
+    var defaultSearch = (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'f');
+    if(defaultSearch || _matchShortcut(e, searchSc)){
       e.preventDefault();
       openSearchModal();
       return;
@@ -128,6 +156,20 @@ function openSearchModal(){
   filterSearchResults();
 }
 
+// 模糊匹配：支持子序列匹配（如 "昼夜回响" 匹配 "昼夜回响"）
+function fuzzyMatch(text, pattern){
+  if(!pattern) return true;
+  text = String(text||'').toLowerCase();
+  pattern = String(pattern||'').toLowerCase();
+  if(text.indexOf(pattern) >= 0) return true;      // 子串包含
+  // 子序列匹配：pattern 的字符按顺序出现在 text 里（如 "zh" 匹配 "z...h..."）
+  let pi = 0;
+  for(let i=0; i<text.length && pi<pattern.length; i++){
+    if(text[i] === pattern[pi]) pi++;
+  }
+  return pi === pattern.length;
+}
+
 function filterSearchResults(){
   var kw = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
   var results = document.getElementById('searchResults');
@@ -136,10 +178,10 @@ function filterSearchResults(){
   var items = [];
   secs.forEach(function(sec){
     (sec.projects||[]).forEach(function(p){
-      var name = (p.name||'').toLowerCase();
-      var month = (p.project_month||'').toLowerCase();
-      if(!kw || name.indexOf(kw)>=0 || month.indexOf(kw)>=0){
-        items.push({ name: p.name, section: sec.name, month: p.project_month || '', status: p.custom_status || '' });
+      var name = p.name||'';
+      var month = p.project_month||'';
+      if(!kw || fuzzyMatch(name, kw) || fuzzyMatch(month, kw)){
+        items.push({ name: name, section: sec.name, month: month, status: p.custom_status || '' });
       }
     });
   });
@@ -338,11 +380,14 @@ function renderStats(){
   renderOverviewCharts();
 }
 
-// ===== 首页概览图表（部门分布 + 工作流状态分布）=====
+// ===== 首页概览图表（部门分布 + 工作流状态分布，仅当月项目）=====
 function renderOverviewCharts(){
   const wrap = $('overviewCharts');
   if(!wrap) return;
-  const list = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
+  const allList = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
+  const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
+  // 只统计当月项目（project_month == 当前月）
+  const list = allList.filter(p => (p.project_month || '') === nowMonth);
   if(list.length === 0){ wrap.innerHTML=''; return; }
 
   // 部门分布
@@ -383,8 +428,8 @@ function renderOverviewCharts(){
   }
 
   wrap.innerHTML =
-    barChart('🏢 部门项目分布', deptArr, deptMax, ()=>'#5c6bc0') +
-    barChart('📊 工作流状态分布', statusArr, statusMax, l=>statusColor[l]||'#95a5a6');
+    barChart('🏢 部门项目分布（本月）', deptArr, deptMax, ()=>'#5c6bc0') +
+    barChart('📊 工作流状态分布（本月）', statusArr, statusMax, l=>statusColor[l]||'#95a5a6');
 }
 function getDeptStyle(dept){
   if(!dept)return '';
@@ -414,7 +459,9 @@ function projectCardHTML(p){
   const total = p.total_episodes || 0;
   const progressId = 'prog-' + p.name.replace(/[^a-zA-Z0-9_]/g,'_');
   let progressHTML = '';
-  if (total > 0) {
+  // 审核中/修改中不显示输出进度（此时关注的是成片验收/修改，而非剪辑进度）
+  const _hideProgress = (_st === '审核中' || _st === '修改中');
+  if (total > 0 && !_hideProgress) {
     progressHTML = `<div class="card-progress" id="${progressId}">
       <div class="card-progress-bar"><div class="card-progress-fill" style="width:0%"></div></div>
       <div class="card-progress-text"><span>输出进度（扫描目录中...）</span><span>— / ${total} 集</span></div>

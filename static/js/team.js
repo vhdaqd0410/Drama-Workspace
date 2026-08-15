@@ -9,6 +9,14 @@ async function loadConfig(){
     $('cfgFfprobe').value=cfg.ffprobe_path||cfg.ffprobe||'';
     $('cfgNames').value=(cfg.suggested_names||cfg.fenji_names||[]).join('\n');
   }catch(e){}
+  // 加载快捷键配置
+  try{
+    const d = await api('GET', '/api/settings');
+    if(d && d.ok && d.settings && d.settings.search_shortcut){
+      const sel = document.getElementById('cfgSearchShortcut');
+      if(sel) sel.value = d.settings.search_shortcut;
+    }
+  }catch(_){}
 }
 async function saveConfig(){
   const cfg={
@@ -20,6 +28,16 @@ async function saveConfig(){
     suggested_names:$('cfgNames').value.split('\n').map(s=>s.trim()).filter(Boolean)
   };
   try{await api('POST','/api/config',cfg);toast('设置已保存','success')}catch(e){toast('保存失败: '+e.message,'error')}
+}
+async function saveShortcut(){
+  const sel = document.getElementById('cfgSearchShortcut');
+  if(!sel) return;
+  const val = sel.value;
+  try{
+    await api('PUT', '/api/settings', { search_shortcut: val });
+    window._shortcutConfig = { search: val };
+    toast('⚡ 快捷键已更新' + (val ? ': ' + val : '（默认 Ctrl+K/F）'), 'success');
+  }catch(e){ toast('保存失败: '+e.message,'error'); }
 }
 async function migrateOld(){
   try{toast('正在迁移...','info');const r=await api('POST','/api/migrate');toast((r&&r.message)||'迁移完成','success')}catch(e){toast('迁移失败: '+e.message,'error')}

@@ -828,6 +828,109 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         size = _os.path.getsize(save_path)
         return jsonify(ok=True, name=safe_name, size=size, dir=_TEMPLATE_DIR)
 
+    # ============ 用户设置持久化（模板选择/目标文件路径等） ============
+    @app.route('/api/settings', methods=['GET'])
+    def api_get_settings():
+        """读取全部用户设置（模板选择、目标文件路径等），重开软件自动恢复。"""
+        return jsonify(ok=True, settings=db.get_all_settings())
+
+    @app.route('/api/settings', methods=['PUT'])
+    def api_set_settings():
+        """批量保存用户设置。body: { key: value, ... }"""
+        data = request.get_json(silent=True) or {}
+        saved = {}
+        for k, v in data.items():
+            db.set_setting(k, v)
+            saved[k] = v
+        return jsonify(ok=True, saved=saved)
+
+    # ============ 分集人员模板（勾选人员保存为模板） ============
+    @app.route('/api/fenji/person_templates', methods=['GET'])
+    def fenji_list_person_templates():
+        """列出已保存的人员模板。存储为 JSON: {"模板名": ["人员1", "人员2", ...]}"""
+        raw = db.get_setting('fenji_person_templates', '{}')
+        try:
+            tpls = _j.loads(raw) if isinstance(raw, str) and raw.strip() else {}
+        except Exception:
+            tpls = {}
+        return jsonify(ok=True, templates=tpls)
+
+    @app.route('/api/fenji/person_templates', methods=['POST'])
+    def fenji_save_person_template():
+        """保存人员模板。body: { name: "模板名", persons: ["A","B",...] }"""
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        persons = data.get('persons') or []
+        if not name or not isinstance(persons, list) or not persons:
+            return jsonify(ok=False, msg='模板名或人员列表不能为空'), 400
+        raw = db.get_setting('fenji_person_templates', '{}')
+        try:
+            tpls = _j.loads(raw) if isinstance(raw, str) and raw.strip() else {}
+        except Exception:
+            tpls = {}
+        tpls[name] = [str(p).strip() for p in persons if str(p).strip()]
+        db.set_setting('fenji_person_templates', _j.dumps(tpls, ensure_ascii=False))
+        return jsonify(ok=True, templates=tpls)
+
+    @app.route('/api/fenji/person_templates', methods=['DELETE'])
+    def fenji_delete_person_template():
+        """删除人员模板。body: { name: "模板名" }"""
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        raw = db.get_setting('fenji_person_templates', '{}')
+        try:
+            tpls = _j.loads(raw) if isinstance(raw, str) and raw.strip() else {}
+        except Exception:
+            tpls = {}
+        if name in tpls:
+            del tpls[name]
+            db.set_setting('fenji_person_templates', _j.dumps(tpls, ensure_ascii=False))
+        return jsonify(ok=True, templates=tpls)
+
+    # ============ 目标文件上传（选择本地 Excel 作为累积目标） ============
+    _TARGET_DIR = _os.path.join(_DATA_DIR, 'fenji_targets')
+
+    @app.route('/api/fenji/targets', methods=['GET'])
+    def fenji_list_targets():
+        """列出已上传的目标文件（累积汇总 Excel）。"""
+        try:
+            names = []
+            if _os.path.isdir(_TARGET_DIR):
+                for fn in sorted(_os.listdir(_TARGET_DIR)):
+                    if fn.endswith(('.xlsx', '.xls', '.xlsm')):
+                        names.append(fn)
+            return jsonify(ok=True, targets=names, dir=_TARGET_DIR)
+        except Exception as e:
+            return jsonify(ok=False, msg=str(e)), 500
+
+    @app.route('/api/fenji/upload_target', methods=['POST'])
+    def fenji_upload_target():
+        """上传一个本地 Excel 作为目标汇总文件，返回其服务端路径（供导出追加）。"""
+        _os.makedirs(_TARGET_DIR, exist_ok=True)
+        if 'file' not in request.files:
+            return jsonify(ok=False, msg='无文件'), 400
+        f = request.files['file']
+        if not f.filename:
+            return jsonify(ok=False, msg='文件名为空'), 400
+        safe_name = _os.path.basename(f.filename)
+        save_path = _os.path.join(_TARGET_DIR, safe_name)
+        f.save(save_path)
+        return jsonify(ok=True, name=safe_name, path=save_path)
+
+    @app.route('/api/fenji/targets', methods=['DELETE'])
+    def fenji_delete_target():
+        """删除已上传的目标文件。body: { name: "文件名" }"""
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        safe = _os.path.basename(name)
+        p = _os.path.join(_TARGET_DIR, safe)
+        if _os.path.isfile(p):
+            try:
+                _os.remove(p)
+            except Exception:
+                pass
+        return jsonify(ok=True)
+
     @app.route('/api/fenji/export_excel', methods=['POST'])
     def fenji_export_excel():
         """

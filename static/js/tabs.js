@@ -143,14 +143,15 @@ function _monthOptions(){
 async function _loadReportData(){
   const el = document.getElementById('reportBody');
   if(!el) return;
-  const month = document.getElementById('reportMonth').value;
-  el.innerHTML = '加载中...';
+  const monthSel = document.getElementById('reportMonth');
+  const month = monthSel ? monthSel.value : '';
+  el.innerHTML = '<div style="text-align:center;padding:30px;color:#86868b">🔍 正在加载 ' + (month||'') + ' 报告...</div>';
   try{
-    const d = await api('GET','/api/report/monthly?month=' + month);
-    if(!d.ok){ el.innerHTML = '<div style="color:#ff3b30">加载失败</div>'; return; }
+    const d = await api('GET','/api/report/monthly?month=' + encodeURIComponent(month));
+    if(!d.ok){ el.innerHTML = '<div style="color:#ff3b30;padding:20px">加载失败</div>'; return; }
     el.innerHTML = _renderReportHTML(d);
   }catch(e){
-    el.innerHTML = '<div style="color:#ff3b30">加载失败: '+e.message+'</div>';
+    el.innerHTML = '<div style="color:#ff3b30;padding:20px">加载失败: '+e.message+'</div>';
   }
 }
 
