@@ -304,34 +304,37 @@ function renderActions(p){
   return btns.map(([label,fn,cls,extra])=>`<button class="btn btn-sm ${cls||''}" ${extra||''} onclick="${fn}">${label}</button>`).join('');
 }
 function renderStats(){
-  const list = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
-  const total = list.length;
-  // 只统计组内NAS section 里的制作中项目（排除部门项目干扰）
-  const groupSection = (allSections || []).find(s => s.key === 'group_active');
-  const groupList = groupSection ? (groupSection.projects || []) : list;
-  const inProd = groupList.filter(p => {
-    const s = String(p.custom_status || '');
-    return s.includes('剪辑') || s.includes('审核') || s.includes('修改');
-  }).length;
+  // 优先用后端统一计算的概览统计（口径一致），不存在则本地兜底
+  const os = (typeof window._overviewStats !== 'undefined' && window._overviewStats) || null;
   const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
-  // 只统计"有实际制作痕迹"的项目（排除空壳/模板目录）
-  const activeList = list.filter(p => {
-    const s = String(p.custom_status || '').trim();
-    const d = String(p.delivery_status || '').trim();
-    const t = Number(p.total_episodes || 0);
-    return s || (d && d !== 'pending') || t > 0;
-  });
-  const thisMonth = activeList.filter(p => p.project_month === nowMonth).length;
-  // 本月已完成项目 = 本月且有"已完成"状态 或 已完成组里的本月项目
-  const thisMonthDone = activeList.filter(p =>
-    p.project_month === nowMonth &&
-    String(p.custom_status || '').trim() === '已完成'
-  ).length;
+
+  let total, thisMonth, thisMonthDone, inProd;
+  if (os && typeof os.total === 'number') {
+    total = os.total;
+    thisMonth = os.this_month;
+    thisMonthDone = os.this_month_done;
+    inProd = os.producing;
+  } else {
+    // 本地兜底计算（口径：制作中含分集中等所有进行中状态）
+    const list = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
+    total = list.length;
+    const activeList = list.filter(p => {
+      const s = String(p.custom_status || '').trim();
+      const d = String(p.delivery_status || '').trim();
+      const t = Number(p.total_episodes || 0);
+      return s || (d && d !== 'pending') || t > 0;
+    });
+    const monthList = activeList.filter(p => p.project_month === nowMonth);
+    thisMonth = monthList.length;
+    thisMonthDone = monthList.filter(p => String(p.custom_status || '').trim() === '已完成').length;
+    inProd = monthList.filter(p => { const s = String(p.custom_status || '').trim(); return !!s && s !== '已完成'; }).length;
+  }
+
   $('statsRow').innerHTML=`
     <div class="stat-card" onclick="$('globalSearch').value='';$('filterStatus').value='';$('filterDept').value='';$('filterMonth').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon blue">📁</div><div><div class="stat-num">${total}</div><div class="stat-label">总项目</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fff3cd;color:#856404">📅</div><div><div class="stat-num">${thisMonth}</div><div class="stat-label">本月项目</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='已完成';renderDashboard()" style="cursor:pointer"><div class="stat-icon green">✅</div><div><div class="stat-num">${thisMonthDone}</div><div class="stat-label">本月已完成</div></div></div>
-    <div class="stat-card" onclick="$('filterMonth').value='';$('filterStatus').value='';$('globalSearch').value='';renderDashboard();document.querySelector('#projectGrid').scrollIntoView()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>`;
+    <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';$('globalSearch').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>`;
 }
 function getDeptStyle(dept){
   if(!dept)return '';

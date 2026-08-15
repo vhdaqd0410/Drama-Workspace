@@ -274,6 +274,15 @@ def api_projects():
     result['production_count'] = len(production)
     result['completed_count'] = len(group_completed)
 
+    # 统一概览统计（总/本月/本月已完成/制作中），口径集中计算
+    try:
+        from scan import compute_overview_stats
+        result['overview_stats'] = compute_overview_stats(
+            production, group_all, group_completed)
+    except Exception as e:
+        app.logger.error('compute_overview_stats failed: %s', e)
+        result['overview_stats'] = None
+
 
     return jsonify(result)
 

@@ -62,6 +62,8 @@ async function loadProjects(){
     projects=flat;
     allSections=d.sections||[];
     allProjects={production:d.production||[],group_all:d.group_all||[],group_completed:d.group_completed||[]};
+    // 后端统一计算的概览统计（总/本月/已完成/制作中），供首页统计卡片使用
+    window._overviewStats = (d && d.overview_stats) || null;
     // 月份合并：等专门接口回来再 merge（绕开 scan.py dict 缺失，也避免 localStorage 脏数据）
     function _isShell(p){var s=String(p.custom_status||'').trim(),d=String(p.delivery_status||'').trim(),t=Number(p.total_episodes||0);return !s&&(!d||d==='pending')&&t===0;}
     try{

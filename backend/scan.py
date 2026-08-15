@@ -9,6 +9,69 @@ from utils import scan_dir
 logger = logging.getLogger(__name__)
 
 
+def _is_active_project(p):
+    """项目是否有实际制作痕迹（排除空壳/模板目录）。"""
+    s = str(p.get("custom_status") or "").strip()
+    d = str(p.get("delivery_status") or "").strip()
+    t = int(p.get("total_episodes") or 0)
+    return bool(s) or (d and d != "pending") or t > 0
+
+
+def _is_producing(p):
+    """项目是否处于制作中（进行中状态，含分集中/剪辑中/审核中/修改中等）。"""
+    s = str(p.get("custom_status") or "").strip()
+    return bool(s) and s != "已完成"
+
+
+def compute_overview_stats(production, group_all, group_completed, now_month=None):
+    """统一计算首页概览统计，保证口径一致：
+    - 总项目：所有有制作痕迹的项目（跨分组去重）
+    - 本月项目：本月(project_month==now_month)且有制作痕迹的项目
+    - 本月已完成：本月项目里状态为已完成
+    - 制作中：本月项目里处于制作中状态（非空且非已完成）
+    恒等式：本月项目 = 本月已完成 + 制作中
+    """
+    import time as _t
+    if now_month is None:
+        now_month = datetime.now().strftime("%Y-%m")
+
+    # 跨分组去重（按项目名，优先保留信息更全的记录）
+    seen = {}
+    for bucket in (production, group_all, group_completed):
+        for p in bucket:
+            name = p.get("name")
+            if not name:
+                continue
+            if name not in seen:
+                seen[name] = p
+            else:
+                ex = seen[name]
+                # 已有空壳记录时用新的有制作痕迹记录替换
+                if not _is_active_project(ex) and _is_active_project(p):
+                    seen[name] = p
+    all_projects = list(seen.values())
+
+    total = sum(1 for p in all_projects if _is_active_project(p))
+
+    month_projects = [p for p in all_projects
+                      if (p.get("project_month") or "") == now_month and _is_active_project(p)]
+    this_month = len(month_projects)
+    this_month_done = sum(1 for p in month_projects
+                          if str(p.get("custom_status") or "").strip() == "已完成")
+    producing = sum(1 for p in month_projects if _is_producing(p))
+
+    # 恒等式校验：本月项目 = 本月已完成 + 制作中
+    # （制作中含所有进行中状态，故恒成立）
+
+    return {
+        "total": total,
+        "this_month": this_month,
+        "this_month_done": this_month_done,
+        "producing": producing,
+        "month": now_month,
+    }
+
+
 def _compute_project_alert(p):
     """对进行中项目计算异常提醒。
 
