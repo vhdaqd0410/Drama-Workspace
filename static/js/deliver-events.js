@@ -151,6 +151,7 @@ async function deliverFolders(){
           toast('✅ 文件夹回传完成', 'success');
           refreshDeliverablesList();
           if(typeof renderDashboard === 'function') renderDashboard();
+          _showDeliverDoneModal(name);
         }, 500);
       } else if(sp.indexOf('失败') >= 0 || sp.indexOf('超时') >= 0 || sp.indexOf('异常') >= 0){
         clearInterval(poll);
@@ -276,9 +277,11 @@ async function deliverBatch(){
         if(barFill) barFill.style.width = pct + '%';
         if(barText) barText.textContent = label || (pct + '%');
 
-        // 判断完成
+        // 判断完成（后端完成时 sync_progress = "批量回传完成（N 个文件）"）
         var st = target.delivery_status || target.sync_status || '';
-        if(st && st !== 'delivering' && sp.indexOf('回传') !== 0){
+        var isDone = sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0
+          || (st === 'delivered' && sp.indexOf('回传') !== 0);
+        if(isDone){
           clearInterval(poll);
           var bar2 = document.getElementById(progBarId);
           if(bar2) bar2.style.background = '#e2efda';
@@ -287,6 +290,7 @@ async function deliverBatch(){
           setTimeout(function(){
             toast('✅ 批量回传完成', 'success');
             refreshDeliverablesList();
+            _showDeliverDoneModal(name);
           }, 500);
         }
       }catch(err){}
@@ -298,4 +302,72 @@ async function deliverBatch(){
   }
   _deliverablesState.running = false;
   renderDeliverablesModal();
+}
+
+// ===== 回传完成弹窗：打开回传目录 + 复制回传目录路径 =====
+async function _showDeliverDoneModal(projectName){
+  // 获取目标目录（制作部上映单集版）
+  let dst = '';
+  try{
+    const d = await api('GET', '/api/project/' + encodeURIComponent(projectName) + '/deliver_dst');
+    if(d && d.ok && d.path) dst = d.path;
+  }catch(_){}
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay active';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:999;display:flex;align-items:center;justify-content:center';
+  const dstHtml = dst
+    ? `<div style="font-size:12px;color:#86868b;margin:8px 0 2px">回传目录</div>
+       <div style="font-family:monospace;font-size:12px;background:#f5f5f7;padding:8px 10px;border-radius:6px;word-break:break-all">${htm(dst)}</div>`
+    : '<div style="font-size:12px;color:#86868b;margin:8px 0 2px">（未能获取回传目录路径）</div>';
+  overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:460px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.2)">
+    <div style="padding:16px 18px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);font-weight:700;font-size:15px">✅ 回传完成</div>
+    <div style="padding:16px 18px">
+      <div style="font-size:13px;margin-bottom:4px">项目「<b>${htm(projectName)}</b>」的成片已回传到制作部。</div>
+      ${dstHtml}
+    </div>
+    <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
+      ${dst ? `<button class="btn btn-sm btn-primary" onclick="openDeliverDst('${dst.replace(/'/g,"\\'")}')">📂 打开回传目录</button>
+      <button class="btn btn-sm" onclick="copyDeliverDst('${dst.replace(/'/g,"\\'")}')">📋 复制路径</button>` : ''}
+      <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
+// 打开回传目录（后端 open_folder，弹系统资源管理器）
+async function openDeliverDst(path){
+  try{
+    // 用一个真实项目名（用当前交付的项目）
+    const name = _deliverablesState ? _deliverablesState.projectName : '';
+    const r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/open_folder', { which: 'path', path: path });
+    if(r && r.ok) toast('已打开回传目录', 'success');
+    else toast(r && r.message || '打开失败', 'error');
+  }catch(e){ toast('打开失败: ' + e.message, 'error'); }
+}
+
+// 复制回传目录路径到剪贴板
+function copyDeliverDst(path){
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(path).then(function(){
+        toast('📋 已复制路径: ' + path, 'success');
+      }).catch(function(){
+        _copyFallback(path);
+      });
+    } else {
+      _copyFallback(path);
+    }
+  }catch(e){ _copyFallback(path); }
+}
+function _copyFallback(text){
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('📋 已复制路径: ' + text, 'success');
+  }catch(e){ toast('复制失败', 'error'); }
 }

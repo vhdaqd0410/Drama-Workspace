@@ -83,18 +83,25 @@ function _getSearchShortcut(){
 function _matchShortcut(e, shortcutStr){
   if(!shortcutStr) return false;
   var parts = String(shortcutStr).toLowerCase().split('+').map(function(x){return x.trim();});
+  // e.metaKey / e.ctrlKey 可能在非浏览器环境为 undefined，做布尔归一
+  var ctrl = !!(e.ctrlKey || e.metaKey);
+  var alt = !!e.altKey;
+  var shift = !!e.shiftKey;
   var key = e.key ? e.key.toLowerCase() : '';
-  // 特殊键
   if(key === ' ') key = 'space';
-  if(key.length === 1 && e.code && e.code.indexOf('Key')===0) key = e.code.slice(3).toLowerCase();
+  // 用 e.code 兜底（浏览器里 e.key 可能是大写/特殊值）
+  if(e.code){
+    var c = e.code;
+    if(/^Key[A-Z]$/.test(c)) key = c.slice(3).toLowerCase();
+    else if(c === 'Space') key = 'space';
+    else if(c === 'Enter') key = 'enter';
+  }
   var hasCtrl = parts.indexOf('ctrl')>=0 || parts.indexOf('control')>=0;
   var hasAlt = parts.indexOf('alt')>=0;
   var hasShift = parts.indexOf('shift')>=0;
-  var hasMeta = parts.indexOf('meta')>=0;
-  if(hasCtrl !== (e.ctrlKey||e.metaKey)) return false;
-  if(hasAlt !== e.altKey) return false;
-  if(hasShift !== e.shiftKey) return false;
-  // 取主键（最后一个非修饰键）
+  if(hasCtrl !== ctrl) return false;
+  if(hasAlt !== alt) return false;
+  if(hasShift !== shift) return false;
   var main = parts[parts.length-1];
   return key === main;
 }

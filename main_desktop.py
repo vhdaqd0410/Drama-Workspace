@@ -347,6 +347,67 @@ def _trigger_api(action):
 
 
 # ============================================================
+# 全局热键：即使窗口隐藏到托盘，按快捷键也能唤回窗口
+# ============================================================
+# Windows 虚拟键码
+_MOD_ALT = 0x0001
+_MOD_CTRL = 0x0002
+_MOD_SHIFT = 0x0004
+_VK_W = 0x57          # 'W'
+_VK_B = 0x42          # 'B'
+_VK_G = 0x47          # 'G'
+_HOTKEY_ID = 0x5E11   # 自定义热键 ID
+
+# 候选热键组合（Ctrl+Alt 常被系统/输入法占用，按优先级尝试）
+_HOTKEY_CANDIDATES = [
+    ("Ctrl+Shift+B", _MOD_CTRL | _MOD_SHIFT, _VK_B),
+    ("Ctrl+Shift+G", _MOD_CTRL | _MOD_SHIFT, _VK_G),
+    ("Alt+Shift+B", _MOD_ALT | _MOD_SHIFT, _VK_B),
+    ("Alt+G", _MOD_ALT, _VK_G),
+    ("Ctrl+Alt+W", _MOD_ALT | _MOD_CTRL, _VK_W),
+]
+
+def _run_global_hotkey():
+    """后台线程：注册系统级全局热键，按下列唤回主窗口。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+
+        # 依次尝试注册，取第一个成功的组合
+        registered = None
+        for label, mod, vk in _HOTKEY_CANDIDATES:
+            if user32.RegisterHotKey(None, _HOTKEY_ID, mod, vk):
+                registered = (label, mod, vk)
+                break
+        if registered is None:
+            print("[hotkey] 所有全局热键注册失败（可能被其他程序占用）")
+            return
+
+        label, mod, vk = registered
+        print(f"[hotkey] 全局热键已注册: {label}")
+
+        # 最小消息循环，等待 WM_HOTKEY
+        msg = wintypes.MSG()
+        WM_HOTKEY = 0x0312
+        while True:
+            ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+            if ret <= 0:
+                break
+            if msg.message == WM_HOTKEY and msg.wParam == _HOTKEY_ID:
+                print(f"[hotkey] {label} 按下，唤回窗口")
+                try:
+                    _show_window()
+                    _update_tray_label()
+                except Exception:
+                    pass
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+    except Exception as e:
+        print(f"[hotkey] 全局热键线程异常: {e}")
+
+
+# ============================================================
 # 托盘启动（daemon 线程，独立于 WebView 主线程）
 # ============================================================
 def _run_tray():
@@ -438,6 +499,12 @@ def _main():
     # 3. 托盘 daemon（后台线程跑 pystray 主循环）
     threading.Thread(target=_run_tray, daemon=True).start()
     print("✅ 系统托盘已就绪")
+
+    # 3.5 全局热键（唤回窗口，实际组合见线程日志）
+    try:
+        threading.Thread(target=_run_global_hotkey, daemon=True).start()
+    except Exception as e:
+        print(f"[hotkey] 全局热键启动失败: {e}")
 
     # 4. WebView 窗口（主线程阻塞）
     window = webview.create_window(

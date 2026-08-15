@@ -320,16 +320,24 @@ class DeliverMixin:
                 sync_progress="部分失败: " + "; ".join(errors[:2]),
                 last_delivered_at=now)
         else:
-            # Shell.CopyHere 是异步的, 此时只表示"已发起"
-            # 保持 delivering 状态一会儿, 让用户看 Shell 对话框
-            def _mark_done():
-                import time as _t
-                _t.sleep(5)
-                self.db.update_project_status(
-                    project_name, delivery_status="delivered",
-                    sync_progress="", last_delivered_at=now)
+            # Shell.CopyHere 是异步的，用后台线程轮询目标目录，实时更新真实进度
+            expected_files = [os.path.basename(p) for p, _ in file_map]
+            # 记录目标目录，供前端回传完成后弹窗"打开目录/复制路径"
+            with self._lock:
+                self._deliver_tasks[project_name] = {
+                    "task_type": "batch_files",
+                    "status": "running",
+                    "dst": dst_dir,
+                    "total": len(expected_files),
+                    "message": "批量回传中...",
+                    "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+
             import threading as _th
-            _th.Thread(target=_mark_done, daemon=True).start()
+            _th.Thread(
+                target=self._poll_batch_copy_progress,
+                args=(project_name, dst_dir, expected_files, now),
+                daemon=True).start()
 
         # 返回结果列表 (所有已成功发起)
         results = []
@@ -349,6 +357,58 @@ class DeliverMixin:
                 "Shell 批量回传" if ok else "批量失败: " + str(errors[0] if errors else "未知"))
 
         return results
+
+    def _poll_batch_copy_progress(self, project_name, dst_dir, expected_files, started_at):
+        """后台线程：轮询目标目录，实时更新批量回传的真实进度，完成后标记 delivered。"""
+        import time as _t
+        total = len(expected_files)
+        last_count = -1
+        done_ts = None
+        # 最多等 5 分钟
+        deadline = _t.time() + 300
+        while _t.time() < deadline:
+            try:
+                present = set(os.listdir(dst_dir)) if os.path.isdir(dst_dir) else set()
+                cur = sum(1 for f in expected_files if f in present)
+            except Exception:
+                cur = last_count
+            if cur != last_count:
+                last_count = cur
+                self.db.update_project_status(
+                    project_name, sync_progress="回传 %d/%d 文件" % (cur, total))
+                with self._lock:
+                    t = self._deliver_tasks.get(project_name, {})
+                    t["current"] = cur
+            if cur >= total:
+                # 全部到位：等 1 秒稳定后标记完成
+                if done_ts is None:
+                    done_ts = _t.time()
+                elif _t.time() - done_ts >= 1:
+                    self.db.update_project_status(
+                        project_name, delivery_status="delivered",
+                        sync_progress="批量回传完成（%d 个文件）" % total,
+                        last_delivered_at=started_at)
+                    with self._lock:
+                        t = self._deliver_tasks.get(project_name, {})
+                        t["status"] = "done"
+                        t["pct"] = 100
+                    self.db.add_sync_log(
+                        project_name, "批量回传完成", "group->production",
+                        file_path=dst_dir, status="success",
+                        message="已回传 %d 个文件到 %s" % (total, dst_dir))
+                    self._notify_desktop("✅ 批量回传完成", project_name + "（%d 个文件）" % total)
+                    return
+            elif done_ts is not None:
+                done_ts = None
+            _t.sleep(1)
+        # 超时兜底
+        try:
+            self.db.update_project_status(
+                project_name, delivery_status="delivered",
+                sync_progress="批量回传完成（%d 个文件，请核对）" % total,
+                last_delivered_at=started_at)
+        except Exception:
+            pass
 
     def list_output_files(self, project_name):
         """列出项目所有 01上映单集版 目录中的文件（group → production fallback）。

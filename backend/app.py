@@ -376,6 +376,28 @@ def api_deliver_folder(project_name):
 _VIDEO_EXTS = {'.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv', '.ts', '.m2ts', '.wmv', '.rmvb', '.rm', '.3gp'}
 
 
+@app.route("/api/project/<path:project_name>/deliver_dst", methods=["GET"])
+def api_project_deliver_dst(project_name):
+    """返回项目最近一次成片回传的目标目录（制作部上映单集版），供回传完成后打开/复制。"""
+    proj = sync_engine.db.get_project(project_name) or {}
+    # 优先从最近交付任务取
+    dst = None
+    with sync_engine._lock:
+        t = sync_engine._deliver_tasks.get(project_name, {})
+        dst = t.get("dst") or None
+    if not dst:
+        prod_path = proj.get("production_path") or ""
+        if prod_path:
+            dirs = sync_engine._find_output_dirs(prod_path, project_name)
+            dst = dirs[0] if dirs else None
+    if not dst:
+        dst, _ = sync_engine.get_dest_dir(project_name)
+    if not dst:
+        return jsonify({"ok": False, "message": "未找到回传目标目录"}), 404
+    return jsonify({"ok": True, "path": dst, "project_name": project_name})
+
+
+
 @app.route("/api/preview/open_local", methods=["POST"])
 def api_preview_open_local():
     """用本地默认播放器（如 PotPlayer）打开视频文件。"""
