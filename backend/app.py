@@ -62,6 +62,16 @@ logging.basicConfig(
             backupCount=_log_backups, encoding="utf-8"),
     ])
 
+# 治理日志噪音：waitress.queue 的 "Task queue depth is N" 警告会大量刷屏
+# （负载高时每秒几十条，占满日志）。这类负载提示仅在 DEBUG 排查时有价值，
+# 平时把它抑制到 ERROR 级别，避免日志快速膨胀。
+try:
+    logging.getLogger("waitress.queue").setLevel(logging.ERROR)
+    # waitress 主 logger 保持 WARNING（保留真正的错误），避免误伤其他告警
+    logging.getLogger("waitress").setLevel(logging.WARNING)
+except Exception:
+    pass
+
 logger = logging.getLogger("nas-bridge")
 
 db = Database(config.get("database", "nas_bridge.db"))
@@ -1142,4 +1152,10 @@ if __name__ == "__main__":
 
 
 def create_app():
+    # 启动成片目录监听（桌面版走 create_app 也会生效；Web 版 main() 里也会调 start，
+    # 已由 Watcher.start 的幂等保护避免重复启动）
+    try:
+        threading.Thread(target=watcher.start, daemon=True).start()
+    except Exception:
+        pass
     return app

@@ -82,6 +82,7 @@ class Watcher:
         self._timer = None
         self._retry_queue = []   # [(file_path, retry_count), ...]
         self._max_retries = 3
+        self._started = False    # 幂等保护，防止重复启动
 
     def _get_output_dir_name(self, project_name):
         if project_name in self.special_projects:
@@ -93,6 +94,9 @@ class Watcher:
         if not self.enabled:
             logger.info("成片监听已禁用")
             return
+        if self._started:
+            return  # 幂等：已启动则忽略
+        self._started = True
         self._refresh_watches()
         self._timer = threading.Timer(60, self._refresh_loop)
         self._timer.daemon = True

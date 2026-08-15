@@ -52,6 +52,12 @@ backend/config.yaml
 data/config.json
 
 # ===========================
+# 本地工具配置 / 运行时缓存
+# ===========================
+.claude/
+data/output_dirs_cache.json
+
+# ===========================
 # Node (如果未来加前端工具链)
 # ===========================
 node_modules/

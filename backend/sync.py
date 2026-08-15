@@ -476,17 +476,27 @@ class SyncMixin:
         return self.output_dir_name
 
     def _find_output_dirs(self, base_path, project_name):
-        """在项目目录下递归查找 01上映单集版 目录，带缓存"""
+        """在项目目录下递归查找 01上映单集版 目录，带持久化缓存"""
         cache_key = base_path + "|" + project_name
         with self._lock:
             if cache_key in self._output_dir_cache:
-                return self._output_dir_cache[cache_key]
+                cached = self._output_dir_cache[cache_key]
+                # 校验缓存路径仍存在；若全部失效则重新扫描（项目可能已移动/删除）
+                if cached:
+                    alive = [d for d in cached if os.path.isdir(d)]
+                    if alive == cached:
+                        return cached
+                # 缓存失效，重新扫描
+                self._output_dir_cache.pop(cache_key, None)
 
         dir_name = self._get_output_dir_name(project_name)
         dirs = find_dir_recursive(base_path, dir_name)
 
         with self._lock:
             self._output_dir_cache[cache_key] = dirs
+            # 写盘持久化，重启后免重扫（只在新增条目时写，避免高频重复写盘）
+            if len(self._output_dir_cache) > self._last_cache_save_size:
+                self._save_output_dir_cache()
         return dirs
 
     def _cleanup_partial_dst(self, dst):
@@ -502,6 +512,12 @@ class SyncMixin:
     def clear_cache(self):
         with self._lock:
             self._output_dir_cache.clear()
+        # 同时删除持久化缓存文件，避免下次启动加载旧数据
+        try:
+            if hasattr(self, "_output_dir_cache_file") and os.path.isfile(self._output_dir_cache_file):
+                os.remove(self._output_dir_cache_file)
+        except Exception:
+            pass
 
     # ============================================================
     # 桌面版任务栏闪烁 + 通知钩子
