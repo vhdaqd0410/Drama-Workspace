@@ -520,8 +520,6 @@ a{color:var(--blue);text-decoration:none}
         <option value="已交付">已交付</option>
         <option value="待质检">待质检</option>
         <option value="质检中">质检中</option>
-        <option value="质检通过">质检通过</option>
-        <option value="质检失败">质检失败</option>
         <option value="已完成">已完成</option>
       </select>
     </div>
@@ -542,6 +540,7 @@ a{color:var(--blue);text-decoration:none}
     
     <div class="filter-spacer"></div>
     <div class="filter-count" id="filterCount"></div>
+    <button id="clearFilterBtn" class="btn btn-sm" onclick="clearAllFilters()" style="display:none;color:#c5221f;border-color:#f5c6c4" title="清除所有筛选">✕ 清除筛选</button>
   </div>
   <div id="episodeAlertBanner" style="display:none"></div>
   <div id="projectGrid" class="sections-container"></div>
@@ -909,7 +908,7 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260815a"></script>
+<script src="/static/js/core.js?v=20260815b"></script>
 <script src="/static/js/project.js?v=20260815q"></script>
 <script src="/static/js/tabs.js?v=20260815m"></script>
 <script src="/static/js/episode.js?v=20260815s"></script>

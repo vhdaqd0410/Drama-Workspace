@@ -313,17 +313,6 @@ function renderStats(){
     const s = String(p.custom_status || '');
     return s.includes('剪辑') || s.includes('审核') || s.includes('修改');
   }).length;
-  const passed = list.filter(p => {
-    const q = p.qa_status;
-    if (!q || typeof q !== 'object') return false;
-    return String(q.status || '').toLowerCase() === 'pass';
-  }).length;
-  const failed = list.filter(p => {
-    const q = p.qa_status;
-    if (!q || typeof q !== 'object') return false;
-    const s = String(q.status || '').toLowerCase();
-    return s === 'fail' || s === 'error';
-  }).length;
   const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
   // 只统计"有实际制作痕迹"的项目（排除空壳/模板目录）
   const activeList = list.filter(p => {
@@ -333,12 +322,16 @@ function renderStats(){
     return s || (d && d !== 'pending') || t > 0;
   });
   const thisMonth = activeList.filter(p => p.project_month === nowMonth).length;
+  // 本月已完成项目 = 本月且有"已完成"状态 或 已完成组里的本月项目
+  const thisMonthDone = activeList.filter(p =>
+    p.project_month === nowMonth &&
+    String(p.custom_status || '').trim() === '已完成'
+  ).length;
   $('statsRow').innerHTML=`
-    <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fff3cd;color:#856404">📅</div><div><div class="stat-num">${thisMonth}</div><div class="stat-label">本月项目</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">📁</div><div><div class="stat-num">${total}</div><div class="stat-label">总项目</div></div></div>
-    <div class="stat-card"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">✅</div><div><div class="stat-num">${passed}</div><div class="stat-label">质检通过</div></div></div>
-    <div class="stat-card"><div class="stat-icon red">❌</div><div><div class="stat-num">${failed}</div><div class="stat-label">质检失败</div></div></div>`;
+    <div class="stat-card" onclick="$('globalSearch').value='';$('filterStatus').value='';$('filterDept').value='';$('filterMonth').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon blue">📁</div><div><div class="stat-num">${total}</div><div class="stat-label">总项目</div></div></div>
+    <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fff3cd;color:#856404">📅</div><div><div class="stat-num">${thisMonth}</div><div class="stat-label">本月项目</div></div></div>
+    <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='已完成';renderDashboard()" style="cursor:pointer"><div class="stat-icon green">✅</div><div><div class="stat-num">${thisMonthDone}</div><div class="stat-label">本月已完成</div></div></div>
+    <div class="stat-card" onclick="$('filterMonth').value='';$('filterStatus').value='';$('globalSearch').value='';renderDashboard();document.querySelector('#projectGrid').scrollIntoView()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>`;
 }
 function getDeptStyle(dept){
   if(!dept)return '';
@@ -471,6 +464,18 @@ function updateMonthFilter(){
   if(cur){const opts=Array.from(sel.options);for(const o of opts){if(o.value===cur){sel.value=cur;break}}}
 }
 
+// 清除所有筛选条件
+function clearAllFilters(){
+  try{
+    if($('globalSearch'))$('globalSearch').value='';
+    if($('filterDept'))$('filterDept').value='';
+    if($('filterStatus'))$('filterStatus').value='';
+    if($('filterMonth'))$('filterMonth').value='';
+    renderDashboard();
+    toast('已清除全部筛选', 'info');
+  }catch(e){}
+}
+
 function updateDepartmentFilter(){
   const depts=[...new Set(projects.map(p=>p.department).filter(Boolean))];
   const sel=$('filterDept');
@@ -572,6 +577,13 @@ function renderDashboard(){
     const arrow=sec.collapsed?'▶':'▼';
     totalShown+=projs.length;
 
+    // 组内NAS section 高亮（本部门进行中，最常看）
+    const isGroupActive = sec.key === 'group_active';
+    const sectionHeaderStyle = isGroupActive
+      ? 'background:linear-gradient(135deg,#f0f7ff,#e3eefb);'
+      : '';
+    const titlePrefix = isGroupActive ? '🎯 ' : (sec.type==='completed' ? '✅ ' : '');
+
     // 组内NAS (group_active) 或筛选激活 → 全渲染
     const alwaysFull = (sec.key === 'group_active') || _forceFull;
     const renderCount = alwaysFull ? projs.length : Math.min(_LAZY_BATCH, projs.length);
@@ -589,9 +601,9 @@ function renderDashboard(){
       : '';
     return `
     <div class="section-block ${collapsed}" data-section-key="${sec.key}">
-      <div class="section-header" onclick="toggleSection('${sec.key}')">
+      <div class="section-header" onclick="toggleSection('${sec.key}')" style="${sectionHeaderStyle}">
         <span class="section-arrow">${arrow}</span>
-        <span class="section-title">${sec.name}</span>
+        <span class="section-title">${titlePrefix}${sec.name}</span>
         ${batchRefreshBtn}
         <span class="section-count">${projs.length} 个项目${hasMore?' (首次显示 '+renderCount+')':''}</span>
       </div>
@@ -626,6 +638,13 @@ function renderDashboard(){
   if(fc){
     const total=allSections.reduce((s,sec)=>s+(sec.projects?.length||0),0);
     fc.textContent=`显示 ${totalShown} / ${total} 个项目`;
+  }
+
+  // 清除筛选按钮：有激活筛选时显示
+  const clearBtn=$('clearFilterBtn');
+  if(clearBtn){
+    const hasFilter = q || fd || fs || fm;
+    clearBtn.style.display = hasFilter ? 'inline-block' : 'none';
   }
 
   // 批量栏
