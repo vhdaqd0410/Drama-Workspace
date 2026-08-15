@@ -36,6 +36,11 @@ function startKeyRecord(type){
   window._keyRecorder = function(e){
     e.preventDefault();
     e.stopPropagation();
+    // Esc 取消录制
+    if(e.key === 'Escape'){
+      _cancelKeyRecord(type);
+      return;
+    }
     var mods = [];
     if(e.ctrlKey||e.metaKey) mods.push('ctrl');
     if(e.altKey) mods.push('alt');
@@ -45,23 +50,47 @@ function startKeyRecord(type){
     if(key==='control'||key==='alt'||key==='shift'||key==='meta') return; // 只按修饰键不记录
     if(key===' ') key='space';
     // 数字键/字母键/功能键
-    var valid = /^[a-z0-9]$/.test(key) || /^f\d{1,2}$/.test(key) || key==='space' || key==='enter' || key==='tab' || key==='esc';
+    var valid = /^[a-z0-9]$/.test(key) || /^f\d{1,2}$/.test(key) || key==='space' || key==='enter' || key==='tab';
     if(!valid){
-      toast('请使用字母/数字/功能键组合', 'warning');
+      toast('请使用字母/数字/功能键组合，Esc 取消', 'warning');
       return;
     }
     if(mods.length === 0){
-      toast('请至少包含一个修饰键（Ctrl/Alt/Shift）', 'warning');
+      toast('请至少包含一个修饰键（Ctrl/Alt/Shift），Esc 取消', 'warning');
       return;
     }
     var shortcut = mods.concat([key]).join('+');
-    window.removeEventListener('keydown', window._keyRecorder);
-    window._keyRecorder = null;
-    _keyRecording = null;
-    // 保存
-    _saveRecordedShortcut(type, shortcut);
+    _finishKeyRecord(type, shortcut);
   };
   window.addEventListener('keydown', window._keyRecorder);
+}
+
+// 结束录制并保存
+function _finishKeyRecord(type, shortcut){
+  if(window._keyRecorder){
+    window.removeEventListener('keydown', window._keyRecorder);
+    window._keyRecorder = null;
+  }
+  _keyRecording = null;
+  _saveRecordedShortcut(type, shortcut);
+}
+
+// 取消录制（Esc 或超时）
+function _cancelKeyRecord(type){
+  if(window._keyRecorder){
+    window.removeEventListener('keydown', window._keyRecorder);
+    window._keyRecorder = null;
+  }
+  _keyRecording = null;
+  var inputId = type === 'global' ? 'cfgGlobalSearchShortcut'
+    : type === 'wakeup' ? 'cfgWakeupShortcut' : 'cfgSearchShortcut';
+  var input = document.getElementById(inputId);
+  if(input){
+    input.value = '';
+    input.style.color = '';
+    input.style.fontWeight = '';
+  }
+  toast('已取消录制', 'info');
 }
 
 function _saveRecordedShortcut(type, shortcut){

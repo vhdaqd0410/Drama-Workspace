@@ -1,6 +1,15 @@
 // DOMContentLoaded 入口
 document.addEventListener('DOMContentLoaded',async ()=>{
   try{
+    // 清理可能残留的快捷键录制监听器（防止拦截所有快捷键）
+    try{
+      if(window._keyRecorder){
+        window.removeEventListener('keydown', window._keyRecorder);
+        window._keyRecorder = null;
+      }
+      window._keyRecording = null;
+    }catch(_){}
+
     // 加载用户设置（快捷键配置等），失败不阻塞
     try{
       const _set = await fetch('/api/settings').then(r=>r.json());

@@ -485,6 +485,7 @@ a{color:var(--blue);text-decoration:none}
 <div class="header">
   <div class="header-left"><div class="logo"><span class="logo-icon">🎬</span>视频工作台</div></div>
   <div class="header-right">
+    <button class="btn btn-icon" onclick="openSearchModal()" title="全局搜索 (Ctrl+K)">🔍</button>
     <div class="h-search">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
       <input id="globalSearch" type="text" placeholder="搜索项目...">
@@ -959,13 +960,13 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/fenji-init.js?v=20260815n"></script>
 <script src="/static/js/fenji-assign.js?v=20260815n"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
-<script src="/static/js/team.js?v=20260815q"></script>
+<script src="/static/js/team.js?v=20260815r"></script>
 <script src="/static/js/deliverables.js?v=20260815m"></script>
 <script src="/static/js/deliver-events.js?v=20260815n"></script>
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>
 <script src="/static/js/preview.js?v=20260815m"></script>
 <script src="/static/js/deliver-patch.js?v=20260815m"></script>
-<script src="/static/js/app.js?v=20260815n"></script>
+<script src="/static/js/app.js?v=20260815o"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};
 if(window.__IS_DESKTOP__){
