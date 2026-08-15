@@ -1341,9 +1341,12 @@ class DeliverMixin:
                     project_name,
                     delivery_status="delivered",
                     last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    custom_status="待质检",
+                    custom_status="已完成",
                     sync_progress="交付完成（系统复制）",
                 )
+                # 交付完成后把项目归档到组内NAS的 00已完成 目录，
+                # 使其出现在首页"已完成"分组（而不是因"已完成"状态被过滤而消失）
+                self._move_to_completed(project_name)
                 self.db.add_sync_log(
                     project_name, "一键交付完成", "group->production",
                     file_path=src, status="success",
