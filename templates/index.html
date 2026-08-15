@@ -845,43 +845,30 @@ a{color:var(--blue);text-decoration:none}
     <div class="panel settings-section"><h3>⚡ 快捷键设置</h3>
       <div class="form-group">
         <label>🌐 全局搜索项目</label>
-        <select id="cfgGlobalSearchShortcut" onchange="saveGlobalSearchShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
-          <option value="">Ctrl+Alt+S（默认）</option>
-          <option value="ctrl+alt+s">Ctrl+Alt+S</option>
-          <option value="ctrl+shift+s">Ctrl+Shift+S</option>
-          <option value="ctrl+alt+p">Ctrl+Alt+P</option>
-          <option value="ctrl+shift+p">Ctrl+Shift+P</option>
-          <option value="alt+f">Alt+F</option>
-          <option value="ctrl+shift+f">Ctrl+Shift+F</option>
-          <option value="ctrl+alt+g">Ctrl+Alt+G</option>
-        </select>
-        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">软件在后台时，从任意程序按此快捷键可唤起搜索框。⚠️ 修改后需重启软件生效。</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="cfgGlobalSearchShortcut" readonly placeholder="点击下方按钮录制，或默认 Ctrl+Alt+S" style="flex:1;padding:8px;border:1px solid var(--bg-border);border-radius:6px;background:#fff;cursor:pointer" onclick="startKeyRecord('global')">
+          <button class="btn btn-sm" onclick="startKeyRecord('global')">🎹 录制</button>
+          <button class="btn btn-sm danger" onclick="clearKeyRecord('global')" title="恢复默认">✕</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">点击「录制」后按下想要的组合键（如 Ctrl+Alt+Z）。软件在后台时从任意程序可唤起搜索框。⚠️ 重启软件生效。</div>
       </div>
       <div class="form-group" style="margin-top:12px">
         <label>📄 页面内搜索</label>
-        <select id="cfgSearchShortcut" onchange="saveShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
-          <option value="">Ctrl+K / Ctrl+F（默认）</option>
-          <option value="ctrl+space">Ctrl+Space</option>
-          <option value="ctrl+g">Ctrl+G</option>
-          <option value="alt+s">Alt+S</option>
-          <option value="ctrl+e">Ctrl+E</option>
-          <option value="ctrl+p">Ctrl+P</option>
-        </select>
-        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">软件窗口内搜索，选择后立即生效，支持模糊搜索</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="cfgSearchShortcut" readonly placeholder="点击下方按钮录制，或默认 Ctrl+K/F" style="flex:1;padding:8px;border:1px solid var(--bg-border);border-radius:6px;background:#fff;cursor:pointer" onclick="startKeyRecord('page')">
+          <button class="btn btn-sm" onclick="startKeyRecord('page')">🎹 录制</button>
+          <button class="btn btn-sm danger" onclick="clearKeyRecord('page')" title="恢复默认">✕</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">软件窗口内搜索，录制后立即生效，支持模糊搜索</div>
       </div>
       <div class="form-group" style="margin-top:12px">
         <label>🪟 全局唤醒窗口</label>
-        <select id="cfgWakeupShortcut" onchange="saveWakeupShortcut()" style="padding:8px;border:1px solid var(--bg-border);border-radius:6px">
-          <option value="">默认（自动选择）</option>
-          <option value="ctrl+shift+b">Ctrl+Shift+B</option>
-          <option value="ctrl+shift+g">Ctrl+Shift+G</option>
-          <option value="alt+shift+b">Alt+Shift+B</option>
-          <option value="alt+g">Alt+G</option>
-          <option value="ctrl+alt+w">Ctrl+Alt+W</option>
-          <option value="ctrl+alt+d">Ctrl+Alt+D</option>
-          <option value="ctrl+shift+w">Ctrl+Shift+W</option>
-        </select>
-        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">窗口隐藏到托盘后，按此快捷键可从任意程序唤回窗口。⚠️ 修改后需重启软件生效。</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="cfgWakeupShortcut" readonly placeholder="点击下方按钮录制，或默认自动选择" style="flex:1;padding:8px;border:1px solid var(--bg-border);border-radius:6px;background:#fff;cursor:pointer" onclick="startKeyRecord('wakeup')">
+          <button class="btn btn-sm" onclick="startKeyRecord('wakeup')">🎹 录制</button>
+          <button class="btn btn-sm danger" onclick="clearKeyRecord('wakeup')" title="恢复默认">✕</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">窗口隐藏到托盘后，从任意程序按此快捷键唤回窗口。⚠️ 重启软件生效。</div>
       </div>
     </div>
     <div class="panel settings-section" style="grid-column:1/-1"><h3>👤 分集默认</h3>
@@ -972,7 +959,7 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/fenji-init.js?v=20260815n"></script>
 <script src="/static/js/fenji-assign.js?v=20260815n"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
-<script src="/static/js/team.js?v=20260815p"></script>
+<script src="/static/js/team.js?v=20260815q"></script>
 <script src="/static/js/deliverables.js?v=20260815m"></script>
 <script src="/static/js/deliver-events.js?v=20260815n"></script>
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>

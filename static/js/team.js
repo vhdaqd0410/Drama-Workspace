@@ -1,4 +1,118 @@
 // Config + Team 管理
+// 快捷键显示格式化：'ctrl+alt+z' → 'Ctrl+Alt+Z'
+function _fmtShortcut(s){
+  if(!s) return '';
+  return String(s).toLowerCase().split('+').map(function(p){
+    p = p.trim();
+    if(p==='ctrl') return 'Ctrl';
+    if(p==='control') return 'Ctrl';
+    if(p==='alt') return 'Alt';
+    if(p==='shift') return 'Shift';
+    if(p==='meta') return 'Win';
+    if(p==='space') return 'Space';
+    return p.toUpperCase();
+  }).join('+');
+}
+// 当前录制状态
+var _keyRecording = null;  // 'global' | 'page' | 'wakeup'
+
+function startKeyRecord(type){
+  if(_keyRecording){
+    toast('请先完成当前录制', 'warning');
+    return;
+  }
+  _keyRecording = type;
+  var inputId = type === 'global' ? 'cfgGlobalSearchShortcut'
+    : type === 'wakeup' ? 'cfgWakeupShortcut' : 'cfgSearchShortcut';
+  var input = document.getElementById(inputId);
+  if(input){
+    input.value = '按下组合键...';
+    input.style.color = '#0071e3';
+    input.style.fontWeight = '600';
+  }
+  toast('🎹 按下你想要的组合键（如 Ctrl+Alt+Z）', 'info');
+
+  // 一次性监听 keydown
+  window._keyRecorder = function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    var mods = [];
+    if(e.ctrlKey||e.metaKey) mods.push('ctrl');
+    if(e.altKey) mods.push('alt');
+    if(e.shiftKey) mods.push('shift');
+    // 主键
+    var key = (e.key||'').toLowerCase();
+    if(key==='control'||key==='alt'||key==='shift'||key==='meta') return; // 只按修饰键不记录
+    if(key===' ') key='space';
+    // 数字键/字母键/功能键
+    var valid = /^[a-z0-9]$/.test(key) || /^f\d{1,2}$/.test(key) || key==='space' || key==='enter' || key==='tab' || key==='esc';
+    if(!valid){
+      toast('请使用字母/数字/功能键组合', 'warning');
+      return;
+    }
+    if(mods.length === 0){
+      toast('请至少包含一个修饰键（Ctrl/Alt/Shift）', 'warning');
+      return;
+    }
+    var shortcut = mods.concat([key]).join('+');
+    window.removeEventListener('keydown', window._keyRecorder);
+    window._keyRecorder = null;
+    _keyRecording = null;
+    // 保存
+    _saveRecordedShortcut(type, shortcut);
+  };
+  window.addEventListener('keydown', window._keyRecorder);
+}
+
+function _saveRecordedShortcut(type, shortcut){
+  var inputId = type === 'global' ? 'cfgGlobalSearchShortcut'
+    : type === 'wakeup' ? 'cfgWakeupShortcut' : 'cfgSearchShortcut';
+  var input = document.getElementById(inputId);
+  var settingKey = type === 'global' ? 'global_search_shortcut'
+    : type === 'wakeup' ? 'wakeup_shortcut' : 'search_shortcut';
+  var label = type === 'global' ? '全局搜索' : type === 'wakeup' ? '全局唤醒' : '页面内搜索';
+
+  if(input){
+    input.value = _fmtShortcut(shortcut);
+    input.style.color = '';
+    input.style.fontWeight = '';
+  }
+
+  // 保存到后端
+  var body = {}; body[settingKey] = shortcut;
+  api('PUT', '/api/settings', body).then(function(){
+    // 更新前端生效的配置
+    if(type === 'global'){
+      // 页面内也支持全局搜索快捷键（作为补充）
+    } else if(type === 'page'){
+      window._shortcutConfig = window._shortcutConfig || {};
+      window._shortcutConfig.search = shortcut;
+    }
+    toast('✅ ' + label + '快捷键已设置: ' + _fmtShortcut(shortcut) + (type==='page' ? '（已生效）' : '（重启软件生效）'),
+      type==='page' ? 'success' : 'info');
+  }).catch(function(){
+    toast('保存失败', 'error');
+  });
+}
+
+function clearKeyRecord(type){
+  var inputId = type === 'global' ? 'cfgGlobalSearchShortcut'
+    : type === 'wakeup' ? 'cfgWakeupShortcut' : 'cfgSearchShortcut';
+  var settingKey = type === 'global' ? 'global_search_shortcut'
+    : type === 'wakeup' ? 'wakeup_shortcut' : 'search_shortcut';
+  var label = type === 'global' ? '全局搜索' : type === 'wakeup' ? '全局唤醒' : '页面内搜索';
+  var input = document.getElementById(inputId);
+  if(input) input.value = '';
+  var body = {}; body[settingKey] = '';
+  api('PUT', '/api/settings', body).then(function(){
+    if(type === 'page'){
+      window._shortcutConfig = window._shortcutConfig || {};
+      window._shortcutConfig.search = '';
+    }
+    toast(label + '快捷键已恢复默认', 'info');
+  }).catch(function(){});
+}
+
 async function loadConfig(){
   try{
     const cfg=await api('GET','/api/config');
@@ -13,17 +127,18 @@ async function loadConfig(){
   try{
     const d = await api('GET', '/api/settings');
     if(d && d.ok && d.settings){
-      if(d.settings.search_shortcut){
-        const sel = document.getElementById('cfgSearchShortcut');
-        if(sel) sel.value = d.settings.search_shortcut;
+      var cfg = d.settings;
+      if(cfg.search_shortcut){
+        var s1 = document.getElementById('cfgSearchShortcut');
+        if(s1) s1.value = _fmtShortcut(cfg.search_shortcut);
       }
-      if(d.settings.wakeup_shortcut){
-        const sel2 = document.getElementById('cfgWakeupShortcut');
-        if(sel2) sel2.value = d.settings.wakeup_shortcut;
+      if(cfg.wakeup_shortcut){
+        var s2 = document.getElementById('cfgWakeupShortcut');
+        if(s2) s2.value = _fmtShortcut(cfg.wakeup_shortcut);
       }
-      if(d.settings.global_search_shortcut){
-        const sel3 = document.getElementById('cfgGlobalSearchShortcut');
-        if(sel3) sel3.value = d.settings.global_search_shortcut;
+      if(cfg.global_search_shortcut){
+        var s3 = document.getElementById('cfgGlobalSearchShortcut');
+        if(s3) s3.value = _fmtShortcut(cfg.global_search_shortcut);
       }
     }
   }catch(_){}
@@ -38,34 +153,6 @@ async function saveConfig(){
     suggested_names:$('cfgNames').value.split('\n').map(s=>s.trim()).filter(Boolean)
   };
   try{await api('POST','/api/config',cfg);toast('设置已保存','success')}catch(e){toast('保存失败: '+e.message,'error')}
-}
-async function saveShortcut(){
-  const sel = document.getElementById('cfgSearchShortcut');
-  if(!sel) return;
-  const val = sel.value;
-  try{
-    await api('PUT', '/api/settings', { search_shortcut: val });
-    window._shortcutConfig = { search: val };
-    toast('⚡ 快捷键已更新' + (val ? ': ' + val : '（默认 Ctrl+K/F）'), 'success');
-  }catch(e){ toast('保存失败: '+e.message,'error'); }
-}
-async function saveWakeupShortcut(){
-  const sel = document.getElementById('cfgWakeupShortcut');
-  if(!sel) return;
-  const val = sel.value;
-  try{
-    await api('PUT', '/api/settings', { wakeup_shortcut: val });
-    toast('⚡ 全局唤醒快捷键已保存' + (val ? ': ' + val : '（默认自动选择）') + '，重启软件生效', 'info');
-  }catch(e){ toast('保存失败: '+e.message,'error'); }
-}
-async function saveGlobalSearchShortcut(){
-  const sel = document.getElementById('cfgGlobalSearchShortcut');
-  if(!sel) return;
-  const val = sel.value;
-  try{
-    await api('PUT', '/api/settings', { global_search_shortcut: val });
-    toast('🌐 全局搜索快捷键已保存' + (val ? ': ' + val : '（默认 Ctrl+Alt+S）') + '，重启软件生效', 'info');
-  }catch(e){ toast('保存失败: '+e.message,'error'); }
 }
 async function migrateOld(){
   try{toast('正在迁移...','info');const r=await api('POST','/api/migrate');toast((r&&r.message)||'迁移完成','success')}catch(e){toast('迁移失败: '+e.message,'error')}

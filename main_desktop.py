@@ -480,7 +480,6 @@ def _run_global_hotkey():
             if ret <= 0:
                 break
             if msg.message == WM_HOTKEY:
-                hwnd = msg.hwnd
                 wparam = msg.wParam
                 if wparam == HOTKEY_ID_WAKE and wake:
                     print(f"[hotkey] {wake[0]} 按下，唤回窗口")
