@@ -763,6 +763,16 @@ function _ctPopup(name){ return document.getElementById('ctodo-popup-' + _ctSani
 function _ctTrigger(name){ return document.getElementById('ctodo-trigger-' + _ctSanitize(name)); }
 let _ctMouse = { x: 0, y: 0 };
 function cardTodoMouse(e){ _ctMouse.x = e.clientX; _ctMouse.y = e.clientY; }
+// 关闭弹窗（带淡出动画）
+function _ctHide(pop){
+  if(!pop || !pop.classList.contains('show')) return;
+  pop.classList.add('hiding');
+  setTimeout(function(){
+    pop.classList.remove('show');
+    pop.classList.remove('hiding');
+    delete pop.dataset.pinned;
+  }, 175);
+}
 // 把弹窗定位到鼠标附近（跟随鼠标），并做视口边界钳制
 function _ctPosition(pop){
   const pad = 14;
@@ -778,7 +788,7 @@ function _ctPosition(pop){
 // 关闭所有打开的弹窗（跳过固定的）
 function _ctCloseOthers(){
   document.querySelectorAll('.card-todo-popup.show').forEach(p=>{
-    if(!p.dataset.pinned){ p.classList.remove('show'); }
+    if(!p.dataset.pinned) _ctHide(p);
   });
 }
 
@@ -787,8 +797,8 @@ function cardToggleTodo(name, el){
   const pop = _ctPopup(name);
   if(!pop) return;
   const isShow = pop.classList.contains('show');
-  // 关闭所有已开的（含固定）
-  document.querySelectorAll('.card-todo-popup.show').forEach(p=>{ p.classList.remove('show'); delete p.dataset.pinned; });
+  // 关闭所有已开的（含固定，淡出）
+  document.querySelectorAll('.card-todo-popup.show').forEach(p=>{ _ctHide(p); });
   if(!isShow){
     _ctPosition(pop);
     pop.classList.add('show');
@@ -815,7 +825,7 @@ function cardLeaveTodo(el){
   const pop = el.nextElementSibling;
   if(pop && pop.classList.contains('show') && !pop.dataset.pinned){
     setTimeout(function(){
-      if(!pop.matches(':hover')) pop.classList.remove('show');
+      if(!pop.matches(':hover')) _ctHide(pop);
     }, 200);
   }
 }

@@ -77,21 +77,15 @@ async function loadInsights(){
       }).join('');
     }
 
-    // 各剪辑当月集数：从当月项目 episode_plan/episodes 聚合（与工作台同口径）
-    const editorEps = {};
-    monthList.forEach(p => {
-      let plan = p.episode_plan;
-      if (typeof plan === 'string') { try { plan = JSON.parse(plan); } catch(e){ plan = null; } }
-      if (plan && typeof plan === 'object' && Object.keys(plan).length > 0) {
-        Object.entries(plan).forEach(([ep, editor]) => {
-          if (!editor) return;
-          const n = parseInt(ep, 10);
-          if (!isNaN(n)) editorEps[editor] = (editorEps[editor]||0) + 1;
-        });
-      } else {
-        (p.episodes || []).forEach(e => { if (e.editor) editorEps[e.editor] = (editorEps[e.editor]||0) + 1; });
+    // 各剪辑当月集数：与月度报告「剪辑师工作量」同源（/api/stats/dashboard editors）
+    let editorEps = {};
+    try{
+      const sd = await api('GET','/api/stats/dashboard');
+      if(sd && sd.editors && Array.isArray(sd.editors)){
+        editorEps = {};
+        sd.editors.forEach(e => { if(e && e.name && e.assigned) editorEps[e.name] = e.assigned; });
       }
-    });
+    }catch(e){ /* 保留空 */ }
     const editorDonut = buildDonut(editorEps);
 
     body.innerHTML = `
