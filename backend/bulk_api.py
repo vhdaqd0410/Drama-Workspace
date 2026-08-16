@@ -275,3 +275,95 @@ def register_routes(app, db):
         except Exception as e:
             import traceback; traceback.print_exc()
             return jsonify({"ok": False, "msg": str(e)}), 500
+
+    # ================================================================
+    # 数据看板统计 API
+    # ================================================================
+
+    @app.route("/api/stats/dashboard", methods=["GET"])
+    def api_stats_dashboard():
+        """数据看板：剪辑师工作量 + 部门统计 + 产能趋势。"""
+        import json as _json
+        from datetime import datetime as _dt
+
+        now = _dt.now()
+        cur_month = request.args.get("month", "") or now.strftime("%Y-%m")
+
+        # ---------- 1. 剪辑师工作量（分集 plan 统计） ----------
+        editor_workload = {}
+        with db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT name, episode_plan FROM projects"
+            ).fetchall()
+        for row in rows:
+            r = dict(row)
+            ep = r.get("episode_plan") or ""
+            if not ep or ep == "{}":
+                continue
+            try:
+                plan = _json.loads(ep) if isinstance(ep, str) else (ep or {})
+            except Exception:
+                continue
+            if not isinstance(plan, dict):
+                continue
+            for ep_num, editor in plan.items():
+                if not editor:
+                    continue
+                ed = editor.strip()
+                if not ed:
+                    continue
+                item = editor_workload.setdefault(ed, {"assigned": 0, "projects": set()})
+                item["assigned"] += 1
+                item["projects"].add(r.get("name"))
+
+        editor_list = [
+            {"name": name, "assigned": item["assigned"], "projects": len(item["projects"])}
+            for name, item in sorted(editor_workload.items(), key=lambda x: -x[1]["assigned"])
+        ]
+
+        # ---------- 2. 部门项目统计 ----------
+        with db.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT department,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN custom_status='已完成' THEN 1 ELSE 0 END) as completed,
+                          SUM(CASE WHEN custom_status IN ('剪辑中','审核中','修改中') THEN 1 ELSE 0 END) as editing,
+                          SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) as delivered
+                   FROM projects GROUP BY department ORDER BY total DESC"""
+            ).fetchall()
+        dept_stats = [dict(r) for r in rows]
+
+        # ---------- 3. 产能趋势（近6个月） ----------
+        months = []
+        for i in range(5, -1, -1):
+            d = _dt(now.year, now.month - i, 1)
+            months.append(d.strftime("%Y-%m"))
+        trend = []
+        for m in months:
+            with db.get_conn() as conn:
+                r = conn.execute(
+                    """SELECT COUNT(*) as total,
+                              SUM(CASE WHEN custom_status='已完成' THEN 1 ELSE 0 END) as done,
+                              SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) as delivered
+                       FROM projects WHERE project_month=?""",
+                    (m,),
+                ).fetchone()
+            trend.append({
+                "month": m,
+                "total": r["total"] or 0,
+                "done": r["done"] or 0,
+                "delivered": r["delivered"] or 0,
+            })
+
+        return jsonify({
+            "ok": True,
+            "month": cur_month,
+            "editors": editor_list,
+            "dept_stats": dept_stats,
+            "trend": trend,
+            "summary": {
+                "total_editors": len(editor_list),
+                "total_assigned": sum(e["assigned"] for e in editor_list),
+            },
+        })
+

@@ -509,6 +509,7 @@ a{color:var(--blue);text-decoration:none}
 <div class="tab-panel active" id="tab-dashboard">
   <div class="stats-row" id="statsRow"><div class="loading-wrap"><div class="spinner"></div><div>加载统计数据...</div></div></div>
   <div id="overviewCharts" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px"></div>
+  <div id="workloadBoard" style="margin-bottom:20px"></div>
   <div class="filter-bar" id="filterBar">
     <div class="filter-group">
       <label>📅 月份</label>
@@ -835,8 +836,23 @@ a{color:var(--blue);text-decoration:none}
   <div class="tab-panel" id="tab-settings">
   <div class="settings-grid">
     <div class="panel settings-section"><h3>🏢 NAS 路径</h3>
-      <div class="form-group"><label>group_root</label><input type="text" id="cfgGroupRoot"></div>
-      <div class="form-group"><label>production_roots (每行一个)</label><textarea id="cfgProdRoots"></textarea></div>
+      <div class="form-group">
+        <label>组内 NAS（group_root）</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="cfgGroupRoot" placeholder="例如 O:\AI漫剧剪辑一组" style="flex:1">
+          <button class="btn btn-sm btn-primary" onclick="saveGroupRoot()">💾 保存</button>
+        </div>
+        <div id="groupRootStatus" style="font-size:11px;color:#86868b;margin-top:4px"></div>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label>制作部 NAS（production_roots）</label>
+        <div id="prodRootsList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="newProdRoot" placeholder="添加新路径，如 N:\AI漫剧二部中转" style="flex:1">
+          <input type="text" id="newProdLabel" placeholder="部门标签(可选)" style="width:130px">
+          <button class="btn btn-sm btn-primary" onclick="addProdRoot()">＋ 添加</button>
+        </div>
+      </div>
     </div>
     <div class="panel settings-section"><h3>🔧 QA 设置</h3>
       <div class="form-group"><label>默认 Workers</label><input type="number" id="cfgWorkers" value="4"></div>
@@ -953,20 +969,20 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260815k"></script>
+<script src="/static/js/core.js?v=20260815l"></script>
 <script src="/static/js/project.js?v=20260815r"></script>
 <script src="/static/js/tabs.js?v=20260815n"></script>
 <script src="/static/js/episode.js?v=20260815s"></script>
 <script src="/static/js/fenji-init.js?v=20260815n"></script>
 <script src="/static/js/fenji-assign.js?v=20260815n"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
-<script src="/static/js/team.js?v=20260815r"></script>
+<script src="/static/js/team.js?v=20260815s"></script>
 <script src="/static/js/deliverables.js?v=20260815m"></script>
 <script src="/static/js/deliver-events.js?v=20260815n"></script>
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>
 <script src="/static/js/preview.js?v=20260815m"></script>
 <script src="/static/js/deliver-patch.js?v=20260815m"></script>
-<script src="/static/js/app.js?v=20260815o"></script>
+<script src="/static/js/app.js?v=20260815p"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};
 if(window.__IS_DESKTOP__){

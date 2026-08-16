@@ -56,6 +56,9 @@ document.addEventListener('DOMContentLoaded',async ()=>{
     // 3.7 全局快捷键
     try{ bindShortcuts(); } catch(e){ console.warn('shortcuts init failed', e); }
 
+    // 3.8 剪辑完成自动扫描提醒
+    try{ if(typeof initEditCompleteWatcher==='function') initEditCompleteWatcher(); }catch(_){}
+
     // 4. 自动刷新已禁用 — 由用户手动点 🔄 刷新 按钮触发
     // pollDashboard=setInterval(loadProjects,30000);
   }catch(e){

@@ -1,4 +1,78 @@
 // Config + Team 管理
+
+// ===== NAS 路径列表管理 =====
+async function loadNasPaths(){
+  try{
+    const d = await api('GET', '/api/config/paths');
+    if(!d || !d.ok) return;
+    // 组内路径
+    const gr = document.getElementById('cfgGroupRoot');
+    if(gr) gr.value = d.group_root || '';
+    const grStatus = document.getElementById('groupRootStatus');
+    if(grStatus){
+      const exists = await _pathExists(d.group_root);
+      grStatus.innerHTML = d.group_root
+        ? (exists ? '<span style="color:#2E7D32">✅ 路径可用</span>' : '<span style="color:#c5221f">⚠️ 路径不存在或不可访问</span>')
+        : '';
+    }
+    // 制作部路径列表
+    const list = document.getElementById('prodRootsList');
+    if(list){
+      const roots = d.production_roots || [];
+      const labels = d.production_labels || {};
+      if(roots.length === 0){
+        list.innerHTML = '<div style="color:#86868b;font-size:12px;padding:4px">暂无制作部路径</div>';
+      } else {
+        list.innerHTML = roots.map(function(path){
+          const label = labels[path] || '';
+          const safe = String(path).replace(/"/g,'&quot;').replace(/'/g,"&#39;");
+          return `<div style="display:flex;align-items:center;gap:6px;background:#f8fafc;border:1px solid #e5e8ee;border-radius:6px;padding:6px 8px">
+            <span style="flex:1;font-size:12px;font-family:monospace;word-break:break-all">${htm(path)}</span>
+            ${label ? `<span style="font-size:11px;color:#666;background:#eef2ff;padding:1px 6px;border-radius:4px">${htm(label)}</span>` : ''}
+            <button class="btn btn-sm danger" onclick="delProdRoot('${safe}')" title="删除">✕</button>
+          </div>`;
+        }).join('');
+      }
+    }
+  }catch(_){}
+}
+async function _pathExists(path){
+  if(!path) return false;
+  // 前端无法直接检测网络路径，用后端接口检测
+  try{
+    const d = await api('POST', '/api/config/path_check', { path: path });
+    return !!(d && d.ok && d.exists);
+  }catch(_){ return true; }
+}
+async function saveGroupRoot(){
+  const input = document.getElementById('cfgGroupRoot');
+  const path = (input.value||'').trim();
+  if(!path){ toast('请输入组内NAS路径','warning'); return; }
+  try{
+    const d = await api('POST', '/api/config/paths', { type: 'group', path: path });
+    toast(d.message || '已保存', d.ok ? 'success' : 'error');
+    if(d.ok){ loadNasPaths(); loadConfig(); }
+  }catch(e){ toast('保存失败: '+e.message,'error'); }
+}
+async function addProdRoot(){
+  const input = document.getElementById('newProdRoot');
+  const labelInput = document.getElementById('newProdLabel');
+  const path = (input.value||'').trim();
+  if(!path){ toast('请输入制作部路径','warning'); return; }
+  try{
+    const d = await api('POST', '/api/config/paths', { type: 'production', path: path, label: (labelInput.value||'').trim() });
+    toast(d.message || '已添加', d.ok ? 'success' : 'error');
+    if(d.ok){ input.value=''; labelInput.value=''; loadNasPaths(); loadConfig(); }
+  }catch(e){ toast('添加失败: '+e.message,'error'); }
+}
+async function delProdRoot(path){
+  if(!confirm('删除制作部路径 ' + path + '？')) return;
+  try{
+    const d = await api('DELETE', '/api/config/paths', { type: 'production', path: path });
+    toast(d.message || '已删除', d.ok ? 'success' : 'error');
+    if(d.ok){ loadNasPaths(); loadConfig(); }
+  }catch(e){ toast('删除失败: '+e.message,'error'); }
+}
 // 快捷键显示格式化：'ctrl+alt+z' → 'Ctrl+Alt+Z'
 function _fmtShortcut(s){
   if(!s) return '';
@@ -146,12 +220,13 @@ async function loadConfig(){
   try{
     const cfg=await api('GET','/api/config');
     $('cfgGroupRoot').value=cfg.group_root||'';
-    $('cfgProdRoots').value=(cfg.production_roots||[]).join('\n');
     $('cfgWorkers').value=cfg.qa_workers||cfg.workers||4;
     $('cfgFfmpeg').value=cfg.ffmpeg_path||cfg.ffmpeg||'';
     $('cfgFfprobe').value=cfg.ffprobe_path||cfg.ffprobe||'';
     $('cfgNames').value=(cfg.suggested_names||cfg.fenji_names||[]).join('\n');
   }catch(e){}
+  // 加载 NAS 路径列表（组内 + 制作部）
+  try{ await loadNasPaths(); }catch(_){}
   // 加载快捷键配置
   try{
     const d = await api('GET', '/api/settings');
@@ -175,7 +250,6 @@ async function loadConfig(){
 async function saveConfig(){
   const cfg={
     group_root:$('cfgGroupRoot').value,
-    production_roots:$('cfgProdRoots').value.split('\n').map(s=>s.trim()).filter(Boolean),
     qa_workers:parseInt($('cfgWorkers').value)||4,
     ffmpeg_path:$('cfgFfmpeg').value,
     ffprobe_path:$('cfgFfprobe').value,

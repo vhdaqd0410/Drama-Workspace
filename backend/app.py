@@ -650,6 +650,21 @@ def api_get_paths():
     })
 
 
+@app.route("/api/config/path_check", methods=["POST"])
+def api_path_check():
+    """检测 NAS 路径是否可访问。body: { path }"""
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    if not path:
+        return jsonify({"ok": True, "exists": False, "message": "路径为空"})
+    try:
+        exists = os.path.isdir(path)
+        return jsonify({"ok": True, "exists": exists, "path": path,
+                        "message": "可访问" if exists else "不可访问"})
+    except Exception as e:
+        return jsonify({"ok": True, "exists": False, "message": str(e)})
+
+
 @app.route("/api/config/paths", methods=["POST"])
 def api_add_path():
     """新增 NAS 路径

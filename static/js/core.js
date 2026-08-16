@@ -87,6 +87,67 @@ function _getSearchShortcut(){
   // 未配置时默认用 Ctrl+Space
   return sc || 'ctrl+space';
 }
+// ===== 剪辑完成自动扫描提醒 =====
+var _editWatcherStarted = false;
+var _editAlertedProjects = {};  // 记录已提醒过的项目，避免重复提醒
+function initEditCompleteWatcher(){
+  if(_editWatcherStarted) return;
+  _editWatcherStarted = true;
+  // 首次启动延迟检查，之后每3分钟
+  setTimeout(checkEditCompleteProjects, 15000);
+  setInterval(checkEditCompleteProjects, 3*60*1000);
+}
+async function checkEditCompleteProjects(){
+  try{
+    var flat = [];
+    try{
+      var d = await api('GET', '/api/projects');
+      flat = (d.group_all || []).filter(function(p){ return p.project_type === 'group'; });
+    }catch(_){ return; }
+
+    for(var i=0; i<flat.length; i++){
+      var p = flat[i];
+      if(String(p.custom_status||'').trim() !== '剪辑中') continue;
+      var total = Number(p.total_episodes) || 0;
+      if(total <= 0) continue;
+      // 已提醒过则跳过
+      if(_editAlertedProjects[p.name]) continue;
+      // 获取实时集数
+      try{
+        var st = await api('GET', '/api/project/' + encodeURIComponent(p.name) + '/episodes_status');
+        if(st && st.ok && (st.current_count || 0) >= total){
+          _editAlertedProjects[p.name] = true;
+          showEditCompleteDialog(p.name, total, st.current_count);
+          break;  // 一次提醒一个，避免轰炸
+        }
+      }catch(_){}
+    }
+  }catch(_){}
+}
+function showEditCompleteDialog(name, total, current){
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10000;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:440px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.2)">
+    <div style="padding:16px 18px;background:linear-gradient(135deg,#e3f2fd,#bbdefb);font-weight:700;font-size:15px">✂️ 项目已剪完</div>
+    <div style="padding:16px 18px">
+      <div style="font-size:14px;margin-bottom:6px">项目「<b>${htm(name)}</b>」已剪辑完成</div>
+      <div style="font-size:12px;color:#666">已产出 <b>${current}</b> / ${total} 集，是否进入审核？</div>
+    </div>
+    <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove()">稍后</button>
+      <button class="btn btn-sm btn-primary" onclick="confirmEditComplete('${name.replace(/'/g,"\\'")}', this)">✅ 进入审核</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+async function confirmEditComplete(name, btn){
+  try{
+    await api('POST', '/api/project/' + encodeURIComponent(name) + '/custom_status', { custom_status: '审核中' });
+    toast('✅ ' + name + ' 已进入审核', 'success');
+    btn.closest('.modal-overlay').remove();
+    if(typeof loadProjects === 'function') loadProjects();
+  }catch(e){ toast('操作失败: '+e.message, 'error'); }
+}
 // 解析快捷键配置字符串，判断当前按键是否匹配
 function _matchShortcut(e, shortcutStr){
   if(!shortcutStr) return false;
@@ -441,6 +502,7 @@ function renderStats(){
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='已完成';renderDashboard()" style="cursor:pointer"><div class="stat-icon green">✅</div><div><div class="stat-num">${thisMonthDone}</div><div class="stat-label">本月已完成</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';$('globalSearch').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>`;
   renderOverviewCharts();
+  try{ if(typeof renderWorkloadBoard==='function') renderWorkloadBoard(); }catch(_){}
 }
 
 // ===== 首页概览图表（部门分布 + 工作流状态分布，仅当月项目）=====
@@ -493,6 +555,93 @@ function renderOverviewCharts(){
   wrap.innerHTML =
     barChart('🏢 部门项目分布（本月）', deptArr, deptMax, ()=>'#5c6bc0') +
     barChart('📊 工作流状态分布（本月）', statusArr, statusMax, l=>statusColor[l]||'#95a5a6');
+}
+
+// ===== 工作量 / 数据看板 =====
+async function renderWorkloadBoard(){
+  const board = document.getElementById('workloadBoard');
+  if(!board) return;
+  try{
+    const d = await api('GET', '/api/stats/dashboard');
+    if(!d || !d.ok) return;
+    const editors = d.editors || [];
+    const dept = d.dept_stats || [];
+    const trend = d.trend || [];
+    const summary = d.summary || {};
+
+    let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:20px">';
+
+    // === 剪辑师工作量看板 ===
+    const maxAssigned = editors.length ? editors[0].assigned : 1;
+    const editorRows = editors.slice(0, 15).map(function(e){
+      const pct = maxAssigned>0 ? Math.round(e.assigned/maxAssigned*100) : 0;
+      const hue = Math.max(0, 210 - pct*1.2);  // 工作量高 → 偏红
+      const color = pct>=80 ? '#e74c3c' : pct>=50 ? '#e67e22' : '#3498db';
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="width:70px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${htm(e.name)}">${htm(e.name)}</div>
+        <div style="flex:1;height:18px;background:#f0f2f5;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#3498db,${color});border-radius:4px;transition:width .5s"></div></div>
+        <div style="width:55px;font-size:12px;font-weight:600;color:#333">${e.assigned}集</div>
+        <div style="width:50px;font-size:11px;color:#86868b">${e.projects}项目</div>
+      </div>`;
+    }).join('');
+
+    html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-weight:700;font-size:14px">👥 剪辑师工作量（本月）</div>
+        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集</span>
+      </div>
+      <div style="max-height:340px;overflow-y:auto">${editorRows || '<div style="color:#86868b;padding:20px;text-align:center">暂无分集数据</div>'}</div>
+    </div>`;
+
+    // === 部门统计 ===
+    const deptMax = dept.length ? Math.max(...dept.map(x=>x.total||0), 1) : 1;
+    const deptRows = dept.map(function(s){
+      const pct = Math.round((s.total||0)/deptMax*100);
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="width:90px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${htm(s.department||'未分部门')}">${htm(s.department||'未分部门')}</div>
+        <div style="flex:1;height:18px;background:#f0f2f5;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#5c6bc0,#7986cb);border-radius:4px"></div></div>
+        <div style="width:80px;font-size:11px;color:#666">${s.total||0}项目 · ${s.completed||0}完成</div>
+      </div>`;
+    }).join('');
+    html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
+      <div style="font-weight:700;font-size:14px;margin-bottom:12px">🏢 部门项目统计</div>
+      ${deptRows || '<div style="color:#86868b;padding:20px;text-align:center">暂无数据</div>'}
+    </div>`;
+
+    html += '</div>';
+
+    // === 产能趋势（近6个月） ===
+    if(trend.length){
+      const tMax = Math.max(...trend.map(x=>Math.max(x.total,x.done,x.delivered,1)));
+      const trendHtml = trend.map(function(t){
+        const wTotal = Math.round(t.total/tMax*100);
+        const wDone = Math.round(t.done/tMax*100);
+        const wDel = Math.round(t.delivered/tMax*100);
+        return `<div style="flex:1;min-width:80px;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div style="display:flex;align-items:flex-end;height:120px;gap:3px">
+            <div title="立项 ${t.total}" style="width:16px;background:#5c6bc0;border-radius:3px 3px 0 0;height:${wTotal}%"></div>
+            <div title="完成 ${t.done}" style="width:16px;background:#27ae60;border-radius:3px 3px 0 0;height:${wDone}%"></div>
+            <div title="交付 ${t.delivered}" style="width:16px;background:#3498db;border-radius:3px 3px 0 0;height:${wDel}%"></div>
+          </div>
+          <div style="font-size:11px;color:#666">${t.month.slice(5)}月</div>
+          <div style="font-size:10px;color:#999">${t.total}·${t.done}·${t.delivered}</div>
+        </div>`;
+      }).join('');
+      html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);margin-top:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:12px">📈 产能趋势（近6个月）</div>
+        <div style="display:flex;justify-content:space-around;margin-bottom:8px">${trendHtml}</div>
+        <div style="display:flex;gap:14px;justify-content:center;font-size:11px;color:#86868b">
+          <span><span style="display:inline-block;width:10px;height:10px;background:#5c6bc0;border-radius:2px;margin-right:4px"></span>立项</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#27ae60;border-radius:2px;margin-right:4px"></span>完成</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#3498db;border-radius:2px;margin-right:4px"></span>交付</span>
+        </div>
+      </div>`;
+    }
+
+    board.innerHTML = html;
+  }catch(e){
+    board.innerHTML = '';
+  }
 }
 function getDeptStyle(dept){
   if(!dept)return '';
