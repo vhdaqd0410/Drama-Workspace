@@ -1,13 +1,7 @@
 # -*- coding: utf-8 -*-
-from .config import load_config, save_config, get, DB_PATH
-from .db import db, Database, init_db
-from .qa_engine import qa_engine, QAEngine
-# sync_engine 延迟导入
+"""backend 包。
 
-def init_workbench(db_path=None):
-    load_config()
-    if db_path is None:
-        from pathlib import Path
-        db_path = str(DB_PATH)
-    init_db(db_path)
-    return db
+配置收敛后，本包不再加载 JSON 配置（data/config.json）。所有配置统一由
+backend/config.yaml 承载（见 app.py / enhanced_routes.py / main.py）。
+子模块（db / qa_engine / app 等）按需直接导入。
+"""

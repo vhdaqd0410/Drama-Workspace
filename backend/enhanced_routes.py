@@ -13,6 +13,46 @@ from fenji_exporter import export_from_template, backup_template, list_templates
 
 _logger = _logging.getLogger(__name__)
 
+# =====================================================================
+# 配置收敛：统一以 backend/config.yaml 为唯一配置源。
+# 旧实现通过 config.py 读写 data/config.json（与 app.py 使用的 config.yaml
+# 不一致，导致设置页面改动对主流程无效）。这里新增 yaml 读写封装并替换
+# NAS 路径相关读取，使 enhanced_routes 与 app.py / sync_engine 同源。
+# =====================================================================
+_CONFIG_YAML = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "config.yaml")
+
+
+def _yaml_cfg():
+    """读取 config.yaml 全量 dict（失败返回空 dict）。"""
+    try:
+        with open(_CONFIG_YAML, "r", encoding="utf-8") as f:
+            return _y.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def _yaml_get(dotted, default=None):
+    """按 a.b.c 点路径读取 yaml 配置。"""
+    cur = _yaml_cfg()
+    for part in dotted.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return default
+    return cur
+
+
+def _yaml_save(new_cfg):
+    """整体写回 config.yaml（保留未知键，仅更新给定结构）。"""
+    merged = _yaml_cfg()
+    merged.update(new_cfg)
+    tmp = _CONFIG_YAML + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _y.dump(merged, f, allow_unicode=True, default_flow_style=False,
+                sort_keys=False)
+    _os.replace(tmp, _CONFIG_YAML)
+
+
 # 模板/备份存放目录（相对于 backend/ 父目录的 data/fenji_templates 和 data/fenji_backups）
 _DATA_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'data')
 _TEMPLATE_DIR = _os.path.join(_DATA_DIR, 'fenji_templates')
@@ -21,8 +61,8 @@ _BACKUP_DIR = _os.path.join(_DATA_DIR, 'fenji_backups')
 
 def _nas_search_roots():
     """Build [(root, path_key), ...] from config.yaml NAS section."""
-    group_root = _cfg.get("nas.group_root", "")
-    production_roots = _cfg.get("nas.production_roots", []) or []
+    group_root = _yaml_get("nas.group_root", "")
+    production_roots = _yaml_get("nas.production_roots", []) or []
     roots = []
     if group_root:
         roots.append((group_root, "group_path"))
@@ -35,7 +75,7 @@ def _nas_search_roots():
 
 def _production_labels():
     """Return path -> label map from config."""
-    return _cfg.get("nas.production_labels", {}) or {}
+    return _yaml_get("nas.production_labels", {}) or {}
 
 
 # episode_summary 扫描参数：key = 部门标签（production_labels 的 value 或 "group_root"）
@@ -51,8 +91,8 @@ _EPISODE_SCAN_OVERRIDES = {
 def _episode_summary_scan_tasks():
     """Build [(path, skip_names, depth), ...] from config NAS + scan overrides."""
     tasks = []
-    group_root = _cfg.get("nas.group_root", "")
-    production_roots = _cfg.get("nas.production_roots", []) or []
+    group_root = _yaml_get("nas.group_root", "")
+    production_roots = _yaml_get("nas.production_roots", []) or []
     labels = _production_labels()
 
     if group_root:
@@ -225,7 +265,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         root_type = request.args.get("root", "group")
         dirs = []
         if root_type == "group":
-            group_root = _cfg.get("nas.group_root", "")
+            group_root = _yaml_get("nas.group_root", "")
             if group_root and _os.path.isdir(group_root):
                 try:
                     for name in sorted(_os.listdir(group_root)):
@@ -237,7 +277,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                 except OSError:
                     pass
         else:
-            for prod_root in (_cfg.get("nas.production_roots", []) or []):
+            for prod_root in (_yaml_get("nas.production_roots", []) or []):
                 if not prod_root or not _os.path.isdir(prod_root):
                     continue
                 try:
@@ -708,18 +748,61 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
 
     @app.route("/api/config", methods=["GET"])
     def api_config_get():
+        """返回扁平化配置（yaml 视角）。前端设置页按此读取。"""
         try:
-            cfg = _cfg.load_config()
-            return jsonify({"ok": True, "config": cfg})
+            cfg = _yaml_cfg()
+            flat = {
+                "group_root": (cfg.get("nas", {}) or {}).get("group_root", ""),
+                "qa_workers": ((cfg.get("qa", {}) or {}).get("workers", 4)),
+                "ffmpeg_path": ((cfg.get("qa", {}) or {}).get("ffmpeg_path", "")
+                                or (cfg.get("paths", {}) or {}).get("ffmpeg", "")),
+                "ffprobe_path": ((cfg.get("qa", {}) or {}).get("ffprobe_path", "")
+                                 or (cfg.get("paths", {}) or {}).get("ffprobe", "")),
+                "suggested_names": (cfg.get("fenji", {}) or {}).get("suggested_names", []),
+            }
+            return jsonify({"ok": True, "config": flat})
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
 
     @app.route("/api/config", methods=["POST"])
     def api_config_save():
+        """把扁平设置写回 config.yaml 的嵌套结构，与 app.py 读取同源。"""
         data = request.get_json(silent=True) or {}
         try:
-            if hasattr(_cfg, 'save_config'):
-                _cfg.save_config(data)
+            cfg = _yaml_cfg()
+            cfg.setdefault("nas", {})
+            cfg.setdefault("qa", {})
+            cfg.setdefault("paths", {})
+            cfg.setdefault("fenji", {})
+
+            if "group_root" in data:
+                cfg["nas"]["group_root"] = (data.get("group_root") or "").strip()
+            if "qa_workers" in data:
+                try:
+                    cfg["qa"]["workers"] = int(data.get("qa_workers") or 4)
+                except (TypeError, ValueError):
+                    cfg["qa"]["workers"] = 4
+            if "ffmpeg_path" in data:
+                cfg["qa"]["ffmpeg_path"] = (data.get("ffmpeg_path") or "").strip()
+            if "ffprobe_path" in data:
+                cfg["qa"]["ffprobe_path"] = (data.get("ffprobe_path") or "").strip()
+            if "suggested_names" in data:
+                names = data.get("suggested_names")
+                if isinstance(names, list):
+                    cfg["fenji"]["suggested_names"] = [str(n).strip() for n in names if str(n).strip()]
+                elif isinstance(names, str):
+                    cfg["fenji"]["suggested_names"] = [n.strip() for n in names.split("\n") if n.strip()]
+
+            _yaml_save(cfg)
+            # 同步回主流程配置（若 app 侧持有同一 dict 引用）
+            try:
+                import app as _app_mod
+                if hasattr(_app_mod, "config"):
+                    _app_mod.config.update(cfg)
+                if hasattr(_app_mod, "reload_sync_engine"):
+                    _app_mod.reload_sync_engine()
+            except Exception:
+                pass
             return jsonify({"ok": True})
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500

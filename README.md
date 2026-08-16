@@ -135,7 +135,6 @@ static/js/
 ├── deliverables.js      (329 行)  — 成片/修改预览面板
 ├── deliver-batch.js     (212 行)  — 批量回传进度
 ├── deliver-events.js    (373 行)  — 回传事件 + 完成弹窗
-├── deliver-patch.js     (3 行)    — 回传补丁
 ├── preview.js           (122 行)  — 视频预览弹窗
 ├── team.js              (448 行)  — 团队成员 + 设置 + NAS路径管理 + 快捷键录制
 ├── qa.js                (1087 行) — 质检中心 + 批量质检
@@ -214,9 +213,10 @@ Drama-Workspace/
 │   ├── qa_engine.py               # 视频质检引擎（940 行）
 │   ├── detection.py               # OpenCV 黑帧/花屏/PSNR/SSIM（1244 行）
 │   ├── watcher.py                 # Watchdog 后台线程（234 行）
-│   ├── config.py                  # 配置加载 / 保存
+│   ├── version.py                 # ⭐ 统一版本号来源（VERSION / APP_TITLE）
+│   ├── config.py                  # (废弃) 旧 JSON 配置模块，已由 config.yaml 取代
 │   ├── config.example.yaml        # 📋 配置模板（公开，不含真实路径）
-│   ├── config.yaml                # ⚠️ 本地私有配置（已加入 .gitignore）
+│   ├── config.yaml                # ⚠️ 唯一配置源（已加入 .gitignore，含 NAS/服务/质检路径）
 │   ├── utils.py                   # 共享工具函数
 │   └── report_template.py         # 质检报告 HTML 模板
 │
@@ -232,7 +232,6 @@ Drama-Workspace/
 │   ├── deliverables.js            # 成片/修改预览
 │   ├── deliver-batch.js           # 批量回传进度
 │   ├── deliver-events.js          # 回传事件 / 完成弹窗
-│   ├── deliver-patch.js           # 回传补丁
 │   ├── preview.js                 # 视频预览弹窗
 │   ├── team.js                    # 团队成员 / 设置 / NAS路径 / 快捷键录制
 │   ├── qa.js                      # 质检中心 / 批量质检

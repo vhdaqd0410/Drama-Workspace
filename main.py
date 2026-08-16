@@ -8,6 +8,7 @@ import sys
 import webbrowser
 import threading
 import time
+import yaml
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
@@ -23,6 +24,25 @@ try:
 except ImportError:
     _version = None
 APP_TITLE = _version.APP_TITLE if _version else "视频工作台"
+
+# 配置文件：与 backend/app.py 保持一致，统一以 config.yaml 为唯一配置源
+CONFIG_YAML = os.path.join(backend_dir, "config.yaml")
+DB_PATH = os.path.join(BASE_DIR, "data", "workbench.db")
+
+
+def load_server_config():
+    """从 config.yaml 读取 web 段（host/port/debug）。config.yaml 缺省时回退默认值。"""
+    try:
+        with open(CONFIG_YAML, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        web = cfg.get("web", {}) or {}
+    except Exception:
+        web = {}
+    return {
+        "host": web.get("host", "127.0.0.1"),
+        "port": int(web.get("port", 8089)),
+        "debug": bool(web.get("debug", False)),
+    }
 
 
 def open_browser_later(url, delay=2.5):
@@ -60,17 +80,13 @@ def main():
     # 检查依赖
     missing = check_dependencies()
 
-    # 导入配置和应用
-    from backend import config
+    # 导入应用（仅 app，不再经 config.py 的 JSON 配置）
     from backend.app import create_app
 
-    cfg = config.load_config()
+    srv = load_server_config()
+    host, port, debug = srv["host"], srv["port"], srv["debug"]
+
     app = create_app()
-
-    host = cfg.get("server", {}).get("host", "127.0.0.1")
-    port = cfg.get("server", {}).get("port", 8089)
-    debug = cfg.get("server", {}).get("debug", False)
-
     url = f"http://{host}:{port}/"
 
     # 延迟打开浏览器
@@ -83,8 +99,8 @@ def main():
     print("=" * 60)
     print(f"  🌐 访问地址: {url}")
     print(f"  📁 工作目录: {BASE_DIR}")
-    print(f"  💾 数据库:   {config.DB_PATH}")
-    print(f"  📝 配置文件: {config.CONFIG_PATH}")
+    print(f"  💾 数据库:   {DB_PATH}")
+    print(f"  📝 配置文件: {CONFIG_YAML}")
     if missing:
         print(f"  ⚠  缺少依赖: {', '.join(missing)}")
     print("=" * 60)
