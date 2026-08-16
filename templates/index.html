@@ -561,6 +561,7 @@ a{color:var(--blue);text-decoration:none}
       <h3>📑 分集分配</h3>
       <div class="fj-top">
         <div class="form-group"><label>📁 项目</label>
+          <input type="text" id="fjProjectSearch" placeholder="🔍 搜索项目（输入名称/编号过滤）" oninput="fjFilterProject(this.value)" style="margin-bottom:6px;width:100%">
           <select id="fjProject" onchange="fjOnProjectChange()"><option value="">— 选择项目 —</option></select>
         </div>
         <div class="form-group"><label>📊 总集数</label>

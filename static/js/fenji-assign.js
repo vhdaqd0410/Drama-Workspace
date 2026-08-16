@@ -405,6 +405,47 @@ function fjRenderPreview(){
   $('fjStats').innerHTML = stats;
 }
 
+// 过滤项目下拉（按名称/编号搜索）
+function fjFilterProject(q){
+  const kw = (q||'').trim().toLowerCase();
+  const savedVal = $('fjProject').value;
+  const list = (Array.isArray(fenjiLight) ? fenjiLight : []).filter(p => {
+    if(!kw) return true;
+    return (p.name||'').toLowerCase().includes(kw) || (p.id||p.project_id||'').toLowerCase().includes(kw);
+  });
+  $('fjProject').innerHTML = '<option value="">— 选择项目 —</option>' +
+    list.map(p => `<option value="${p.name}">${p.name} (${p.total_episodes||'?'}集)</option>`).join('');
+  if(savedVal && list.some(p=>p.name===savedVal)) $('fjProject').value = savedVal;
+  else if($('fjProject').options.length <= 2 && list.length === 0 && kw){
+    // 无匹配项，保持空下拉
+  }
+  $('fjProject').onchange && $('fjProject').onchange();
+  if(kw){
+    const cnt = list.length;
+    // 在下拉里给个计数提示（通过 title）
+    $('fjProject').title = cnt ? `匹配 ${cnt} 个项目` : '无匹配项目';
+  }
+}
+
+// 获取当前选中项目的完整路径（group_path 优先，其次 production_path）
+async function fjGetProjectPath(){
+  const name = $('fjProject').value;
+  if(!name) return '';
+  // 先从 fenjiLight 找已带的 path 字段
+  if(Array.isArray(fenjiLight)){
+    const hit = fenjiLight.find(p => p.name === name);
+    if(hit && (hit.path || hit.group_path || hit.production_path)) return hit.path || hit.group_path || hit.production_path;
+  }
+  try{
+    const d = await api('GET', `/api/project/${encodeURIComponent(name)}`);
+    if(d && d.ok && d.project){
+      const p = d.project;
+      return p.group_path || p.production_path || name;
+    }
+  }catch(e){}
+  return name;
+}
+
 function fjCopyResult(){
   const byEditor = {};
   Object.entries(fjRanges).forEach(([p,r]) => {
@@ -419,12 +460,17 @@ function fjCopyResult(){
     const ranges = []; let s = eps[0], prev = eps[0];
     for(let i=1;i<eps.length;i++){ if(eps[i]===prev+1) prev=eps[i]; else { ranges.push(s===prev?`${s}`:`${s}-${prev}`); s=prev=eps[i]; } }
     ranges.push(s===prev?`${s}`:`${s}-${prev}`);
-    txt += `${name}: ${ranges.join(', ')}\n`;
+    txt += `${name}：${ranges.join(', ')}\n`;
   });
   if(!txt){ toast('没有可复制的内容','warning'); return; }
-  navigator.clipboard.writeText(txt.trim()).then(() => toast('📋 已复制到剪贴板','success')).catch(() => {
-    const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); document.body.removeChild(ta); toast('📋 已复制','success');
+  // 前置项目路径 + 名称
+  fjGetProjectPath().then(function(path){
+    const header = path ? `${path}\n` : '';
+    const full = header + '\n' + txt;
+    navigator.clipboard.writeText(full.trim()).then(() => toast('📋 已复制到剪贴板','success')).catch(() => {
+      const ta = document.createElement('textarea'); ta.value = full.trim(); document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta); toast('📋 已复制','success');
+    });
   });
 }
 
