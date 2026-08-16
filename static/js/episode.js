@@ -80,6 +80,7 @@ async function openProjectDetail(name){
       {key:'sync_status',label:'同步状态'},
       {key:'custom_status',label:'当前状态'},
       {key:'delivery_status',label:'交付状态'},
+      {key:'delivered_date',label:'📅 交付日期'},
       {key:'total_episodes',label:'总集数'},
       {key:'current_episodes',label:'已生成集数'},
       {key:'completed_episodes',label:'已完成集数'},
@@ -116,7 +117,7 @@ async function openProjectDetail(name){
         <div class="kv-grid">${kvHtml||'<div style="color:var(--text-sec)">暂无额外字段</div>'}</div>
       </div>
       <div class="detail-section">
-        <h3>📑 分集列表（${p.episodes.length} 集）</h3>${epHtml}
+        <h3>📑 分集列表${p.episodes?`（${p.episodes.length} 集）`:''}</h3>${epHtml}
       </div>
       <div class="detail-section">
         <h3>✅ 待办事项 <span id="todoCount" style="font-size:12px;color:var(--text-sec)"></span></h3>
@@ -134,6 +135,7 @@ async function openProjectDetail(name){
       </div>
       <div class="detail-actions">
         <button onclick="setProjectMonth('${p.name.replace(/'/g,"\\'")}')" class="secondary">📅 设置月份</button>
+        <button onclick="setProjectDeliveredDate('${p.name.replace(/'/g,"\\'")}')" class="secondary">🗓 交付日期</button>
         ${p.group_path?`<button onclick="openFolder('group','${p.name.replace(/'/g,"\\'")}')" class="secondary">📁 打开组内文件夹</button>`:''}
         ${p.production_path?`<button onclick="openFolder('production','${p.name.replace(/'/g,"\\'")}')" class="secondary">📁 打开制作文件夹</button>`:''}
         <button onclick="$('detailModal').classList.remove('active');openFenjiFor('${p.name.replace(/'/g,"\\'")}')" class="secondary">📑 管理分集</button>
@@ -234,6 +236,39 @@ function openSmart(name, which){
     if(data.ok) toast('已打开: ' + (data.message || '成功'), 'success');
     else toast(data.message || '打开失败', 'error');
   }).catch(function(e){ toast('打开失败: ' + e.message, 'error'); });
+}
+
+// 设置/清除项目交付日期（交付日历用）
+function setProjectDeliveredDate(name){
+  const overlay = document.createElement('div');
+  overlay.id = 'ddEditModal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:340px;box-shadow:0 12px 40px rgba(0,0,0,.2);font-family:-apple-system,'Segoe UI',sans-serif">
+      <div style="font-size:16px;font-weight:600;margin-bottom:12px">🗓 设置交付日期</div>
+      <div style="font-size:13px;color:#666;margin-bottom:14px;word-break:break-all">${htm(name)}</div>
+      <input id="_ddDate" type="date" style="width:100%;padding:9px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none">
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button id="_ddClear" style="padding:8px 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">🗑 清除</button>
+        <button id="_ddCancel" style="padding:8px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:14px">取消</button>
+        <button id="_ddOk" style="padding:8px 20px;border:none;border-radius:8px;background:#0071e3;color:#fff;cursor:pointer;font-size:14px">保存</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  const dateInput = document.getElementById('_ddDate');
+  function save(){
+    const val = dateInput.value || '';
+    overlay.remove();
+    api('POST', '/api/project/' + encodeURIComponent(name) + '/delivered_date', { date: val }).then(function(d){
+      if(d && d.ok) toast(val ? ('✅ 已设置交付日期: ' + val) : '✅ 已清除交付日期', 'success');
+      else toast((d&&d.message)||'保存失败','error');
+    }).catch(function(e){ toast('保存失败: ' + e.message, 'error'); });
+  }
+  document.getElementById('_ddOk').addEventListener('click', save);
+  document.getElementById('_ddCancel').addEventListener('click', function(){ overlay.remove(); });
+  document.getElementById('_ddClear').addEventListener('click', function(){ overlay.remove(); api('POST','/api/project/' + encodeURIComponent(name) + '/delivered_date',{date:''}).then(function(){toast('✅ 已清除交付日期','success');}); });
+  dateInput.focus();
 }
 
 async function openFolder(type,name){

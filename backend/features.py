@@ -15,6 +15,7 @@ logger = logging.getLogger("features")
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _THUMB_DIR = os.path.join(_BASE, "data", "thumbs")
+_DATA_DIR = os.path.join(_BASE, "data")
 
 
 def _yaml_cfg():
@@ -39,6 +40,34 @@ def _yaml_get(dotted, default=None):
 def _now():
     from datetime import datetime
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_time_text(text):
+    """解析分集目标表格的胶片日期文本（如 '8.15上午10点交'、'8.15'、'2026-8-15'）
+    为 'YYYY-MM-DD'。解析失败返回空串。"""
+    import re as _re
+    from datetime import datetime
+    if not text:
+        return ""
+    s = str(text).strip()
+    # 完整日期：2026-8-15 / 2026/8/15
+    m = _re.search(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        # 短格式：M.D 或 M.D上午/下午…点交
+        m = _re.search(r"(\d{1,2})[.月](\d{1,2})", s)
+        if not m:
+            # 纯数字日期如 815 / 8.15
+            m = _re.search(r"(\d{1,2})\s*[-./]\s*(\d{1,2})", s)
+            if not m:
+                return ""
+        y, mo, d = datetime.now().year, int(m.group(1)), int(m.group(2))
+    try:
+        dt = datetime(y, mo, d)
+    except Exception:
+        return ""
+    return dt.strftime("%Y-%m-%d")
 
 
 def _log_audit(db, project_name, action, detail="", username=""):
@@ -198,74 +227,84 @@ def register_routes(app, db):
             return jsonify({"ok": False, "message": str(e)}), 500
 
     # ==================== 数据洞察（可选增强：大屏 / 日历 / 导出）====================
+    def _parse_ym(s):
+        """从 'YYYY-MM-DD HH:MM:SS' 或 'YYYY-MM' 提取月份 'YYYY-MM'。"""
+        if not s:
+            return ""
+        s = str(s).strip()
+        return s[:7] if len(s) >= 7 and s[4] == "-" else ""
+
     @app.route("/api/insights/summary")
     def features_insights_summary():
-        """KPI 汇总：项目数、状态分布、集数、交付、质检、成员。"""
+        """KPI 汇总（以当月为基准）：
+        项目数 / 当月项目数 / 当月已完成 / 进行中项目 / 成员
+        当月项目状态分布 + 各剪辑当月集数（环形图用）。
+        """
         try:
+            from datetime import datetime
+            now = datetime.now()
+            month = now.strftime("%Y-%m")
             projs = db.get_all_projects() or []
+            # 当月项目：created_at 落在本月
+            month_projs = [p for p in projs if _parse_ym(p.get("created_at")) == month]
+            # 当月已完成：delivered_date 落在本月
+            month_completed = [p for p in projs if _parse_ym(p.get("delivered_date")) == month]
+            # 进行中：状态非"已完成"且非空
+            in_progress = [p for p in projs if (p.get("custom_status") or "").strip() not in ("", "已完成")]
+            # 当月项目状态分布
             status_map = {}
-            total_ep = 0
-            total_done = 0
-            for p in projs:
-                st = (p.get("custom_status") or p.get("delivery_status") or "未设置").strip()
+            for p in month_projs:
+                st = (p.get("custom_status") or p.get("delivery_status") or "未设置").strip() or "未设置"
                 status_map[st] = status_map.get(st, 0) + 1
-                total_ep += int(p.get("total_episodes") or 0)
-                total_done += int(p.get("current_episodes") or 0)
-            # 交付统计（近12个月）
-            months = {}
-            try:
-                logs = db.get_recent_logs(limit=2000)
-                for l in logs:
-                    ts = l.get("created_at") or ""
-                    if len(ts) >= 7 and (l.get("status") or "") != "error":
-                        m = ts[:7]
-                        months[m] = months.get(m, 0) + 1
-            except Exception:
-                pass
-            # 质检统计
-            qa_pass = qa_total = 0
-            try:
-                runs = db.list_all_qa_runs(limit=500)
-                for r in runs:
-                    qa_total += 1
-                    if (r.get("status") or "") == "pass":
-                        qa_pass += 1
-            except Exception:
-                pass
+            # 各剪辑当月集数：从当月项目 episode_plan（episode->editor）聚合
+            editor_eps = {}
+            for p in month_projs:
+                plan = p.get("episode_plan")
+                if isinstance(plan, str):
+                    try:
+                        plan = json.loads(plan)
+                    except Exception:
+                        plan = {}
+                if isinstance(plan, dict):
+                    for ep, editor in plan.items():
+                        if not editor:
+                            continue
+                        try:
+                            n = int(ep)
+                        except Exception:
+                            continue
+                        editor_eps[str(editor)] = editor_eps.get(str(editor), 0) + 1
+                else:
+                    # 兜底：episodes 数组含 editor
+                    for e in (p.get("episodes") or []):
+                        ed = e.get("editor")
+                        if ed:
+                            editor_eps[str(ed)] = editor_eps.get(str(ed), 0) + 1
             # 成员数
             members = 0
             try:
                 members = len(db.list_members() or []) if hasattr(db, "list_members") else 0
             except Exception:
                 pass
-            # 待办统计
-            todo_done = todo_total = 0
-            try:
-                import sqlite3 as _sq
-                with db.get_conn() as conn:
-                    row = conn.execute("SELECT COUNT(*) c, COALESCE(SUM(done),0) d FROM project_todos").fetchone()
-                    todo_total, todo_done = row[0] or 0, row[1] or 0
-            except Exception:
-                pass
             return jsonify({
                 "ok": True,
+                "month": month,
                 "projectCount": len(projs),
-                "statusMap": status_map,
-                "totalEpisodes": total_ep,
-                "doneEpisodes": total_done,
-                "deliveryMonths": months,
-                "qaPass": qa_pass,
-                "qaTotal": qa_total,
+                "monthProjectCount": len(month_projs),
+                "monthCompleted": len(month_completed),
+                "inProgress": len(in_progress),
                 "memberCount": members,
-                "todoTotal": todo_total,
-                "todoDone": todo_done,
+                "statusMap": status_map,
+                "editorEpisodes": editor_eps,
             })
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
 
     @app.route("/api/insights/calendar")
     def features_insights_calendar():
-        """交付日历：返回指定月份每天的交付数。?month=YYYY-MM"""
+        """交付日历：按项目 delivered_date 分组，返回每天交付的项目名列表。
+        ?month=YYYY-MM，days: {YYYY-MM-DD: [项目名,...]}
+        """
         month = request.args.get("month", "")
         if not month or len(month) != 7:
             from datetime import datetime
@@ -273,25 +312,99 @@ def register_routes(app, db):
         prefix = month + "-"
         days = {}
         try:
-            logs = db.get_recent_logs(limit=5000)
-            for l in logs:
-                ts = l.get("created_at") or ""
-                if ts.startswith(prefix):
-                    d = ts[:10]
-                    days[d] = days.get(d, 0) + 1
+            projs = db.get_all_projects() or []
+            for p in projs:
+                dd = (p.get("delivered_date") or "").strip()
+                if dd.startswith(prefix):
+                    d = dd[:10]
+                    days.setdefault(d, []).append(p.get("name") or "")
         except Exception:
             pass
+        # 排序每个日期的项目名
+        for k in days:
+            days[k] = sorted(days[k])
         return jsonify({"ok": True, "month": month, "days": days})
+
+    @app.route("/api/project/<name>/delivered_date", methods=["POST"])
+    def features_set_delivered_date(name):
+        """设置项目交付/归档日期（交付日历用）。body: {date:'YYYY-MM-DD' 或 ''清空}"""
+        data = request.get_json(silent=True) or {}
+        date = (data.get("date") or "").strip()
+        if date and len(date) == 10 and date[4] == "-" and date[7] == "-":
+            db.update_project_status(name, delivered_date=date)
+            _log_audit(db, name, "设置交付日期", date)
+            return jsonify({"ok": True, "date": date})
+        db.update_project_status(name, delivered_date="")
+        _log_audit(db, name, "清除交付日期")
+        return jsonify({"ok": True, "date": ""})
+
+    @app.route("/api/insights/sync_delivery_dates", methods=["POST"])
+    def features_sync_delivery_dates():
+        """从分集目标文件表格读取胶片日期（col4），解析为 YYYY-MM-DD，
+        更新到项目 delivered_date 并刷新日历。body: {target_path?: 路径}"""
+        import openpyxl
+        # 目标文件路径：优先 body，其次设置，再扫描 data/fenji_targets
+        data = request.get_json(silent=True) or {}
+        target = (data.get("target_path") or "").strip()
+        if not target:
+            try:
+                target = db.get_all_settings().get("fj_target_path", "") or ""
+            except Exception:
+                target = ""
+        if not target or not os.path.isfile(target):
+            # 尝试自动查找最近的目标文件
+            tgt_dir = os.path.join(_DATA_DIR, "fenji_targets")
+            if os.path.isdir(tgt_dir):
+                xlsx = [f for f in os.listdir(tgt_dir) if f.lower().endswith((".xlsx", ".xlsm", ".xls"))]
+                if xlsx:
+                    target = os.path.join(tgt_dir, sorted(xlsx)[-1])
+        if not target or not os.path.isfile(target):
+            return jsonify({"ok": False, "message": "未找到目标文件，请先在分集管理设置目标文件"}), 400
+
+        updated = []
+        try:
+            wb = openpyxl.load_workbook(target, data_only=True)
+            ws = wb[wb.sheetnames[0]]
+            # 遍历合并单元格定位项目块，读 col1(项目名) + col4(胶片日期)
+            seen_names = set()
+            for rng in ws.merged_cells.ranges:
+                if rng.min_col == 1 and rng.max_col == 1 and rng.min_row == rng.max_row:
+                    pass
+            # 更稳：逐行读，取每块第一行的 col1 与 col4
+            cur_name = None
+            cur_date = ""
+            for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+                name = row[0].value if len(row) > 0 else None
+                if name and str(name).strip():
+                    # 新项目块开始
+                    if cur_name and cur_date and cur_name not in seen_names:
+                        seen_names.add(cur_name)
+                        parsed = _parse_time_text(cur_date)
+                        if parsed:
+                            db.update_project_status(cur_name, delivered_date=parsed)
+                            updated.append({"project": cur_name, "date": parsed})
+                    cur_name = str(name).strip()
+                    cur_date = row[3].value if len(row) > 3 else None
+            # 处理最后一个块
+            if cur_name and cur_date and cur_name not in seen_names:
+                seen_names.add(cur_name)
+                parsed = _parse_time_text(cur_date)
+                if parsed:
+                    db.update_project_status(cur_name, delivered_date=parsed)
+                    updated.append({"project": cur_name, "date": parsed})
+            return jsonify({"ok": True, "updated": len(updated), "target": target, "items": updated})
+        except Exception as e:
+            return jsonify({"ok": False, "message": "解析失败: " + str(e)}), 500
 
     @app.route("/api/insights/export")
     def features_insights_export():
-        """导出项目档案 CSV（项目名/状态/总集数/已生成/部门/路径/创建时间）。"""
+        """导出项目档案 CSV（项目名/状态/总集数/已生成/部门/路径/交付日期/创建时间）。"""
         import io as _io
         import csv as _csv
         projs = db.get_all_projects() or []
         buf = _io.StringIO()
         writer = _csv.writer(buf)
-        writer.writerow(["项目名", "部门", "当前状态", "交付状态", "总集数", "已生成集数", "组内路径", "制作路径", "创建时间"])
+        writer.writerow(["项目名", "部门", "当前状态", "交付状态", "总集数", "已生成集数", "交付日期", "组内路径", "制作路径", "创建时间"])
         for p in projs:
             writer.writerow([
                 p.get("name", ""),
@@ -300,6 +413,7 @@ def register_routes(app, db):
                 p.get("delivery_status", ""),
                 p.get("total_episodes", 0),
                 p.get("current_episodes", 0),
+                p.get("delivered_date", ""),
                 p.get("group_path", ""),
                 p.get("production_path", ""),
                 p.get("created_at", ""),

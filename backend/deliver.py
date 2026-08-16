@@ -658,6 +658,18 @@ class DeliverMixin:
         self.db.update_project_status(project_name, custom_status=status)
         logger.info("项目状态变更: %s %s -> %s", project_name, old_status, status)
 
+        # 融合功能：状态改为"已完成"时，自动记录交付/归档日期到日历（若未设置）
+        if status == "已完成":
+            try:
+                cur_date = proj.get("delivered_date") or ""
+                if not cur_date:
+                    self.db.update_project_status(
+                        project_name,
+                        delivered_date=datetime.now().strftime("%Y-%m-%d"))
+                    logger.info("项目已完成，自动记录交付日期: %s", project_name)
+            except Exception as e:
+                logger.warning("记录交付日期失败: %s", e)
+
         # 设为"修改中"时，在01上映单集版目录中新建日期文件夹
         if status == "修改中":
             ok, msg = self._create_revision_folder(project_name)

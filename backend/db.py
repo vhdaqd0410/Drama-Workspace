@@ -208,6 +208,11 @@ class Database:
                 c.execute("ALTER TABLE team_members ADD COLUMN title TEXT DEFAULT ''")
             except Exception:
                 pass
+            # delivered_date：项目交付/归档日期（数据洞察交付日历用）
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN delivered_date TEXT DEFAULT ''")
+            except Exception:
+                pass
             try:
                 c.execute("ALTER TABLE team_members ADD COLUMN department TEXT DEFAULT ''")
             except Exception:
