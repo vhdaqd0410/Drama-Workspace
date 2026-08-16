@@ -613,6 +613,23 @@ function fjMaybeSaveHist(){
   fjRenderHistSelect();
 }
 
+// 显式把当前分配保存为一条历史记录（保证入库+后端持久化）
+function fjSaveHistNow(){
+  const name = $('fjProject').value;
+  if(!name){ toast('请先选择项目','warning'); return; }
+  const total = parseInt($('fjTotal').value) || 0;
+  if(Object.keys(fjRanges).length === 0){ toast('当前没有集数分配可保存','warning'); return; }
+  if(total === 0){ toast('请先填写总集数','warning'); return; }
+  fjMaybeSaveHist();
+  // 确保后端同步成功
+  api('PUT', '/api/settings', { fj_history: JSON.stringify(fjHist) }).then(() => {
+    toast(`✅ 已保存历史：${name}（${Object.keys(fjRanges).length} 人）`, 'success');
+  }).catch(() => {
+    toast('⚠️ 已保存到本地，但后端同步失败', 'warning');
+  });
+  fjRenderHistSelect();
+}
+
 // ===== Session =====
 function fjSaveSession(){
   try{
@@ -644,7 +661,11 @@ function fjRestoreSession(){
     }
     if(s.total) $('fjTotal').value = s.total;
     if(Array.isArray(s.selected)) fjSelected = s.selected.filter(p => fjPersons.includes(p));
-    if(s.ranges && typeof s.ranges === 'object') fjRanges = {};
+    if(s.ranges && typeof s.ranges === 'object'){
+      // 恢复上次的集数分配（之前这里被错误清空导致历史/会话丢失）
+      fjRanges = {};
+      Object.entries(s.ranges).forEach(([p,r]) => { if(r) fjRanges[p] = String(r); });
+    }
     if(s.htOn){ $('fjHeadTailOn').checked = true; fjRenderHeadTail(); }
     if(s.htPerson) setTimeout(() => { $('fjHeadTailPerson').value = s.htPerson; }, 50);
     if(s.htNum) $('fjHeadTailNum').value = s.htNum;

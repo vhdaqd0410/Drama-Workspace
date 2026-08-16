@@ -573,6 +573,7 @@ a{color:var(--blue);text-decoration:none}
         <span class="fj-hist-label">🕘 历史</span>
         <select id="fjHistSelect" onchange="fjRestoreHist(this.value)"><option value="">— 从历史载入 —</option></select>
         <button class="btn btn-sm" onclick="fjOpenHistList()" title="全部历史记录">🔍 全部</button>
+        <button class="btn btn-sm btn-primary" onclick="fjSaveHistNow()" title="把当前分配保存为一条历史记录">💾 保存历史</button>
       </div>
 
       <div class="fj-section-title">👥 选择剪辑师 <span id="fjSelCount" style="color:var(--blue);font-size:12px">(已选 0 人)</span>
