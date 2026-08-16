@@ -147,6 +147,16 @@ def register_routes(app, db):
         _log_audit(db, name, "删除待办")
         return jsonify({"ok": True})
 
+    @app.route("/api/todos/global", methods=["GET"])
+    def features_todos_global():
+        """跨项目全局待办：?done=1 含已完成；?q=关键词 过滤；?project=指定项目。"""
+        include_done = (request.args.get("done") or "") == "1"
+        kw = (request.args.get("q") or "").strip()
+        proj = (request.args.get("project") or "").strip()
+        rows = db.get_all_todos(include_done=include_done, keyword=kw or proj)
+        # 若只按项目过滤，需保留该项目所有待办（含已完成按需）
+        return jsonify({"ok": True, "todos": rows, "count": len(rows)})
+
     # ==================== 项目时间轴 ====================
     @app.route("/api/project/<name>/timeline")
     def features_timeline(name):
@@ -338,28 +348,66 @@ def register_routes(app, db):
 
     @app.route("/api/insights/calendar")
     def features_insights_calendar():
-        """交付日历：按项目 delivered_date 分组，返回每天交付的项目名列表。
-        ?month=YYYY-MM，days: {YYYY-MM-DD: [项目名,...]}
+        """交付日历：按项目 delivered_date 分组，返回每天交付的项目。
+        ?month=YYYY-MM；?dept=部门名 可选按部门过滤。
+        days: {YYYY-MM-DD: [{name, department}]}
         """
         month = request.args.get("month", "")
         if not month or len(month) != 7:
             from datetime import datetime
             month = datetime.now().strftime("%Y-%m")
+        dept = (request.args.get("dept") or "").strip()
         prefix = month + "-"
         days = {}
         try:
             projs = db.get_all_projects() or []
             for p in projs:
+                if dept and (p.get("department") or "") != dept:
+                    continue
                 dd = (p.get("delivered_date") or "").strip()
                 if dd.startswith(prefix):
                     d = dd[:10]
-                    days.setdefault(d, []).append(p.get("name") or "")
+                    days.setdefault(d, []).append({
+                        "name": p.get("name") or "",
+                        "department": p.get("department") or "",
+                    })
         except Exception:
             pass
-        # 排序每个日期的项目名
         for k in days:
-            days[k] = sorted(days[k])
-        return jsonify({"ok": True, "month": month, "days": days})
+            days[k] = sorted(days[k], key=lambda x: x.get("name") or "")
+        return jsonify({"ok": True, "month": month, "dept": dept, "days": days})
+
+    @app.route("/api/insights/calendar/export")
+    def features_insights_calendar_export():
+        """导出某月交付清单 CSV。?month=YYYY-MM；?dept=可选按部门过滤。"""
+        import io as _io
+        import csv as _csv
+        month = request.args.get("month", "")
+        if not month or len(month) != 7:
+            from datetime import datetime
+            month = datetime.now().strftime("%Y-%m")
+        dept = (request.args.get("dept") or "").strip()
+        prefix = month + "-"
+        rows = []
+        try:
+            projs = db.get_all_projects() or []
+            for p in projs:
+                if dept and (p.get("department") or "") != dept:
+                    continue
+                dd = (p.get("delivered_date") or "").strip()
+                if dd.startswith(prefix):
+                    rows.append([dd[:10], p.get("name") or "", p.get("department") or ""])
+        except Exception:
+            pass
+        rows.sort(key=lambda r: r[0])
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(["交付日期", "项目名", "部门"])
+        writer.writerows(rows)
+        data = "\ufeff" + buf.getvalue()
+        from flask import Response
+        return Response(data, mimetype="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f"attachment; filename=delivery-{month}.csv"})
 
     @app.route("/api/project/<name>/delivered_date", methods=["POST"])
     def features_set_delivered_date(name):

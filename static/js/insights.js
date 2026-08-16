@@ -101,17 +101,22 @@ async function loadInsights(){
         </div>
       </div>
       <div style="background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
           <h4 style="margin:0;font-size:14px">📅 交付日历</h4>
-          <div style="display:flex;gap:6px;align-items:center">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <select id="calDeptFilter" onchange="insightsCalDept()" style="padding:4px 8px;border:1px solid var(--border,#e5e5ea);border-radius:6px;font-size:12px">
+              <option value="">全部部门</option>
+            </select>
             <button class="btn btn-sm" onclick="insightsCalNav(-1)">◀</button>
             <span id="calMonthLabel" style="font-size:13px;font-weight:600"></span>
             <button class="btn btn-sm" onclick="insightsCalNav(1)">▶</button>
+            <button class="btn btn-sm" onclick="exportCalMonth()" title="导出本月交付清单">📥 导出</button>
           </div>
         </div>
         <div id="insightsCalBox"><div style="color:var(--text-sec);font-size:12px">加载中...</div></div>
       </div>`;
     insightsCalMonth = new Date().toISOString().slice(0,7);
+    populateCalDept();
     await loadInsightsCalendar();
   }catch(e){
     body.innerHTML = '<div style="color:var(--red);text-align:center;padding:30px">加载失败: '+escHtml(e.message)+'</div>';
@@ -154,11 +159,26 @@ function buildDonut(map){
 let insightsCalMonth = '';
 let _calData = {};
 
+function insightsCalDept(){
+  loadInsightsCalendar();
+}
+
 async function insightsCalNav(delta){
   const d = new Date(insightsCalMonth + '-01');
   d.setMonth(d.getMonth() + delta);
   insightsCalMonth = d.toISOString().slice(0,7);
   await loadInsightsCalendar();
+}
+
+// 填充部门下拉
+function populateCalDept(){
+  const sel = document.getElementById('calDeptFilter');
+  if(!sel) return;
+  const cur = sel.value;
+  const depts = [];
+  (window.projects||[]).forEach(p=>{ const d=(p.department||'').trim(); if(d && depts.indexOf(d)<0) depts.push(d); });
+  sel.innerHTML = '<option value="">全部部门</option>' + depts.sort().map(d=>`<option value="${htm(d)}">${htm(d)}</option>`).join('');
+  if(cur) sel.value = cur;
 }
 
 async function loadInsightsCalendar(){
@@ -167,7 +187,9 @@ async function loadInsightsCalendar(){
   if(label) label.textContent = insightsCalMonth;
   if(!box) return;
   try{
-    const d = await api('GET','/api/insights/calendar?month=' + insightsCalMonth);
+    const deptSel = document.getElementById('calDeptFilter');
+    const dept = deptSel ? deptSel.value : '';
+    const d = await api('GET','/api/insights/calendar?month=' + insightsCalMonth + '&dept=' + encodeURIComponent(dept));
     _calData = (d && d.days) || {};
     renderCalendar();
   }catch(e){
@@ -217,7 +239,7 @@ function calHover(el){
   tip.id = 'calTip';
   tip.style.cssText = 'position:fixed;z-index:41000;background:rgba(0,0,0,.85);color:#fff;border-radius:8px;padding:8px 12px;font-size:12px;max-width:320px;box-shadow:0 8px 24px rgba(0,0,0,.35);pointer-events:none';
   tip.innerHTML = projs.length
-    ? `<div style="font-weight:600;margin-bottom:4px">${el.dataset.calDay} 交付 ${projs.length} 部：</div>` + projs.map(n=>'• '+escHtml(n)).join('<br>')
+    ? `<div style="font-weight:600;margin-bottom:4px">${el.dataset.calDay} 交付 ${projs.length} 部：</div>` + projs.map(n=>'• '+escHtml(n.name||n)).join('<br>')
     : '当日无交付';
   document.body.appendChild(tip);
   const r = el.getBoundingClientRect();
@@ -295,7 +317,7 @@ function renderDdList(){
   // 已在该日期的项目
   const already = (_calData[dateKey] || []).slice();
   const marked = {};
-  already.forEach(n => { marked[n] = true; });
+  already.forEach(n => { marked[(n&&n.name)||n] = true; });
   if(!list.length){
     box.innerHTML = '<div style="color:var(--text-sec);font-size:13px;padding:10px 0">无匹配项目</div>';
     return;
@@ -367,6 +389,23 @@ function openExportFolder(){
     if(d && d.ok) toast('已打开导出文件夹','success');
     else toast((d&&d.message)||'打开失败','error');
   }).catch(function(e){ toast('打开失败: '+e.message,'error'); });
+}
+
+// 导出当前月份（含部门筛选）的交付清单 CSV
+function exportCalMonth(){
+  const deptSel = document.getElementById('calDeptFilter');
+  const dept = deptSel ? deptSel.value : '';
+  const url = '/api/insights/calendar/export?month=' + insightsCalMonth + '&dept=' + encodeURIComponent(dept);
+  const key = window.__API_KEY__ || '';
+  fetch(url + (key ? '&key=' + encodeURIComponent(key) : '')).then(function(res){ return res.text(); }).then(function(text){
+    const blob = new Blob([text], { type:'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '交付清单-' + insightsCalMonth + (dept ? '-' + dept : '') + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 200);
+    toast('✅ 已导出 ' + insightsCalMonth + ' 交付清单','success');
+  }).catch(function(e){ toast('导出失败: '+e.message,'error'); });
 }
 
 async function syncDeliveryDates(){

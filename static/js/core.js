@@ -1092,6 +1092,8 @@ function renderDashboard(){
       bar.innerHTML = `<span>已选 <b id="bulkCount">0</b> 个项目</span>
         <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkSetMonth()">📅 批量改月份</button>
         <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkSetStatus()">🏷️ 批量改状态</button>
+        <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkSetDeliveredDate()">🗓 批量交付日期</button>
+        <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkExport()">📥 批量导出</button>
         <button class="btn btn-sm" style="background:#fff;color:#007aff" onclick="bulkClear()">全部取消</button>
         <button class="btn btn-sm" style="background:rgba(255,255,255,.25);color:#fff" onclick="toggleBulkMode()">✕ 退出批量</button>`;
       container.parentElement.insertBefore(bar, container);
@@ -1188,6 +1190,60 @@ async function _bulkSetStatusGo(namesStr){
     toast('✅ 已更新 '+r.updated+' 个项目','success');
     await loadProjects();
   }catch(e){ toast('❌ 批量设置失败: '+e.message,'error'); }
+}
+
+async function bulkSetDeliveredDate(){
+  const names = getBulkSelected();
+  if(!names.length){ toast('请先选择项目','warning'); return; }
+  const today = new Date().toISOString().slice(0,10);
+  const html = `<div class="modal-overlay" onclick="if(event.target===this)this.remove()">
+    <div class="modal" style="width:320px">
+      <div class="modal-head">🗓 批量设置交付日期 (${names.length} 个项目)</div>
+      <div style="padding:15px;display:flex;flex-direction:column;gap:8px">
+        <input type="date" id="bulkDD" value="${today}" style="padding:8px;border:1px solid #d1d5db;border-radius:8px;font-size:14px">
+        <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:4px"><input type="checkbox" id="bulkDDClear"> 清除交付日期</label>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" onclick="document.querySelectorAll('.modal-overlay').forEach(m=>m.remove())">取消</button>
+        <button class="btn btn-primary" onclick="_bulkDDGo('${names.join('||').replace(/'/g,"")}')">确定</button>
+      </div>
+    </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  // 勾选清除时禁用日期输入
+  const clearChk = document.getElementById('bulkDDClear');
+  clearChk.addEventListener('change', function(){
+    document.getElementById('bulkDD').disabled = this.checked;
+  });
+}
+async function _bulkDDGo(namesStr){
+  const names = namesStr.split('||').filter(Boolean);
+  const clear = document.getElementById('bulkDDClear').checked;
+  const date = clear ? '' : document.getElementById('bulkDD').value;
+  document.querySelectorAll('.modal-overlay').forEach(m=>m.remove());
+  try{
+    const r = await api('POST','/api/bulk/update_delivered_date', {names, date});
+    toast('✅ 已更新 '+r.updated+' 个项目的交付日期','success');
+    if(typeof loadInsightsCalendar==='function') loadInsightsCalendar();
+  }catch(e){ toast('❌ 批量设置失败: '+e.message,'error'); }
+}
+function bulkExport(){
+  const names = getBulkSelected();
+  if(!names.length){ toast('请先选择项目','warning'); return; }
+  // 用 fetch 直接下载后端生成的 CSV（带鉴权 body）
+  const key = window.__API_KEY__ || '';
+  fetch('/api/bulk/export', {
+    method:'POST',
+    headers:{'Content-Type':'application/json', ...(key?{'X-API-KEY':key}:{})},
+    body: JSON.stringify({names: names})
+  }).then(function(res){ return res.text(); }).then(function(text){
+    const blob = new Blob([text], {type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '项目档案-批量-' + new Date().toISOString().slice(0,10) + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 200);
+    toast('✅ 已导出 '+names.length+' 个项目','success');
+  }).catch(function(e){ toast('导出失败: '+e.message,'error'); });
 }
 
 function toggleSection(key){

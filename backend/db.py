@@ -374,6 +374,17 @@ class Database:
     def update_project_status(self, name, **kwargs):
         if not kwargs:
             return
+        # 交付联动：一旦置为已交付(delivered)，若尚无 delivered_date 则自动补记交付日期
+        # （取 last_delivered_at 的日期，否则当天），保证交付日历自动更新
+        if kwargs.get("delivery_status") == "delivered":
+            proj = self.get_project(name)
+            if proj and not (proj.get("delivered_date") or "").strip():
+                src = kwargs.get("last_delivered_at") or proj.get("last_delivered_at") or ""
+                dd = (src or "")[:10]
+                if not dd:
+                    from datetime import datetime as _dt
+                    dd = _dt.now().strftime("%Y-%m-%d")
+                kwargs["delivered_date"] = dd
         fields = ", ".join(f"{k}=?" for k in kwargs)
         values = list(kwargs.values()) + [name]
         with self.get_conn() as conn:
@@ -727,6 +738,28 @@ class Database:
                 rows = conn.execute(
                     "SELECT * FROM project_todos WHERE project_name=? ORDER BY done ASC, priority DESC, id DESC",
                     (project_name,)).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def get_all_todos(self, include_done=False, keyword=""):
+        """跨项目查询所有待办（全局待办视图用）。按未完成优先、项目分组排序。"""
+        try:
+            with self.get_conn() as conn:
+                sql = ("SELECT t.*, p.custom_status AS status "
+                       "FROM project_todos t LEFT JOIN projects p ON p.name=t.project_name ")
+                conds = []
+                args = []
+                if not include_done:
+                    conds.append("t.done=0")
+                if keyword:
+                    conds.append("(t.project_name LIKE ? OR t.text LIKE ?)")
+                    kw = "%" + keyword + "%"
+                    args += [kw, kw]
+                if conds:
+                    sql += " WHERE " + " AND ".join(conds)
+                sql += " ORDER BY t.done ASC, t.priority DESC, t.project_name, t.id DESC"
+                rows = conn.execute(sql, args).fetchall()
                 return [dict(r) for r in rows]
         except Exception:
             return []

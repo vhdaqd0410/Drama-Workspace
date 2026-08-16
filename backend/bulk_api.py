@@ -51,6 +51,52 @@ def register_routes(app, db):
         except Exception as e:
             return jsonify({"ok": False, "msg": str(e)}), 500
 
+    @app.route("/api/bulk/update_delivered_date", methods=["POST"])
+    def bulk_update_delivered_date():
+        """批量设置交付日期。body: {names:[], date:'YYYY-MM-DD' or '' 清除}"""
+        body = request.get_json(force=True) or {}
+        names = body.get("names") or []
+        date = (body.get("date") or "").strip()
+        if not names:
+            return jsonify({"ok": False, "msg": "未选择项目"}), 400
+        try:
+            with db.get_conn() as conn:
+                placeholders = ",".join(["?"] * len(names))
+                conn.execute(
+                    f"UPDATE projects SET delivered_date=? WHERE name IN ({placeholders})",
+                    [date] + list(names),
+                )
+            return jsonify({"ok": True, "updated": len(names)})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": str(e)}), 500
+
+    @app.route("/api/bulk/export", methods=["POST"])
+    def bulk_export():
+        """批量导出所选项目的档案 CSV（按 name 列表过滤）。"""
+        import io as _io
+        import csv as _csv
+        body = request.get_json(force=True) or {}
+        names = body.get("names") or []
+        if not names:
+            return jsonify({"ok": False, "msg": "未选择项目"}), 400
+        projs = db.get_all_projects() or []
+        name_set = set(names)
+        projs = [p for p in projs if p.get("name") in name_set]
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(["项目名", "部门", "当前状态", "交付状态", "总集数", "已生成集数", "交付日期", "组内路径", "制作路径", "创建时间"])
+        for p in projs:
+            writer.writerow([
+                p.get("name", ""), p.get("department", ""), p.get("custom_status", ""),
+                p.get("delivery_status", ""), p.get("total_episodes", 0),
+                p.get("current_episodes", 0), p.get("delivered_date", ""),
+                p.get("group_path", ""), p.get("production_path", ""), p.get("created_at", ""),
+            ])
+        data = "\ufeff" + buf.getvalue()
+        from flask import Response
+        return Response(data, mimetype="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": "attachment; filename=projects-selected.csv"})
+
     # ================================================================
     # 任务中心
     # ================================================================

@@ -1207,6 +1207,14 @@ try:
 except Exception as e:
     print("[WARN] backup_service 未启动:", e)
 
+# 启动交付日期定时同步（从分集目标表格自动补录交付日期）
+try:
+    from delivery_sync_service import start_scheduler as _start_dsync
+    _start_dsync()
+    print("[OK] delivery_sync_service(交付日期定时同步) 已启动")
+except Exception as e:
+    print("[WARN] delivery_sync_service 未启动:", e)
+
 
 def main():
     web_cfg = config.get("web", {})
