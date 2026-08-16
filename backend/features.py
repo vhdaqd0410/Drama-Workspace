@@ -431,7 +431,7 @@ def register_routes(app, db):
             try:
                 exp_dir = os.path.join(_DATA_DIR, "exports")
                 os.makedirs(exp_dir, exist_ok=True)
-                fname = "项目档案-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
+                fname = "项目档案-" + _dt.now().strftime("%Y%m%d-%H%M%S") + ".csv"
                 fpath = os.path.join(exp_dir, fname)
                 with open(fpath, "w", encoding="utf-8-sig", newline="") as f:
                     f.write(data)
