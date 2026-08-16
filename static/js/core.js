@@ -24,7 +24,7 @@ function initDesktopSSE(){
     _sseSource=new EventSource('/api/sse');
     _sseSource.onopen=()=>console.log('[SSE] 连接已建立');
     _sseSource.onmessage=(evt)=>{
-      if(!evt.data||evt.data.startsWith('{'))return;
+      if(!evt.data) return;
       try{
         const payload=JSON.parse(evt.data);
         if(payload.type==='notify'){
@@ -79,10 +79,13 @@ function _scheduleSseRefresh(delay){
 
 /* ============ 全局快捷键 ============ */
 // 快捷键配置（从后端设置加载，可在设置界面修改）
-window._shortcutConfig = { search: '' };  // search: 如 'ctrl+space' / 'ctrl+g' / ''=默认ctrl+k/f
+// search: 如 'ctrl+space' / 'ctrl+g' / '' = 默认 ctrl+space
+window._shortcutConfig = { search: '' };
 function _getSearchShortcut(){
   var s = window._shortcutConfig && window._shortcutConfig.search;
-  return s ? String(s).toLowerCase().trim() : '';
+  var sc = s ? String(s).toLowerCase().trim() : '';
+  // 未配置时默认用 Ctrl+Space
+  return sc || 'ctrl+space';
 }
 // 解析快捷键配置字符串，判断当前按键是否匹配
 function _matchShortcut(e, shortcutStr){

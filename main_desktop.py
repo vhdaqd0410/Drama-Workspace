@@ -575,13 +575,15 @@ def _register_quit_api(flask_app):
             except Exception:
                 pass
             # 发布 SSE 事件，通知前端打开搜索框
+            published = False
             try:
-                from backend.sync_engine import SyncEngine
                 from backend.app import sync_engine
-                sync_engine._sse_publish({"type": "search"})
+                if sync_engine:
+                    sync_engine._sse_publish({"type": "search"})
+                    published = len(sync_engine._sse_clients) > 0
             except Exception:
                 pass
-            return jsonify({"ok": True})
+            return jsonify({"ok": True, "sse_clients": published})
         except Exception:
             return '{"ok":true}', 200
 
