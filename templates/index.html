@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -951,6 +951,15 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
     } else {
       return _origFetch(input, init);
     }
+    // 优先走 X-API-KEY 请求头（不进 URL，避免密钥泄漏到访问日志）
+    init = init || {};
+    init.headers = init.headers || {};
+    if(init.headers instanceof Headers){
+      if(!init.headers.has('X-API-KEY')) init.headers.set('X-API-KEY', window.__API_KEY__);
+    } else if(!init.headers['X-API-KEY']){
+      init.headers['X-API-KEY'] = window.__API_KEY__;
+    }
+    // 保留 query 参数兜底（老代码/SSE 等未走该包装的调用）
     if(!url.searchParams.get('key')){
       url.searchParams.set('key', window.__API_KEY__);
     }

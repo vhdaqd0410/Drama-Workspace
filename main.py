@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""视频工作台 v2.0 — 统一启动入口。
+"""视频工作台 v2.6 — 统一启动入口。
 
 双击 start.bat / start.vbs 或命令行: python main.py
 """
@@ -16,6 +16,13 @@ sys.path.insert(0, BASE_DIR)
 backend_dir = os.path.join(BASE_DIR, "backend")
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
+
+# 统一版本号来源（backend/version.py）—— 直接按模块导入，避免触发 backend 包内 app/db 的初始化
+try:
+    import version as _version
+except ImportError:
+    _version = None
+APP_TITLE = _version.APP_TITLE if _version else "视频工作台"
 
 
 def open_browser_later(url, delay=2.5):
@@ -71,7 +78,7 @@ def main():
 
     print()
     print("=" * 60)
-    print("  🎬 视频工作台 v2.0")
+    print("  " + APP_TITLE)
     print("  📦 统一集成: 项目管理 + NAS同步 + 分集 + 质检")
     print("=" * 60)
     print(f"  🌐 访问地址: {url}")

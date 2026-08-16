@@ -19,6 +19,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, "backend"))
 
+# 统一版本号来源（backend/version.py）
+import version as _version
+APP_TITLE = _version.APP_TITLE
+
 # 桌面版标记
 os.environ["DRAMA_DESKTOP"] = "1"
 os.environ["DRAMA_DESKTOP_CAN_COM"] = "1"
@@ -88,7 +92,7 @@ try:
         if _port_alive(_SERVER_PORT):
             print("⚠️  已有实例在运行，正在激活...")
             try:
-                hwnd = ctypes.windll.user32.FindWindowW(None, "🎬 视频工作台 v2.1")
+                hwnd = ctypes.windll.user32.FindWindowW(None, APP_TITLE)
                 if hwnd:
                     ctypes.windll.user32.ShowWindow(hwnd, 9)
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
@@ -197,7 +201,7 @@ def _show_window():
         w.show()
         # 用 Win32 强制前置
         try:
-            hwnd = ctypes.windll.user32.FindWindowW(None, "🎬 视频工作台 v2.1")
+            hwnd = ctypes.windll.user32.FindWindowW(None, APP_TITLE)
             if hwnd:
                 ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
@@ -294,19 +298,19 @@ def _do_quit():
 
 
 # ============================================================
-# 托盘菜单（固定结构，只改 MenuItem.text 实现动态文案）
+# 托盘菜单
+# 说明：pystray 的 MenuItem.text 是只读属性，不能直接改文案（旧实现会报
+# "can't set attribute 'text'"）。正确做法是整体重建菜单并赋回 tray.menu，
+# 由后端触发重绘，从而动态切换"隐藏/显示"文案。
 # ============================================================
-def _build_menu():
+def _build_menu(visible=True):
     import pystray
-    # 默认按窗口可见（首次启动窗口显示中）
-    toggle_item = pystray.MenuItem(
-        "隐藏窗口到托盘",
-        _toggle_window, default=True,
-    )
+    toggle_text = "隐藏窗口到托盘" if visible else "显示主窗口"
+    toggle_item = pystray.MenuItem(toggle_text, _toggle_window, default=True)
     _toggle_menu_item_ref[0] = toggle_item
     return pystray.Menu(
         pystray.MenuItem(
-            "🎬 视频工作台 v2.1",
+            APP_TITLE,
             None, enabled=False,
         ),
         pystray.Menu.SEPARATOR,
@@ -322,13 +326,16 @@ def _build_menu():
 
 
 def _update_tray_label():
-    """只改菜单项的文本，不碰 tray.menu 对象（避免 WinError 87）"""
-    item = _toggle_menu_item_ref[0]
-    if item is None:
+    """根据窗口可见性重建托盘菜单并刷新文案（替换旧的只读 text 赋值方式）。"""
+    tray = _tray_ref[0]
+    if tray is None:
         return
     try:
-        item.text = "隐藏窗口到托盘" if _window_visible[0] else "显示主窗口"
-        print(f"[tray] 菜单文案已更新 → {item.text}")
+        tray.menu = _build_menu(_window_visible[0])
+        # 通知后端重绘托盘菜单（部分后端需要，win32 下无害）
+        if hasattr(tray, "update_menu"):
+            tray.update_menu()
+        print(f"[tray] 菜单文案已更新 → {'隐藏窗口到托盘' if _window_visible[0] else '显示主窗口'}")
     except Exception as e:
         print(f"[tray] 更新菜单文案失败: {e}")
 
@@ -537,7 +544,7 @@ def _run_tray():
     tray = pystray.Icon(
         "drama_workspace",
         img,
-        "🎬 视频工作台 v2.1",
+        APP_TITLE,
         menu,
     )
     _tray_ref[0] = tray
@@ -644,7 +651,7 @@ def _main():
 
     # 4. WebView 窗口（主线程阻塞）
     window = webview.create_window(
-        title="🎬 视频工作台 v2.1",
+        title=APP_TITLE,
         url=f"http://127.0.0.1:{_SERVER_PORT}/",
         width=1400, height=900,
         min_size=(1100, 700),
