@@ -1022,6 +1022,40 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             'skipped': skipped,
         })
 
+    # ============ 从权威目标文件重建各项目分集工作量 ============
+    @app.route('/api/fenji/sync_episode_plan', methods=['POST'])
+    def fenji_sync_episode_plan():
+        """从分集权威目标文件重建各项目 episode_plan（替换失真数据）。
+        body: {target_path?: 可选，默认用 settings.fj_master_path 或 data/fenji_targets 最新文件}
+        返回 {ok, synced, skipped, total_episodes, total_projects}
+        """
+        body = request.get_json(silent=True) or {}
+        target = (body.get('target_path') or '').strip()
+        clear_stale = body.get('clear_stale', True)
+        if not target:
+            # 1) settings.fj_master_path
+            try:
+                target = (db.get_all_settings().get('fj_master_path') or '').strip()
+            except Exception:
+                target = ''
+            # 2) 扫描 data/fenji_targets 最新
+            if not target:
+                _tdir = _os.path.join(_DATA_DIR, 'fenji_targets')
+                if _os.path.isdir(_tdir):
+                    xlsx = [f for f in _os.listdir(_tdir)
+                            if f.lower().endswith(('.xlsx', '.xlsm', '.xls'))]
+                    if xlsx:
+                        target = _os.path.join(_tdir, sorted(xlsx)[-1])
+        if not target or not _os.path.isfile(target):
+            return jsonify(ok=False, msg='未找到分集目标文件，请先在分集管理设置', path=target), 400
+        try:
+            from features import sync_episode_plan_from_target
+            res = sync_episode_plan_from_target(target, db, clear_stale=clear_stale)
+            return jsonify(ok=True, path=target, **res)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return jsonify(ok=False, msg='同步失败: ' + str(e)), 500
+
     # ============ 用户设置持久化（模板选择/目标文件路径等） ============
     @app.route('/api/settings', methods=['GET'])
     def api_get_settings():

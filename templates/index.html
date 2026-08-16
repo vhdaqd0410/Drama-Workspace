@@ -678,6 +678,7 @@ a{color:var(--blue);text-decoration:none}
         <button class="btn btn-sm" onclick="showPasteEpisodesModal()">📋 粘贴分集</button>
         <button class="btn btn-sm" onclick="fjCopyResult()">📋 复制结果</button>
         <button class="btn btn-sm" style="background:#5c6bc0;color:#fff" title="上传分集Excel表格，自动同步到项目（供工作量统计）" onclick="fjSyncFromExcel()">📥 从Excel同步</button>
+        <button class="btn btn-sm" style="background:#00695c;color:#fff" title="从权威分集目标文件重建各项目工作量（统一统计口径，覆盖失真数据）" onclick="fjSyncMasterWorkload()">🎯 同步权威工作量</button>
         <button class="btn btn-sm" title="选择导出用的 Excel 模板" onclick="fjPickTemplate()">📄 模板<span id="fjTplBadge" style="background:var(--bg-border);padding:1px 6px;border-radius:8px;font-size:11px;margin-left:4px">未选</span></button>
         <button class="btn btn-sm btn-primary" onclick="fjExportExcel()">📊 导出预览</button>
         <button class="btn btn-sm" style="background:#2E7D32;color:#fff" title="设置固定目标文件，每次直接追加" onclick="fjPickTargetPath()">⚙️ 目标<span id="fjTargetBadge" style="background:rgba(255,255,255,.25);padding:1px 6px;border-radius:8px;font-size:11px;margin-left:4px">未设</span></button>

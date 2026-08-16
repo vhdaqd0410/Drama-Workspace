@@ -98,3 +98,79 @@ class TestSyncDeliveryDates:
         assert dates["同步项目B"] == "2026-08-20"
         # 验证已写入
         assert tmp_db.get_project("同步项目A")["delivered_date"] == "2026-08-15"
+
+
+# ============================================================
+# 4. 分集工作量同步（sync_episode_plan_from_target）
+# ============================================================
+
+class TestEpisodePlanSync:
+    def test_sync_rebuilds_plan(self, tmp_db, tmp_path):
+        import openpyxl
+        p = str(tmp_path / "master.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["项目X", None, None, None])
+        ws.append([None, None, "张三：1-3", None])
+        ws.append([None, None, "李四：4-6", None])
+        ws.append(["项目Y", None, None, None])
+        ws.append([None, None, "张三：1-2，5", None])
+        wb.save(p)
+
+        tmp_db.upsert_project("项目X", "", "")
+        tmp_db.upsert_project("项目Y", "", "")
+        from features import sync_episode_plan_from_target
+        res = sync_episode_plan_from_target(p, tmp_db, clear_stale=False)
+        assert res["total_projects"] == 2
+        assert res["total_episodes"] == 9   # 项目X 6集 + 项目Y 3集
+        px = tmp_db.get_episode_plan("项目X")
+        assert px["1"] == "张三" and px["6"] == "李四"
+        py = tmp_db.get_episode_plan("项目Y")
+        assert py["5"] == "张三"
+
+    def test_clear_stale(self, tmp_db, tmp_path):
+        import openpyxl
+        p = str(tmp_path / "m.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["项目A", None, None, None])
+        ws.append([None, None, "张三：1-2", None])
+        wb.save(p)
+        tmp_db.upsert_project("项目A", "", "")
+        tmp_db.upsert_project("项目B", "", "")   # 不在目标文件
+        tmp_db.set_episode_plan("项目B", {"1": "假人", "2": "假人"})
+        from features import sync_episode_plan_from_target
+        res = sync_episode_plan_from_target(p, tmp_db, clear_stale=True)
+        assert "项目B" in res["cleared"]
+        assert tmp_db.get_episode_plan("项目B") == {}
+
+
+# ============================================================
+# 5. 统一剪辑师工作量口径（aggregate_editor_workload）
+# ============================================================
+
+class TestAggregateEditorWorkload:
+    def test_aggregate_all(self, tmp_db):
+        tmp_db.upsert_project("P1", "", "")
+        tmp_db.upsert_project("P2", "", "")
+        tmp_db.set_episode_plan("P1", {"1": "张三", "2": "张三", "3": "李四"})
+        tmp_db.set_episode_plan("P2", {"1": "李四"})
+        from features import aggregate_editor_workload
+        wl = aggregate_editor_workload(tmp_db)
+        by_name = {e["name"]: e["assigned"] for e in wl}
+        assert by_name["张三"] == 2 and by_name["李四"] == 2
+        assert len(wl) == 2
+
+    def test_aggregate_by_month(self, tmp_db):
+        tmp_db.upsert_project("P3", "", "")
+        tmp_db.upsert_project("P4", "", "")
+        tmp_db.update_project_status("P3", project_month="2026-08")
+        tmp_db.update_project_status("P4", project_month="2026-07")
+        tmp_db.set_episode_plan("P3", {"1": "张三"})
+        tmp_db.set_episode_plan("P4", {"2": "李四"})
+        from features import aggregate_editor_workload
+        wl = aggregate_editor_workload(tmp_db, month="2026-08")
+        by_name = {e["name"]: e["assigned"] for e in wl}
+        assert by_name.get("张三") == 1
+        assert "李四" not in by_name
+

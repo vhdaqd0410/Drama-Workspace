@@ -221,6 +221,11 @@ class Database:
                 c.execute("ALTER TABLE projects ADD COLUMN department TEXT DEFAULT ''")
             except Exception:
                 pass
+            # project_month：项目所属业务月份（YYYY-MM），统计口径关键字段
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN project_month TEXT DEFAULT ''")
+            except Exception:
+                pass
 
     # ---------- migration from legacy DB ----------
 

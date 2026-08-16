@@ -820,6 +820,30 @@ function fjSyncFromExcel(){
   input.click();
 }
 
+// ===== 从权威目标文件重建各项目工作量（统一统计口径）=====
+async function fjSyncMasterWorkload(){
+  if(!confirm('将从分集权威目标文件重建各项目的分集工作量（覆盖失真的旧数据，用于统计口径统一），继续？')){
+    return;
+  }
+  toast('📥 正在从权威目标文件重建工作量...', 'info');
+  try{
+    const d = await api('POST', '/api/fenji/sync_episode_plan', { clear_stale: true });
+    if(d && d.ok){
+      const synced = d.synced || [];
+      const cleared = d.cleared || [];
+      const skipped = d.skipped || [];
+      const lines = synced.slice(0, 8).map(function(s){ return '  ✓ ' + s.name + '（' + s.episodes + '集，' + s.editor_count + '人）'; }).join('\n');
+      toast('✅ 已重建 ' + synced.length + ' 个项目工作量（' + (d.total_episodes||0) + ' 集）', 'success');
+      alert('✅ 同步完成：\n' + synced.length + ' 个项目 · ' + (d.total_episodes||0) + ' 集\n' + lines + (synced.length>8 ? '\n  ...' : '') + (cleared.length ? '\n\n已清空 ' + cleared.length + ' 个不在目标文件的项目：' + cleared.slice(0,5).map(function(c){return c;}).join('、') : '') + (skipped.length ? '\n\n跳过 ' + skipped.length + ' 个（未找到对应项目）' : ''));
+      if(typeof loadProjects === 'function') loadProjects();
+    } else {
+      toast('❌ ' + (d && d.msg || '同步失败'), 'error');
+    }
+  }catch(e){
+    toast('❌ 同步失败: ' + e.message, 'error');
+  }
+}
+
 function fjUpdateTargetBadge(){
   const b = document.getElementById('fjTargetBadge');
   if(!b) return;

@@ -335,37 +335,47 @@ def register_routes(app, db):
         now = _dt.now()
         cur_month = request.args.get("month", "") or now.strftime("%Y-%m")
 
-        # ---------- 1. 剪辑师工作量（分集 plan 统计） ----------
-        editor_workload = {}
-        with db.get_conn() as conn:
-            rows = conn.execute(
-                "SELECT name, episode_plan FROM projects"
-            ).fetchall()
-        for row in rows:
-            r = dict(row)
-            ep = r.get("episode_plan") or ""
-            if not ep or ep == "{}":
-                continue
-            try:
-                plan = _json.loads(ep) if isinstance(ep, str) else (ep or {})
-            except Exception:
-                continue
-            if not isinstance(plan, dict):
-                continue
-            for ep_num, editor in plan.items():
-                if not editor:
+        # ---------- 1. 剪辑师工作量（统一口径：从 episode_plan 聚合） ----------
+        try:
+            from features import aggregate_editor_workload
+        except Exception:
+            aggregate_editor_workload = None
+        editor_list = []
+        if aggregate_editor_workload:
+            # 统一口径：仅统计当月(project_month=cur_month)项目的分集工作量
+            editor_list = aggregate_editor_workload(db, month=cur_month)
+        # 若 helper 不可用，回退到内联实现
+        if not editor_list:
+            import json as _json
+            editor_workload = {}
+            with db.get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT name, episode_plan FROM projects"
+                ).fetchall()
+            for row in rows:
+                r = dict(row)
+                ep = r.get("episode_plan") or ""
+                if not ep or ep == "{}":
                     continue
-                ed = editor.strip()
-                if not ed:
+                try:
+                    plan = _json.loads(ep) if isinstance(ep, str) else (ep or {})
+                except Exception:
                     continue
-                item = editor_workload.setdefault(ed, {"assigned": 0, "projects": set()})
-                item["assigned"] += 1
-                item["projects"].add(r.get("name"))
-
-        editor_list = [
-            {"name": name, "assigned": item["assigned"], "projects": len(item["projects"])}
-            for name, item in sorted(editor_workload.items(), key=lambda x: -x[1]["assigned"])
-        ]
+                if not isinstance(plan, dict):
+                    continue
+                for ep_num, editor in plan.items():
+                    if not editor:
+                        continue
+                    ed = editor.strip()
+                    if not ed:
+                        continue
+                    item = editor_workload.setdefault(ed, {"assigned": 0, "projects": set()})
+                    item["assigned"] += 1
+                    item["projects"].add(r.get("name"))
+            editor_list = [
+                {"name": name, "assigned": item["assigned"], "projects": len(item["projects"])}
+                for name, item in sorted(editor_workload.items(), key=lambda x: -x[1]["assigned"])
+            ]
 
         # ---------- 2. 部门项目统计 ----------
         with db.get_conn() as conn:

@@ -77,6 +77,155 @@ def _log_audit(db, project_name, action, detail="", username=""):
         logger.warning("写入审计日志失败: %s", e)
 
 
+def aggregate_editor_workload(db, month=None):
+    """统一剪辑师工作量口径：从项目 episode_plan 聚合每人集数。
+    month: 若指定 'YYYY-MM'，仅统计 project_month==month 的项目；否则统计全部有 plan 的项目。
+    返回 [{'name','assigned','projects'}]（按 assigned 降序），剔除空/空白剪辑师。
+    """
+    import json as _json
+    try:
+        projs = db.get_all_projects() or []
+    except Exception:
+        projs = []
+    editor_workload = {}
+    for p in projs:
+        if month and (p.get("project_month") or "") != month:
+            continue
+        ep = p.get("episode_plan") or ""
+        if not ep or ep == "{}":
+            continue
+        try:
+            plan = _json.loads(ep) if isinstance(ep, str) else (ep or {})
+        except Exception:
+            continue
+        if not isinstance(plan, dict):
+            continue
+        for ep_num, editor in plan.items():
+            if not editor or not str(editor).strip():
+                continue
+            ed = str(editor).strip()
+            item = editor_workload.setdefault(ed, {"assigned": 0, "projects": set()})
+            item["assigned"] += 1
+            item["projects"].add(p.get("name") or "")
+    return [
+        {"name": name, "assigned": item["assigned"], "projects": len(item["projects"])}
+        for name, item in sorted(editor_workload.items(), key=lambda x: -x[1]["assigned"])
+    ]
+
+
+def _parse_assign_range_str(plan, line):
+    """解析一行 '剪辑师：1-3，44-45' 加入 plan 字典（{集号str: 剪辑师}）。"""
+    line = (line or "").strip()
+    if '：' in line:
+        parts = line.split('：', 1)
+    elif ':' in line:
+        parts = line.split(':', 1)
+    else:
+        return
+    if len(parts) < 2:
+        return
+    editor = parts[0].strip()
+    ranges = parts[1].strip()
+    if not editor or not ranges:
+        return
+    import re as _re
+    for r in _re.split(r'[,，、;；+\s]+', ranges):
+        r = r.strip()
+        if not r:
+            continue
+        m = _re.match(r'^(\d+)\s*[-—~]\s*(\d+)$', r)
+        if m:
+            s, e = int(m.group(1)), int(m.group(2))
+            for ep in range(min(s, e), max(s, e) + 1):
+                plan[str(ep)] = editor
+        else:
+            m2 = _re.match(r'^(\d+)$', r)
+            if m2:
+                plan[m2.group(1)] = editor
+
+
+def sync_episode_plan_from_target(target_path, db=None, clear_stale=True):
+    """从分集目标表格（权威来源）重建各项目的 episode_plan。
+    读取每个项目块第 C 列的 '剪辑师：集数范围'，生成 {集号: 剪辑师} 并覆盖写入 DB，
+    替换失真的旧分集数据（含假人员）。返回 [{'name','episodes','editor_count'}]。
+    若 clear_stale=True：把 DB 中已有 episode_plan 但不在目标文件里的项目清空，
+    避免过时/测试数据污染统计。
+    """
+    if db is None:
+        from db import db as _db
+        db = _db
+    import openpyxl
+    wb = openpyxl.load_workbook(target_path, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    months = ['一月份','二月份','三月份','四月份','五月份','六月份',
+              '七月份','八月份','九月份','十月份','十一月份','十二月份']
+    # 项目名 -> {集号: 剪辑师}
+    raw_plans = {}
+    cur_name = None
+    for row in ws.iter_rows(values_only=True):
+        if not row or not any(row):
+            continue
+        a = str(row[0] or '').strip() if row[0] else ''
+        c = str(row[2] or '').strip() if len(row) > 2 and row[2] else ''
+        if a and a not in months:
+            cur_name = a
+            raw_plans.setdefault(cur_name, {})
+        elif c and cur_name:
+            _parse_assign_range_str(raw_plans[cur_name], c)
+    # 空项目块剔除
+    raw_plans = {k: v for k, v in raw_plans.items() if v}
+    # 匹配 DB 项目并覆盖写入
+    all_proj = db.get_all_projects() or []
+    name_to_db = {}
+    for p in all_proj:
+        n = p.get("name") or ""
+        name_to_db[n] = p
+    synced = []
+    skipped = []
+    matched_db_names = set()
+    for tname, plan in raw_plans.items():
+        proj = name_to_db.get(tname)
+        if proj is None:
+            # 兜底：按项目名模糊匹配
+            t_clean = tname.split('（')[0].split('(')[0].strip()
+            for n, p in name_to_db.items():
+                if n == tname or (t_clean and t_clean in n) or (tname and n in tname):
+                    proj = p
+                    break
+        if proj is None:
+            skipped.append({'name': tname, 'episodes': len(plan), 'reason': '未找到对应项目'})
+            continue
+        db.set_episode_plan(proj['name'], plan)
+        matched_db_names.add(proj['name'])
+        total = int(proj.get('total_episodes') or 0)
+        if total < len(plan):
+            try:
+                db.set_episodes(proj['name'], len(plan), len(plan))
+            except Exception:
+                pass
+        synced.append({'name': proj['name'], 'episodes': len(plan),
+                       'editor_count': len(set(plan.values()))})
+    # 清空 DB 中已有 plan 但不在目标文件的项目（避免过时数据污染）
+    cleared = []
+    if clear_stale:
+        for p in all_proj:
+            n = p.get("name") or ""
+            ep = p.get("episode_plan") or ""
+            if n in matched_db_names:
+                continue
+            if ep and ep != "{}":
+                try:
+                    plan = json.loads(ep)
+                except Exception:
+                    plan = {}
+                if plan:
+                    db.set_episode_plan(n, {})
+                    cleared.append(n)
+    return {'synced': synced, 'skipped': skipped, 'cleared': cleared,
+            'total_episodes': sum(s['episodes'] for s in synced),
+            'total_projects': len(synced)}
+
+
 def sync_delivery_dates_from_target(target_path, db=None):
     """从分集目标表格读取胶片日期（col4），解析为 YYYY-MM-DD，写入项目 delivered_date。
     返回已更新项目列表 [{project, date}]。失败抛异常。供路由与分集导出自动调用。
@@ -291,8 +440,8 @@ def register_routes(app, db):
             now = datetime.now()
             month = now.strftime("%Y-%m")
             projs = db.get_all_projects() or []
-            # 当月项目：created_at 落在本月
-            month_projs = [p for p in projs if _parse_ym(p.get("created_at")) == month]
+            # 当月项目：以 project_month 为准（与月度报告口径一致）
+            month_projs = [p for p in projs if (p.get("project_month") or "") == month]
             # 当月已完成：delivered_date 落在本月
             month_completed = [p for p in projs if _parse_ym(p.get("delivered_date")) == month]
             # 进行中：状态非"已完成"且非空
@@ -302,30 +451,29 @@ def register_routes(app, db):
             for p in month_projs:
                 st = (p.get("custom_status") or p.get("delivery_status") or "未设置").strip() or "未设置"
                 status_map[st] = status_map.get(st, 0) + 1
-            # 各剪辑当月集数：从当月项目 episode_plan（episode->editor）聚合
+            # 各剪辑当月集数：统一口径，从当月项目 episode_plan 聚合
             editor_eps = {}
-            for p in month_projs:
-                plan = p.get("episode_plan")
-                if isinstance(plan, str):
-                    try:
-                        plan = json.loads(plan)
-                    except Exception:
-                        plan = {}
-                if isinstance(plan, dict):
-                    for ep, editor in plan.items():
-                        if not editor:
-                            continue
+            try:
+                from features import aggregate_editor_workload
+                for ed in aggregate_editor_workload(db, month=month):
+                    editor_eps[ed["name"]] = ed["assigned"]
+            except Exception:
+                for p in month_projs:
+                    plan = p.get("episode_plan")
+                    if isinstance(plan, str):
                         try:
-                            n = int(ep)
+                            plan = json.loads(plan)
                         except Exception:
-                            continue
-                        editor_eps[str(editor)] = editor_eps.get(str(editor), 0) + 1
-                else:
-                    # 兜底：episodes 数组含 editor
-                    for e in (p.get("episodes") or []):
-                        ed = e.get("editor")
-                        if ed:
-                            editor_eps[str(ed)] = editor_eps.get(str(ed), 0) + 1
+                            plan = {}
+                    if isinstance(plan, dict):
+                        for ep, editor in plan.items():
+                            if not editor:
+                                continue
+                            try:
+                                n = int(ep)
+                            except Exception:
+                                continue
+                            editor_eps[str(editor)] = editor_eps.get(str(editor), 0) + 1
             # 成员数
             members = 0
             try:
