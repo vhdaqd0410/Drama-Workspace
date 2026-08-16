@@ -345,12 +345,69 @@ def _trigger_api(action):
     try:
         import urllib.request
         if action == "scan":
+            key = _api_secret()
+            headers = {"X-API-KEY": key} if key else {}
             req = urllib.request.Request(
                 f"http://127.0.0.1:{_SERVER_PORT}/api/scan",
-                method="POST")
+                method="POST", headers=headers)
             urllib.request.urlopen(req, timeout=3)
     except Exception as e:
         print(f"[tray] trigger_api {action} 失败: {e}")
+
+
+# ============================================================
+# 启动设置（开机自启关联）：读取 min_to_tray / auto_scan 并应用
+# ============================================================
+def _api_secret():
+    """从 backend/config.yaml 读取 api_secret（用于本机 HTTP 鉴权）。"""
+    try:
+        import yaml as _y
+        cfg_path = os.path.join(BASE_DIR, "backend", "config.yaml")
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = _y.safe_load(f) or {}
+        return (cfg.get("web", {}) or {}).get("api_secret", "") or ""
+    except Exception:
+        return ""
+
+
+def _read_startup_settings():
+    """读取 /api/settings 中的启动行为，返回 (min_to_tray, auto_scan)。"""
+    key = _api_secret()
+    try:
+        import urllib.request, json as _j
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{_SERVER_PORT}/api/settings",
+            headers={"X-API-KEY": key} if key else {})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = _j.loads(resp.read().decode("utf-8", "ignore"))
+        s = (data.get("settings") or {}) if data.get("ok") else {}
+        min_tray = str(s.get("min_to_tray", "") or "") in ("1", "true", "True")
+        auto_scan = str(s.get("auto_scan", "") or "") in ("1", "true", "True")
+        return min_tray, auto_scan
+    except Exception as e:
+        print(f"[startup] 读取启动设置失败: {e}")
+        return False, False
+
+
+def _apply_startup_settings():
+    """根据设置执行启动行为：延迟后触发扫描 / 隐藏窗口。"""
+    min_tray, auto_scan = _read_startup_settings()
+    print(f"[startup] 启动行为 → 最小化到托盘: {min_tray}, 自动扫描: {auto_scan}")
+    # 自动扫描：等服务与界面就绪后延迟触发，避免阻塞首屏
+    if auto_scan:
+        def _scan():
+            time.sleep(6)
+            print("[startup] 按设置自动扫描 NAS...")
+            _trigger_api("scan")
+        threading.Thread(target=_scan, daemon=True).start()
+    # 最小化到托盘：延迟到窗口创建完成后执行
+    if min_tray:
+        def _min():
+            time.sleep(2)
+            _hide_window()
+            _update_tray_label()
+            print("[startup] 已按设置最小化到托盘")
+        threading.Thread(target=_min, daemon=True).start()
 
 
 # ============================================================
@@ -659,6 +716,12 @@ def _main():
         resizable=True,
     )
     _window_ref[0] = window
+
+    # 应用启动设置（最小化到托盘 / 自动扫描）
+    try:
+        _apply_startup_settings()
+    except Exception as e:
+        print(f"[startup] 应用启动设置异常: {e}")
 
     # 关闭按钮 → 隐藏到托盘而非退出
     def _on_closing():
