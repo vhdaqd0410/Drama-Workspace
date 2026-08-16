@@ -1,12 +1,9 @@
-// ====== 人名条识别插件 前端逻辑 (plugins/nameplate) ======
+// ====== 工具箱：人名条识别插件 前端逻辑 ======
 // API 走全局 api() 封装（自动携带 X-API-KEY）。
 //
-// 说明：本应用桌面版用 pywebview 内嵌浏览器，对 <a download> / window.open
-// 的下载支持很差。因此：
-//   • "打开"：调后端 POST /api/nameplate/open/<file>，由后端 os.startfile()
-//     在本机直接用 Excel 打开 —— 桌面版最可靠
-//   • "下载"：走真实下载（fetch blob 或 <a href=?key=>）；桌面版下若不可靠，
-//     则回退为"打开"（文件本就在本机 data/nameplate_output/）
+// 说明：桌面版用 pywebview 内嵌浏览器，对 <a download>/window.open 下载支持差。
+//   • 打开：后端 os.startfile 本机直接开 Excel
+//   • 保存到本地：后端弹系统原生"另存为"对话框，选目录后复制保存
 
 function npKey() { return window.__API_KEY__ || ''; }
 
@@ -17,7 +14,17 @@ function npFileUrl(name) {
   return url;
 }
 
-function npIsDesktop() { return !!window.__IS_DESKTOP__; }
+// 折叠/展开工具卡片
+function npToggle(headEl) {
+  var card = headEl && headEl.closest('.tool-card');
+  if (!card) return;
+  var body = card.querySelector('.tool-card-body');
+  var arrow = card.querySelector('.np-toggle-arrow');
+  if (!body) return;
+  var collapsed = body.style.display === 'none';
+  body.style.display = collapsed ? '' : 'none';
+  if (arrow) arrow.style.transform = collapsed ? '' : 'rotate(180deg)';
+}
 
 // 打开：后端 os.startfile 本机直接开 Excel（桌面版最可靠）
 async function npOpen(name) {
@@ -26,20 +33,24 @@ async function npOpen(name) {
     if (d && d.ok) { toast('已用 Excel 打开', 'success'); }
     else { toast((d && d.message) || '打开失败', 'error'); }
   } catch (e) {
-    // 兜底：直接触发展示链接
-    toast('打开失败，尝试下载: ' + e.message, 'warning');
-    npDownload(name);
+    toast('打开失败: ' + e.message, 'error');
   }
 }
 
-// 下载：真实下载文件
-function npDownload(name) {
-  var a = document.createElement('a');
-  a.href = npFileUrl(name);
-  a.download = name || '';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+// 保存到本地：后端弹系统"另存为"对话框
+async function npSaveAs(name) {
+  toast('请在弹出窗口中选择保存位置...', 'info');
+  try {
+    var d = await api('POST', '/api/nameplate/save_as/' + encodeURIComponent(name));
+    if (d && d.ok) {
+      if (d.pending) { toast(d.message || '已弹出保存窗口', 'info'); }
+      else { toast(d.message || '已保存', 'success'); }
+    } else {
+      toast((d && d.message) || '保存失败', 'error');
+    }
+  } catch (e) {
+    toast('保存请求失败: ' + e.message, 'error');
+  }
 }
 
 function loadNameplateTab() { loadNameplateFiles(); }
@@ -58,7 +69,7 @@ async function loadNameplateFiles() {
         + '<span>📄 ' + esc(f.name) + ' <small style="color:#999">(' + f.mtime + ', ' + (f.size/1024).toFixed(1) + 'KB)</small></span>'
         + '<span style="display:flex;gap:6px">'
         +   '<button class="btn btn-sm btn-primary" onclick="npOpen(\'' + safe + '\')" title="用 Excel 打开">📂 打开</button>'
-        +   '<button class="btn btn-sm" onclick="npDownload(\'' + safe + '\')" title="下载保存文件">⬇️ 下载</button>'
+        +   '<button class="btn btn-sm" onclick="npSaveAs(\'' + safe + '\')" title="选择保存位置">💾 保存到本地</button>'
         + '</span>'
         + '</div>';
     }).join('');
@@ -121,7 +132,7 @@ function npWaitForResult(expected, tries) {
       npOpen(hit.name);   // 自动用 Excel 打开
       setTimeout(function () {
         var el = document.getElementById('npStatus');
-        if (el) el.textContent = '✅ 已完成（可在列表重新打开/下载）';
+        if (el) el.textContent = '✅ 已完成（可在列表重新打开/保存到本地）';
       }, 4000);
       return;
     }

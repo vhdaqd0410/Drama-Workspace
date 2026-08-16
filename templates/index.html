@@ -503,7 +503,7 @@ a{color:var(--blue);text-decoration:none}
   <div class="tab" data-tab="qa" onclick="switchTab('qa')">🔍 质检中心</div>
   <div class="tab" data-tab="activity" onclick="switchTab('activity');loadActivityTab()">📜 任务中心</div>
   <div class="tab" data-tab="report" onclick="switchTab('report');loadReportTab()">📊 月度报告</div>
-  <div class="tab" data-tab="nameplate" onclick="switchTab('nameplate');loadNameplateTab()">🏷️ 人名条</div>
+  <div class="tab" data-tab="nameplate" onclick="switchTab('nameplate');loadNameplateTab()">🧰 工具箱</div>
   <div class="tab" data-tab="settings" onclick="switchTab('settings')">⚙️ 设置</div>
 </div>
 <div class="main">
@@ -898,44 +898,57 @@ a{color:var(--blue);text-decoration:none}
     </div>
   </div>
 </div>
-  <!-- ===== 人名条识别插件 (plugins/nameplate) ===== -->
+  <!-- ===== 工具箱：可折叠工具卡片 ===== -->
   <div class="tab-panel" id="tab-nameplate">
     <div class="stats-row">
-      <div class="stat-card" style="grid-column:1/-1;background:linear-gradient(135deg,#7a1f1f,#c84628);color:#fff">
+      <div class="stat-card" style="grid-column:1/-1;background:linear-gradient(135deg,#37474f,#546e7a);color:#fff">
         <div style="display:flex;align-items:center;gap:12px">
-          <span style="font-size:28px">🏷️</span>
+          <span style="font-size:28px">🧰</span>
           <div>
-            <div class="stat-num">剧本首次出场人物与场景整理</div>
-            <div class="stat-label">上传 .docx 剧本，自动提取前 N 集首次出场的人物、场景，生成可下载的 Excel</div>
+            <div class="stat-num">工具箱</div>
+            <div class="stat-label">集中管理扩展工具，点击卡片展开/收起</div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="panel" style="margin-top:16px">
-      <h3>📥 上传剧本解析</h3>
-      <div class="form-group" style="margin-top:12px">
-        <label>📄 剧本文档（.docx）</label>
-        <input type="file" id="npFile" accept=".docx">
+    <!-- 工具卡片：人名条识别（可折叠） -->
+    <div class="tool-card" style="margin-top:16px;border:1px solid #e0e0e0;border-radius:10px;background:#fff;overflow:hidden">
+      <div class="tool-card-head" onclick="npToggle(this)"
+           style="display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;background:#fafafa;border-bottom:1px solid #eee;user-select:none">
+        <span style="font-size:20px">🏷️</span>
+        <div style="flex:1">
+          <strong>剧本首次出场人物与场景整理</strong>
+          <div style="font-size:12px;color:var(--text-sec);margin-top:2px">上传 .docx 剧本，自动提取首次出场的人物、场景，生成 Excel（默认全本）</div>
+        </div>
+        <span class="np-toggle-arrow" style="font-size:14px;color:#999;transition:transform .2s">▼</span>
       </div>
-      <div class="form-group">
-        <label>🔢 解析范围（留空 = 全本，或填集数如 30）</label>
-        <input type="number" id="npEpisodes" value="" min="1" max="2000" placeholder="留空=全本" style="max-width:160px">
-        <small style="display:block;color:var(--text-sec);margin-top:4px">默认解析全本；填数字则只解析前 N 集。</small>
-      </div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="npParse()">🚀 开始解析</button>
-        <span id="npStatus" style="font-size:13px;color:var(--text-sec)"></span>
-      </div>
-      <div style="margin-top:8px;font-size:12px;color:var(--text-sec)">
-        💡 也可用插件自带界面：双击 <code>plugins/nameplate/start_tool.bat</code>，或命令行
-        <code>python script_parser.py 剧本.docx 30</code>，功能完全保留。
-      </div>
-    </div>
 
-    <div class="panel" style="margin-top:16px">
-      <h3>📂 已生成的解析结果</h3>
-      <div id="npFiles" style="margin-top:8px;font-size:13px;color:var(--text-sec)">加载中...</div>
+      <div class="tool-card-body" style="padding:16px">
+        <div class="panel" style="box-shadow:none;padding:0;margin:0;background:transparent">
+          <div class="form-group" style="margin-top:4px">
+            <label>📄 剧本文档（.docx）</label>
+            <input type="file" id="npFile" accept=".docx">
+          </div>
+          <div class="form-group">
+            <label>🔢 解析范围（留空 = 全本，或填集数如 30）</label>
+            <input type="number" id="npEpisodes" value="" min="1" max="2000" placeholder="留空=全本" style="max-width:160px">
+            <small style="display:block;color:var(--text-sec);margin-top:4px">默认解析全本；填数字则只解析前 N 集。</small>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="npParse()">🚀 开始解析</button>
+            <span id="npStatus" style="font-size:13px;color:var(--text-sec)"></span>
+          </div>
+          <div style="margin-top:8px;font-size:12px;color:var(--text-sec)">
+            💡 也可用插件自带界面：双击 <code>plugins/nameplate/start_tool.bat</code>，功能完全保留。
+          </div>
+        </div>
+
+        <div class="panel" style="box-shadow:none;padding:0;margin-top:16px;background:transparent">
+          <h3 style="margin:0 0 8px">📂 已生成的解析结果</h3>
+          <div id="npFiles" style="font-size:13px;color:var(--text-sec)">加载中...</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

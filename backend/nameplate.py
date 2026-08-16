@@ -189,3 +189,43 @@ def register_routes(app, db):
         except Exception as e:
             logger.exception("打开文件失败: %s", e)
             return jsonify({"ok": False, "message": f"打开失败: {e}"}), 500
+
+    # ---- 保存到本地（系统"另存为"对话框）----
+    @app.route("/api/nameplate/save_as/<path:filename>", methods=["POST"])
+    def nameplate_save_as(filename):
+        """弹出系统原生"另存为"对话框，让用户选择保存目录，把结果文件复制过去。
+        桌面版 WebView 下载不可靠，用 tkinter 原生对话框最可靠。"""
+        safe = _sanitize_name(filename)
+        src = os.path.join(_OUTPUT_DIR, safe)
+        if not os.path.isfile(src):
+            return jsonify({"ok": False, "message": "文件不存在"}), 404
+
+        result = {}
+
+        def _ask_and_save():
+            try:
+                import tkinter as tk
+                from tkinter import filedialog, messagebox
+                root = tk.Tk()
+                root.withdraw()
+                root.update()  # 确保对话框能正常弹出
+                dst = filedialog.asksaveasfilename(
+                    parent=root,
+                    title="保存解析结果",
+                    initialfile=safe,
+                    defaultextension=".xlsx",
+                    filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
+                )
+                root.destroy()
+                if not dst:
+                    result.update({"ok": False, "message": "已取消保存"})
+                    return
+                import shutil
+                shutil.copy2(src, dst)
+                result.update({"ok": True, "message": f"已保存到 {dst}", "path": dst})
+            except Exception as e:
+                result.update({"ok": False, "message": f"保存失败: {e}"})
+
+        # 对话框会阻塞，放到后台线程，请求立即返回"正在选择保存位置"
+        threading.Thread(target=_ask_and_save, daemon=True).start()
+        return jsonify({"ok": True, "message": "请在弹出窗口中选择保存位置", "pending": True})
