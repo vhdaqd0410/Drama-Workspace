@@ -182,9 +182,13 @@
     if (_overlay) _overlay.style.display = 'none';
   }
 
-  // Ctrl+K 快捷键
+  // Ctrl+P 或 Ctrl+Shift+K 打开命令面板（避免覆盖已有的 Ctrl+K 页面内搜索）
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && (k === 'p')) {
+      e.preventDefault();
+      if (_overlay && _overlay.style.display === 'flex') close(); else open();
+    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (k === 'k')) {
       e.preventDefault();
       if (_overlay && _overlay.style.display === 'flex') close(); else open();
     }

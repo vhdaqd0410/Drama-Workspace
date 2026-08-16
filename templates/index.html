@@ -530,6 +530,8 @@ a{color:var(--blue);text-decoration:none}
     <button class="btn btn-icon" onclick="toggleBulkMode()" title="批量选择模式">☑️</button>
     <button class="btn btn-icon" onclick="scanProjects()" title="扫描项目">🔄</button>
     <button class="btn btn-icon" onclick="showTeam()" title="团队">👥</button>
+    <button class="btn btn-icon" onclick="openCommandPalette()" title="命令面板 (Ctrl+P)">⌘</button>
+    <button class="btn btn-icon" onclick="openInsightsDialog()" title="数据洞察">📊</button>
     <button class="btn btn-icon" onclick="switchTab('settings')" title="设置">⚙️</button>
     <button class="btn btn-danger btn-sm" id="btnQuit" style="display:none" onclick="quitApp()" title="退出桌面版">🚪 退出</button>
   </div>
@@ -1173,6 +1175,7 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/command-palette.js?v=20260816"></script>
 <script src="/static/js/backup.js?v=20260816"></script>
 <script src="/static/js/thumbnail.js?v=20260816"></script>
+<script src="/static/js/insights.js?v=20260816"></script>
 <script src="/static/js/app.js?v=20260815p"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};

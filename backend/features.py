@@ -197,6 +197,120 @@ def register_routes(app, db):
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
 
+    # ==================== 数据洞察（可选增强：大屏 / 日历 / 导出）====================
+    @app.route("/api/insights/summary")
+    def features_insights_summary():
+        """KPI 汇总：项目数、状态分布、集数、交付、质检、成员。"""
+        try:
+            projs = db.get_all_projects() or []
+            status_map = {}
+            total_ep = 0
+            total_done = 0
+            for p in projs:
+                st = (p.get("custom_status") or p.get("delivery_status") or "未设置").strip()
+                status_map[st] = status_map.get(st, 0) + 1
+                total_ep += int(p.get("total_episodes") or 0)
+                total_done += int(p.get("current_episodes") or 0)
+            # 交付统计（近12个月）
+            months = {}
+            try:
+                logs = db.get_recent_logs(limit=2000)
+                for l in logs:
+                    ts = l.get("created_at") or ""
+                    if len(ts) >= 7 and (l.get("status") or "") != "error":
+                        m = ts[:7]
+                        months[m] = months.get(m, 0) + 1
+            except Exception:
+                pass
+            # 质检统计
+            qa_pass = qa_total = 0
+            try:
+                runs = db.list_all_qa_runs(limit=500)
+                for r in runs:
+                    qa_total += 1
+                    if (r.get("status") or "") == "pass":
+                        qa_pass += 1
+            except Exception:
+                pass
+            # 成员数
+            members = 0
+            try:
+                members = len(db.list_members() or []) if hasattr(db, "list_members") else 0
+            except Exception:
+                pass
+            # 待办统计
+            todo_done = todo_total = 0
+            try:
+                import sqlite3 as _sq
+                with db.get_conn() as conn:
+                    row = conn.execute("SELECT COUNT(*) c, COALESCE(SUM(done),0) d FROM project_todos").fetchone()
+                    todo_total, todo_done = row[0] or 0, row[1] or 0
+            except Exception:
+                pass
+            return jsonify({
+                "ok": True,
+                "projectCount": len(projs),
+                "statusMap": status_map,
+                "totalEpisodes": total_ep,
+                "doneEpisodes": total_done,
+                "deliveryMonths": months,
+                "qaPass": qa_pass,
+                "qaTotal": qa_total,
+                "memberCount": members,
+                "todoTotal": todo_total,
+                "todoDone": todo_done,
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "message": str(e)}), 500
+
+    @app.route("/api/insights/calendar")
+    def features_insights_calendar():
+        """交付日历：返回指定月份每天的交付数。?month=YYYY-MM"""
+        month = request.args.get("month", "")
+        if not month or len(month) != 7:
+            from datetime import datetime
+            month = datetime.now().strftime("%Y-%m")
+        prefix = month + "-"
+        days = {}
+        try:
+            logs = db.get_recent_logs(limit=5000)
+            for l in logs:
+                ts = l.get("created_at") or ""
+                if ts.startswith(prefix):
+                    d = ts[:10]
+                    days[d] = days.get(d, 0) + 1
+        except Exception:
+            pass
+        return jsonify({"ok": True, "month": month, "days": days})
+
+    @app.route("/api/insights/export")
+    def features_insights_export():
+        """导出项目档案 CSV（项目名/状态/总集数/已生成/部门/路径/创建时间）。"""
+        import io as _io
+        import csv as _csv
+        projs = db.get_all_projects() or []
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(["项目名", "部门", "当前状态", "交付状态", "总集数", "已生成集数", "组内路径", "制作路径", "创建时间"])
+        for p in projs:
+            writer.writerow([
+                p.get("name", ""),
+                p.get("department", ""),
+                p.get("custom_status", ""),
+                p.get("delivery_status", ""),
+                p.get("total_episodes", 0),
+                p.get("current_episodes", 0),
+                p.get("group_path", ""),
+                p.get("production_path", ""),
+                p.get("created_at", ""),
+            ])
+        data = "\ufeff" + buf.getvalue()  # BOM 便于 Excel 打开中文
+        from flask import Response
+        return Response(
+            data,
+            mimetype="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=projects.csv"})
+
     # ==================== 视频缩略图（ffmpeg）====================
     @app.route("/api/thumbnail")
     def features_thumbnail():
