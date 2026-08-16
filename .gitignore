@@ -84,6 +84,7 @@ data/fenji_targets/
 # ===========================
 data/backups/
 data/thumbs/
+data/exports/
 
 # ===========================
 # 人名条插件 (plugins/nameplate) 运行时产物
