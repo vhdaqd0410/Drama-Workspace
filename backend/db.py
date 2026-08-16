@@ -182,6 +182,27 @@ class Database:
                 key TEXT PRIMARY KEY,
                 value TEXT DEFAULT ''
             )""")
+
+            # ---- 融合自「项目档案管理器」：待办事项 + 审计日志 ----
+            c.execute("""CREATE TABLE IF NOT EXISTS project_todos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                text TEXT NOT NULL,
+                done INTEGER DEFAULT 0,
+                priority INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_todos_project ON project_todos(project_name)")
+            c.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT,
+                action TEXT,
+                detail TEXT,
+                username TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_logs(project_name)")
+
             # Migration: add columns if missing
             try:
                 c.execute("ALTER TABLE team_members ADD COLUMN title TEXT DEFAULT ''")
@@ -693,6 +714,65 @@ class Database:
                 return {r[0]: r[1] for r in rows}
         except Exception:
             return {}
+
+    # ==================== 项目待办事项 ====================
+    def get_project_todos(self, project_name):
+        try:
+            with self.get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM project_todos WHERE project_name=? ORDER BY done ASC, priority DESC, id DESC",
+                    (project_name,)).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def add_project_todo(self, project_name, text, priority=0):
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO project_todos(project_name, text, priority) VALUES(?,?,?)",
+                (project_name, text, int(priority or 0)))
+            return cur.lastrowid
+
+    def update_project_todo(self, todo_id, done=None, text=None, priority=None):
+        with self.get_conn() as conn:
+            if done is not None:
+                conn.execute("UPDATE project_todos SET done=? WHERE id=?",
+                             (1 if done else 0, todo_id))
+            if text is not None:
+                conn.execute("UPDATE project_todos SET text=? WHERE id=?",
+                             (str(text).strip(), todo_id))
+            if priority is not None:
+                conn.execute("UPDATE project_todos SET priority=? WHERE id=?",
+                             (int(priority or 0), todo_id))
+
+    def delete_project_todo(self, todo_id):
+        with self.get_conn() as conn:
+            conn.execute("DELETE FROM project_todos WHERE id=?", (todo_id,))
+
+    # ==================== 审计日志 ====================
+    def add_audit_log(self, project_name, action, detail="", username=""):
+        try:
+            with self.get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO audit_logs(project_name, action, detail, username) VALUES(?,?,?,?)",
+                    (project_name, action, detail, username))
+        except Exception:
+            pass
+
+    def get_audit_logs(self, project_name=None, limit=100):
+        try:
+            with self.get_conn() as conn:
+                if project_name:
+                    rows = conn.execute(
+                        "SELECT * FROM audit_logs WHERE project_name=? ORDER BY created_at DESC, id DESC LIMIT ?",
+                        (project_name, limit)).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM audit_logs ORDER BY created_at DESC, id DESC LIMIT ?",
+                        (limit,)).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
 
 
 db = Database()

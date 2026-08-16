@@ -99,7 +99,7 @@ if not _API_SECRET:
 # 免鉴权白名单：页面 + 静态资源 + 内部轮询 + 文件流式端点
 # video/img 原生请求不走 fetch，无法自动带 key；服务已绑 127.0.0.1，外部无法直连
 _PUBLIC_ROUTES = {"/", "/health", "/api/health", "/api/status", "/favicon.ico"}
-_PUBLIC_PREFIXES = ("/static/", "/api/_self/", "/api/preview/", "/api/thumbnail/", "/api/frame/", "/api/file_stream/", "/api/sse")
+_PUBLIC_PREFIXES = ("/static/", "/api/_self/", "/api/preview/", "/api/thumbnail/", "/api/thumbnail", "/api/frame/", "/api/file_stream/", "/api/sse")
 
 @app.before_request
 def _auth_gate():
@@ -1191,6 +1191,21 @@ try:
     print("[OK] autostart(开机自启) 已注册")
 except ImportError as e:
     print("[WARN] autostart(开机自启) 未加载:", e)
+
+try:
+    from features import register_routes as _register_features
+    _register_features(app, db)
+    print("[OK] features(待办/时间轴/备份/缩略图) 已注册")
+except ImportError as e:
+    print("[WARN] features(待办/时间轴/备份/缩略图) 未加载:", e)
+
+# 启动数据库每日自动备份
+try:
+    from backup_service import start_scheduler as _start_backup
+    _start_backup()
+    print("[OK] backup_service(数据库自动备份) 已启动")
+except Exception as e:
+    print("[WARN] backup_service 未启动:", e)
 
 
 def main():

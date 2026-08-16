@@ -956,6 +956,10 @@ a{color:var(--blue);text-decoration:none}
     <div class="panel settings-section" style="grid-column:1/-1"><h3>👤 分集默认</h3>
       <div class="form-group"><label>建议剪辑师名字 (每行一个)</label><textarea id="cfgNames"></textarea></div>
     </div>
+    <div class="panel settings-section" style="grid-column:1/-1"><h3>💾 数据备份</h3>
+      <div style="font-size:12px;color:var(--text-sec);margin-bottom:8px">每日自动备份数据库到 data/backups/（保留 7 份），也可手动备份或从历史备份恢复。</div>
+      <button class="btn btn-sm btn-primary" onclick="openBackupDialog()">🛡️ 打开备份/恢复</button>
+    </div>
     <div class="panel settings-section" style="grid-column:1/-1;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn" onclick="migrateOld()">📦 迁移旧数据</button>
       <button class="btn btn-primary" onclick="saveConfig()">🔄 保存设置</button>
@@ -1166,6 +1170,9 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>
 <script src="/static/js/preview.js?v=20260815m"></script>
 <script src="/static/js/nameplate.js?v=20260816"></script>
+<script src="/static/js/command-palette.js?v=20260816"></script>
+<script src="/static/js/backup.js?v=20260816"></script>
+<script src="/static/js/thumbnail.js?v=20260816"></script>
 <script src="/static/js/app.js?v=20260815p"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};

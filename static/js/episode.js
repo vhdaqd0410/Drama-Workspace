@@ -115,7 +115,23 @@ async function openProjectDetail(name){
         <h3>📌 基本信息</h3>
         <div class="kv-grid">${kvHtml||'<div style="color:var(--text-sec)">暂无额外字段</div>'}</div>
       </div>
-      ${epHtml?`<div class="detail-section"><h3>📑 分集列表（${p.episodes.length} 集）</h3>${epHtml}</div>`:''}
+      <div class="detail-section">
+        <h3>📑 分集列表（${p.episodes.length} 集）</h3>${epHtml}
+      </div>
+      <div class="detail-section">
+        <h3>✅ 待办事项 <span id="todoCount" style="font-size:12px;color:var(--text-sec)"></span></h3>
+        <div id="todoBox">
+          <div style="color:var(--text-sec);font-size:13px;padding:8px 0">加载中...</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input id="todoInput" placeholder="添加待办，如：补字幕 / 调色 / 等审片..." style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;outline:none" onkeydown="if(event.key==='Enter')addTodo('${p.name.replace(/'/g,"\\'")}')">
+          <button class="btn btn-sm btn-primary" onclick="addTodo('${p.name.replace(/'/g,"\\'")}')">＋ 添加</button>
+        </div>
+      </div>
+      <div class="detail-section">
+        <h3>🕐 项目时间轴 <span id="tlSummary" style="font-size:12px;color:var(--text-sec)"></span></h3>
+        <div id="timelineBox"><div style="color:var(--text-sec);font-size:13px;padding:8px 0">加载中...</div></div>
+      </div>
       <div class="detail-actions">
         <button onclick="setProjectMonth('${p.name.replace(/'/g,"\\'")}')" class="secondary">📅 设置月份</button>
         ${p.group_path?`<button onclick="openFolder('group','${p.name.replace(/'/g,"\\'")}')" class="secondary">📁 打开组内文件夹</button>`:''}
@@ -124,9 +140,93 @@ async function openProjectDetail(name){
         <button onclick="$('detailModal').classList.remove('active');qaStartFor('${p.name.replace(/'/g,"\\'")}')" class="secondary">🔍 开始质检</button>
       </div>
     `;
+    // 加载待办 + 时间轴
+    loadTodos(name);
+    loadTimeline(name);
   }catch(e){
     content.innerHTML=`<div style="padding:40px;color:var(--red);text-align:center">加载失败: ${e.message}</div>
       <div style="padding:0 20px 20px;text-align:right"><button class="btn" onclick="$('detailModal').classList.remove('active')">关闭</button></div>`;
+  }
+}
+// ===== 待办事项（融合自「项目档案管理器」）=====
+async function loadTodos(name){
+  const box=document.getElementById('todoBox');
+  if(!box)return;
+  try{
+    const d=await api('GET',`/api/project/${encodeURIComponent(name)}/todos`);
+    const todos=(d&&d.todos)||[];
+    renderTodos(name,todos);
+  }catch(e){
+    box.innerHTML=`<div style="color:var(--red);font-size:13px">加载待办失败</div>`;
+  }
+}
+function renderTodos(name,todos){
+  const box=document.getElementById('todoBox');
+  if(!box)return;
+  const cnt=document.getElementById('todoCount');
+  if(cnt){
+    const done=todos.filter(t=>t.done).length;
+    cnt.textContent=todos.length?`（${done} 已完成 / ${todos.length} 共）`:'';
+  }
+  if(!todos.length){
+    box.innerHTML=`<div style="color:var(--text-sec);font-size:13px;padding:4px 0">暂无待办</div>`;
+    return;
+  }
+  box.innerHTML=todos.map(t=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px dashed var(--border)">
+      <button onclick="toggleTodo('${name.replace(/'/g,"\\'")}',${t.id},${t.done?0:1})" style="background:none;border:none;font-size:18px;cursor:pointer;width:26px;text-align:center;padding:0" title="${t.done?'标记未完成':'标记完成'}">${t.done?'☑️':'⬜'}</button>
+      <span style="flex:1;font-size:14px;${t.done?'text-decoration:line-through;color:var(--text-sec)':''}">${escHtml(t.text)}</span>
+      <button onclick="delTodo('${name.replace(/'/g,"\\'")}',${t.id})" style="background:none;border:none;color:var(--red,#ff3b30);cursor:pointer;font-size:14px" title="删除">🗑</button>
+    </div>`).join('');
+}
+async function addTodo(name){
+  const input=document.getElementById('todoInput');
+  const text=input?input.value.trim():'';
+  if(!text){toast('请输入待办内容','warning');return;}
+  try{
+    const d=await api('POST',`/api/project/${encodeURIComponent(name)}/todos`,{text:text});
+    if(d&&d.ok){ if(input)input.value=''; loadTodos(name); toast('已添加待办','success'); }
+    else toast((d&&d.message)||'添加失败','error');
+  }catch(e){toast('添加失败: '+e.message,'error');}
+}
+async function toggleTodo(name,id,done){
+  try{
+    await api('PUT',`/api/project/${encodeURIComponent(name)}/todos/${id}`,{done:!!done});
+    loadTodos(name);
+  }catch(e){toast('更新失败: '+e.message,'error');}
+}
+async function delTodo(name,id){
+  try{
+    await api('DELETE',`/api/project/${encodeURIComponent(name)}/todos/${id}`);
+    loadTodos(name);
+  }catch(e){toast('删除失败: '+e.message,'error');}
+}
+// ===== 项目时间轴（融合自「项目档案管理器」）=====
+async function loadTimeline(name){
+  const box=document.getElementById('timelineBox');
+  if(!box)return;
+  try{
+    const d=await api('GET',`/api/project/${encodeURIComponent(name)}/timeline`);
+    const events=(d&&d.events)||[];
+    const sum=(d&&d.summary)||{};
+    const s=document.getElementById('tlSummary');
+    if(s)s.textContent=events.length?`（共 ${events.length} 个事件）`:'';
+    if(!events.length){
+      box.innerHTML=`<div style="color:var(--text-sec);font-size:13px;padding:4px 0">暂无事件</div>`;
+      return;
+    }
+    box.innerHTML=`<div style="max-height:300px;overflow-y:auto;padding:4px 0">`+
+      events.map(ev=>`
+        <div style="display:flex;gap:10px;padding:5px 0;position:relative;padding-left:18px">
+          <span style="position:absolute;left:0;top:9px;width:9px;height:9px;border-radius:50%;background:${ev.color||'#0071e3'}"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500">${ev.title||''}</div>
+            <div style="font-size:12px;color:var(--text-sec);word-break:break-all">${escHtml(ev.detail||'')}</div>
+            <div style="font-size:11px;color:var(--text-sec);opacity:.7">${ev.time||''}</div>
+          </div>
+        </div>`).join('')+`</div>`;
+  }catch(e){
+    box.innerHTML=`<div style="color:var(--red);font-size:13px">加载时间轴失败</div>`;
   }
 }
 function openSmart(name, which){

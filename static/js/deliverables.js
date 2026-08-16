@@ -195,7 +195,7 @@ function renderDeliverablesModal(){
     return '<tr id="' + rowId + '" style="' + rowBg + '">'
       + '<td class="deliv-td-ck"><input type="checkbox" ' + checked + ' data-deliv-ck="' + htm(f.name) + '" onchange="toggleDelivRow(\'' + htm(f.name).replace(/'/g,"\'") + '\')"></td>'
       + '<td class="deliv-td-ep">' + epHtml + '</td>'
-      + '<td class="deliv-td-name" title="' + htm(f.path) + '">' + icon + ' ' + htm(f.name) + '</td>'
+      + '<td class="deliv-td-name" title="' + htm(f.path) + '" data-thumb="' + (isVideo ? htm(f.path) : '') + '">' + icon + ' ' + htm(f.name) + '</td>'
       + '<td class="deliv-td-size">' + _fmtSize(f.size||0) + '</td>'
       + '<td style="font-size:12px">' + statusBadge + '</td>'
       + '<td class="deliv-td-time">' + htm(f.mtime||'') + '</td>'

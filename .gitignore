@@ -80,6 +80,12 @@ data/fenji_backups/
 data/fenji_targets/
 
 # ===========================
+# 融合功能 (features) 运行时产物：数据库备份 + 视频缩略图缓存
+# ===========================
+data/backups/
+data/thumbs/
+
+# ===========================
 # 人名条插件 (plugins/nameplate) 运行时产物
 # ===========================
 data/nameplate_output/
