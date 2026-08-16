@@ -9,9 +9,9 @@
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.5+-5C3EE8?style=for-the-badge&logo=opencv)](https://opencv.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/status-active-brightgreen?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/v2.1-blue?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/v2.6.0-blue?style=for-the-badge)]()
 
-📡 **实时扫描 · 可视化进度 · 智能协作 · 一键交付**
+📡 **实时扫描 · 可视化进度 · 智能协作 · 一键交付 · 快捷键直达**
 
 </div>
 
@@ -41,8 +41,8 @@
         <b>AI 质检</b><br/>黑帧/花屏检测
       </td>
       <td align="center" width="16%">
-        <h3>📅</h3>
-        <b>月份统计</b><br/>按项目归档
+        <h3>⌨️</h3>
+        <b>全局快捷键</b><br/>任意程序唤起搜索
       </td>
     </tr>
   </table>
@@ -59,6 +59,7 @@
 - [🧩 界面预览](#-界面预览)
 - [🔌 API 接口](#-api-接口)
 - [🗄️ 数据库](#️-数据库)
+- [⌨️ 快捷键](#️-快捷键)
 - [🧪 开发指南](#-开发指南)
 - [🐛 常见问题](#-常见问题)
 - [📜 依赖 & 日志](#-依赖--日志)
@@ -82,17 +83,21 @@
 | 模块 | 说明 |
 |------|------|
 | 🔎 NAS 自动扫描 | N 盘制作部 + O 盘组NAS 双源扫描，项目自动按部门分组 |
-| 📊 分集管理 | Chips 可视化分配 · 批量粘贴 · 自动均分 · 工作量柱状图 · 历史复用 |
+| 📊 分集管理 | Chips 可视化分配 · 批量粘贴 · 自动均分 · 人员模板 · 历史复用 |
+| 📥 Excel 分集同步 | 上传分集 Excel 自动同步到项目，解决已完成项目未设分集导致工作量不准 |
 | 📈 进度扫描 | 自动扫描 `01上映单集版` 目录，缺集红色高亮 + 实时百分比 |
+| ✂️ 剪辑完成提醒 | 剪辑中项目达到设定集数自动弹出"进入审核"提醒 |
+| 📊 数据看板 | 剪辑师工作量 · 部门统计 · 产能趋势（近6月），月度报告整合 |
 | 🎥 成片预览 | editing/revising/delivery 三模式 · 跨盘 fallback · 倍速播放 · 步进 |
 | 💻 系统原生复制 | **Shell.Application.CopyHere** 弹系统资源管理器进度对话框，用户可见 |
-| 📦 素材/成片回传 | 批量回传共用一个 CopyHere 窗口（临时目录硬链接合并） |
-| 📅 项目月份 | 下拉框选择月份（前后各 1 年）· localStorage 持久化 · 按名称去重统计 |
-| 🔍 视频质检 | OpenCV 黑帧检测 · 花屏检测 · PSNR/SSIM · 音轨存在性 · 生成 HTML 报告 |
-| 👥 团队管理 | 成员 CRUD · 职位下拉（组长/卡前/卡后/助理）· 部门归属 · 集数自动移位 |
+| 📦 素材/成片回传 | 批量回传真实进度追踪 · 完成弹窗（打开目录/复制路径） |
+| 📅 项目月份 | 下拉框选择月份 · 后端持久化 · 按名称去重统计 |
+| 🔍 视频质检 | OpenCV 黑帧检测 · 花屏检测 · PSNR/SSIM · 批量质检报告 |
+| ⌨️ 全局快捷键 | 全局搜索/唤醒热键（系统级，任意程序可用）· 可录制自定义 |
+| 👥 团队管理 | 成员 CRUD · 职位下拉 · 部门归属 · 集数自动移位 |
 | 👀 Watchdog | 后台线程监听成片目录 · 稳定 30s 后自动标记 |
 | 📑 Excel 导出 | 分集分配一键导出模板 · 自动备份 · 追加写入不覆盖 |
-| 📝 修改预览 | 修改中的项目额外显示"📝 修改预览"按钮 |
+| 🏢 NAS 路径设置 | 设置界面可自定义/编辑组内与制作部路径，含可访问性检测 |
 
 ---
 
@@ -103,72 +108,78 @@
 ```
 app.py ─┬── scan.py      (ScanMixin)      — get_projects_enriched, 自动发现项目
         ├── sync.py      (SyncMixin)      — robocopy + Shell.Application.CopyHere
-        ├── deliver.py   (DeliverMixin)   — 成片/修改/交付三场景回传
+        ├── deliver.py   (DeliverMixin)   — 成片/修改/交付三场景回传 + 进度追踪
         └── preview.py   (PreviewMixin)   — 视频路径解析 + 流式预览路由
 
-enhanced_routes.py   — 扩展路由（团队、分集导入、light 列表）
+enhanced_routes.py   — 扩展路由（团队、分集、Excel同步、质检、设置）
+bulk_api.py          — 批量操作 + 任务中心 + 月度报告 + 数据看板
 fenji.py / fenji_exporter.py — 分集分配 + Excel 导出
 qa_engine.py + detection.py — 质检引擎（黑帧/花屏/PSNR/SSIM）
 watcher.py           — Watchdog 后台线程
-db.py                — SQLite ORM + 建表迁移
+db.py                — SQLite ORM + 建表迁移 + 用户设置(key-value)
 utils.py             — 共享工具函数
+main_desktop.py      — 桌面版入口（托盘 + 全局热键 RegisterHotKey）
 ```
 
 ### 前端模块拆分
 
 ```
-templates/index.html ── 骨架 HTML + 内联样式
+templates/index.html ── 骨架 HTML + 内联样式（1028 行）
 
 static/js/
-├── core.js              (420 行)   — Dashboard 渲染 / 月份统计 / 状态徽章
-├── project.js           (234 行)   — 项目加载 / 月份 localStorage merge / 名称去重
-├── episode.js           (598 行)   — 分集详情 / 缺集扫描 / setProjectMonth 下拉框
-├── fenji-assign.js      (962 行)   — 分集 Chips 可视化分配 / 批量粘贴
-├── fenji-init.js        (51 行)    — 分集初始化
-├── deliverables.js      (329 行)   — 成片/修改预览面板
-├── deliver-batch.js     (212 行)   — 批量回传进度
-├── deliver-events.js    (183 行)   — 回传事件监听
-├── deliver-patch.js     (3 行)     — 回传补丁
-├── preview.js           (122 行)   — 视频预览弹窗
-├── team.js              (197 行)   — 团队成员管理
-├── qa.js                (80 行)    — 质检入口
-└── app.js               (33 行)    — 应用初始化
+├── core.js              (1064 行) — Dashboard 渲染 / 数据看板 / 快捷键 / 剪辑提醒
+├── project.js           (234 行)  — 项目加载 / 月份 merge / 名称去重
+├── episode.js           (598 行)  — 分集详情 / 缺集扫描 / setProjectMonth
+├── fenji-assign.js      (1184 行) — 分集分配 / 人员模板 / Excel同步
+├── fenji-init.js        (51 行)   — 分集初始化
+├── deliverables.js      (329 行)  — 成片/修改预览面板
+├── deliver-batch.js     (212 行)  — 批量回传进度
+├── deliver-events.js    (373 行)  — 回传事件 + 完成弹窗
+├── deliver-patch.js     (3 行)    — 回传补丁
+├── preview.js           (122 行)  — 视频预览弹窗
+├── team.js              (448 行)  — 团队成员 + 设置 + NAS路径管理 + 快捷键录制
+├── qa.js                (1087 行) — 质检中心 + 批量质检
+├── tabs.js              (246 行)  — 月度报告 / 任务中心
+└── app.js               (67 行)   — 应用初始化 + SSE + 定时任务
 ```
 
 ### 数据流向
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 浏览器                                                      │
-│  index.html → 13 个 ES 模块（core / project / episode / ...）│
+│ 浏览器 (桌面版 WebView / 网页)                              │
+│  index.html → 14 个 JS 模块（core / project / episode / ...）│
 └────────────────────┬────────────────────────────────────────┘
-                     │ HTTP/JSON
+                     │ HTTP/JSON + SSE(实时推送)
 ┌────────────────────▼────────────────────────────────────────┐
 │ Flask 后端 0.0.0.0:8089  (waitress WSGI 生产模式)          │
 │                                                             │
-│  app.py (891行)                                             │
+│  app.py (1207行)                                            │
 │  ├── /api/projects            → ScanMixin.get_projects     │
 │  ├── /api/project_months      → SELECT project_month 专门接口│
 │  ├── /api/project/<n>/update_month  → 月份下拉框持久化       │
 │  ├── /api/project/<n>/episodes_status → 实时缺集扫描         │
 │  ├── /api/preview/<n>/<f>     → PreviewMixin 流式视频       │
-│  └── 30+ 其他路由                                            │
+│  ├── /api/stats/dashboard     → 数据看板(剪辑师/部门/趋势)  │
+│  ├── /api/fenji/sync_from_excel → Excel分集同步到项目        │
+│  ├── /api/settings            → 用户设置持久化(key-value)   │
+│  └── 70+ 其他路由                                            │
 │                                                             │
-│  enhanced_routes.py (514行)  fenji.py  qa_engine.py         │
+│  enhanced_routes.py  bulk_api.py  fenji.py  qa_engine.py    │
+│  main_desktop.py — 托盘 + 全局热键(RegisterHotKey)          │
 └────────────────────┬────────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────────┐
 │ 存储层                                                       │
 │                                                             │
-│ 💾 SQLite (workbench.db)                                    │
-│   projects / team_members / episode_plans / qa_records /   │
-│   sync_log / delivery_records                                │
+│ 💾 SQLite (data/workbench.db)                               │
+│   projects / team_members / qa_runs / qa_results /         │
+│   sync_logs / delivery_logs / deliver_runs / app_settings   │
 │                                                             │
 │ 📁 NAS 磁盘                                                  │
 │   N:\ 制作部 (多部门)    O:\ 组内NAS (剪辑一组)               │
 │                                                             │
-│ 🧠 浏览器 localStorage                                      │
-│   wb_project_months: {项目名: '2026-08'}  ← 月份缓存         │
+│ 🧠 浏览器 localStorage + 后端 app_settings 双重持久化        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -180,26 +191,29 @@ static/js/
 Drama-Workspace/
 │
 ├── 🚀 main.py                     # 统一启动入口（自动打开浏览器）
+├── 🚀 main_desktop.py             # 桌面版入口（WebView + 托盘 + 全局热键）
 ├── 🛠️ start.bat / start.vbs       # Windows 一键启动
+├── 🛠️ start_desktop.vbs           # 桌面版无黑窗启动
 ├── 📦 requirements.txt            # Python 依赖清单
 ├── 🔒 .gitignore                  # 排除 DB / 日志 / config.yaml / 临时脚本
 ├── 📖 README.md                   # 项目文档（本文件）
 │
 ├── 🐍 backend/                    # ═══════ Python 后端 ═══════
 │   ├── __init__.py                # 包初始化：导出 create_app / db
-│   ├── app.py                     # Flask 主入口 + 38 个核心路由（891 行）
-│   ├── enhanced_routes.py         # 扩展路由：团队 / 分集导入 / light 列表（514 行）
-│   ├── scan.py ⭐ Mixin           # 项目扫描 + 按名称去重（374 行）
-│   ├── sync.py ⭐ Mixin           # robocopy + Shell.Application.CopyHere（355 行）
-│   ├── deliver.py ⭐ Mixin        # 成片/修改/交付 三场景回传（1493 行）
-│   ├── preview.py ⭐ Mixin        # 视频路径解析 + 跨盘 fallback（235 行）
-│   ├── sync_engine.py             # 兼容桥：从 app 导入 Mixin（23 行）
-│   ├── db.py                      # SQLite ORM + 建表迁移（591 行）
-│   ├── fenji.py                   # 分集分配逻辑（74 行）
-│   ├── fenji_exporter.py          # Excel 模板导出 + 追加写入（131 行）
-│   ├── qa_engine.py               # 视频质检引擎（460 行）
+│   ├── app.py                     # Flask 主入口 + 核心路由（1207 行）
+│   ├── enhanced_routes.py         # 扩展路由：团队/分集/Excel同步/质检/设置（1195 行）
+│   ├── bulk_api.py                # 批量操作/任务中心/月度报告/数据看板（369 行）
+│   ├── scan.py ⭐ Mixin           # 项目扫描 + 按名称去重（481 行）
+│   ├── sync.py ⭐ Mixin           # robocopy + Shell.Application.CopyHere（597 行）
+│   ├── deliver.py ⭐ Mixin        # 成片/修改/交付 三场景回传 + 进度追踪（2081 行）
+│   ├── preview.py ⭐ Mixin        # 视频路径解析 + 跨盘 fallback（333 行）
+│   ├── sync_engine.py             # 兼容桥：从 app 导入 Mixin + 缓存持久化
+│   ├── db.py                      # SQLite ORM + 建表 + 用户设置（704 行）
+│   ├── fenji.py                   # 分集分配逻辑（83 行）
+│   ├── fenji_exporter.py          # Excel 模板导出 + 追加写入（156 行）
+│   ├── qa_engine.py               # 视频质检引擎（940 行）
 │   ├── detection.py               # OpenCV 黑帧/花屏/PSNR/SSIM（1244 行）
-│   ├── watcher.py                 # Watchdog 后台线程（197 行）
+│   ├── watcher.py                 # Watchdog 后台线程（234 行）
 │   ├── config.py                  # 配置加载 / 保存
 │   ├── config.example.yaml        # 📋 配置模板（公开，不含真实路径）
 │   ├── config.yaml                # ⚠️ 本地私有配置（已加入 .gitignore）
@@ -207,25 +221,29 @@ Drama-Workspace/
 │   └── report_template.py         # 质检报告 HTML 模板
 │
 ├── 🖥️ templates/
-│   └── index.html                 # 单页应用骨架（707 行 · 样式内联）
+│   └── index.html                 # 单页应用骨架（1028 行 · 样式内联）
 │
 ├── 🧩 static/js/                  # ═══════ 前端模块化 ═══════
-│   ├── core.js                    # Dashboard 渲染 / 月份统计 / 状态徽章
+│   ├── core.js                    # Dashboard / 数据看板 / 快捷键 / 剪辑提醒
 │   ├── project.js                 # 项目加载 / 名称去重 / localStorage merge
-│   ├── episode.js                 # 缺集扫描 / setProjectMonth 下拉框 modal
-│   ├── fenji-assign.js            # Chips 可视化分配
+│   ├── episode.js                 # 缺集扫描 / setProjectMonth 下拉框
+│   ├── fenji-assign.js            # Chips 可视化分配 / 人员模板 / Excel同步
 │   ├── fenji-init.js              # 分集初始化
 │   ├── deliverables.js            # 成片/修改预览
 │   ├── deliver-batch.js           # 批量回传进度
-│   ├── deliver-events.js          # 回传事件监听
+│   ├── deliver-events.js          # 回传事件 / 完成弹窗
 │   ├── deliver-patch.js           # 回传补丁
 │   ├── preview.js                 # 视频预览弹窗
-│   ├── team.js                    # 团队成员管理
-│   ├── qa.js                      # 质检入口
-│   └── app.js                     # 应用初始化
+│   ├── team.js                    # 团队成员 / 设置 / NAS路径 / 快捷键录制
+│   ├── qa.js                      # 质检中心 / 批量质检
+│   ├── tabs.js                    # 月度报告 / 任务中心
+│   └── app.js                     # 应用初始化 + SSE + 定时任务
 │
 └── 💾 data/                       # ═══════ 运行时数据（自动生成）═══════
     ├── workbench.db               # SQLite 数据库
+    ├── output_dirs_cache.json     # 上映单集版目录缓存（持久化）
+    ├── fenji_templates/           # 分集导出模板
+    ├── fenji_targets/             # 分集累积目标文件
     └── config.json                # 前端运行时配置
 ```
 
@@ -273,8 +291,8 @@ start.vbs            # 后台静默启动（无 CMD 窗口）
 
 ```
 ============================================================
-  🎬 视频工作台 v2.0
-  📦 统一集成: 项目管理 + NAS同步 + 分集 + 质检
+  🎬 视频工作台 v2.6.0
+  📦 统一集成: 项目管理 + NAS同步 + 分集 + 质检 + 数据看板
 ============================================================
   🌐 访问地址: http://127.0.0.1:8089/
   💾 数据库:   data/workbench.db
@@ -292,45 +310,51 @@ start.vbs            # 后台静默启动（无 CMD 窗口）
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ 📅本月项目 │ 📁总项目 │ 🎬制作中 │ ✅质检通过 │ 🔍质检中 │ ⚠️缺集 │ 📦同步中 │
+│ 📁总项目 │ 📅本月项目 │ ✅本月已完成 │ 🎬制作中 │                   │
 ├──────────────────────────────────────────────────────────────────┤
 │ 🔎 搜索  │ 🏢 部门  │ 🏷️ 月份  │ 📋 状态  │ ↕️ 排序: 状态 ▼   │
 ├──────────────────────────────────────────────────────────────────┤
+│ ┌─ 概览图：部门项目分布(本月) ─┐ ┌─ 工作流状态分布(本月) ──────┐ │
+│ └────────────────────────────┘ └────────────────────────────┘ │
 │                                                                  │
 │ ▼ 组内NAS                                                        │
 │ ┌──────────────────────────────┐  ┌──────────────────────────────┐│
 │ │ 🍭 与他的痛觉绑定             │  │ 👥 萌宝练气三万层            ││
 │ │ [🎬剪辑中] 📅2026-08 [AI二部] │  │ [🔍审核中] 📅2026-08 [AI一部]││
-│ │ ▓▓▓▓▓▓░░ 已输出 35/70        │  │ ▓▓▓░░░  已输出 0/70         ││
-│ │ ⚠️ 缺第 3、5、8-12 集        │  │ ⚠️ 缺 70 集                 ││
-│ │ [🔄] [📅] [📑分集] [📦同步]  │  │ [🔄] [📅] [📑分集] [📦同步] ││
+│ │ ▓▓▓▓▓▓░░ 已输出 35/70        │  │ (审核中/修改中不显示进度)    ││
+│ │ ⚠️ 缺第 3、5、8-12 集        │  │                              ││
+│ │ [🔄] [📑分集] [✏️标记修改]  │  │ [🔄] [📑分集] [✏️标记修改]  ││
 │ └──────────────────────────────┘  └──────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 项目月份设置（下拉框 Modal）
+### 全局搜索框（快捷键唤起）
 
 ```
-┌──────────────────────────┐
-│ 📅 设置项目月份           │
-│ 她的游戏，我的棋局        │
-│                          │
-│ ┌────────────────────┐   │
-│ │ — 清空（不统计）—  │   │
-│ │ 2025-01            │   │
-│ │ 2025-02            │   │
-│ │ ...                │   │
-│ │ 2026-08 · 本月 📌  │   │  ← 当前月自动高亮
-│ │ 2026-09            │   │
-│ │ ... 一直到 2027-12 │   │
-│ └────────────────────┘   │
-│           [取消] [确定]  │
-└──────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ 🔍 [搜索项目名称、月份、拼音首字母...]      Ctrl+Space│
+│ ──────────────────────────────────────────────────── │
+│  (模糊搜索结果，点击定位到项目卡片 + 高亮动画)        │
+│  ↑↓ 选择 · Enter 打开 · Esc 关闭                     │
+└──────────────────────────────────────────────────────┘
+```
+
+### 数据看板（月度报告 Tab）
+
+```
+┌─ 👥 剪辑师工作量(本月) ──┐ ┌─ 🏢 部门项目统计 ──────┐
+│ 金文龙 ▓▓▓▓▓▓ 108集 17项目│ │ AI二部 ▓▓▓▓▓▓ 8项目 5完成│
+│ 袁绍杰 ▓▓▓▓▓▓ 106集 17项目│ │ AI一部 ▓▓▓▓░░ 7项目 3完成│
+│ ...                       │ │ ...                    │
+└───────────────────────────┘ └────────────────────────┘
+┌─ 📈 产能趋势(近6月) ─────────────────────────────────┐
+│ ▓▓▓ 立项  ▓▓▓ 完成  ▓▓▓ 交付                        │
+└─────────────────────────────────────────────────────┘
 ```
 
 ### 系统原生复制进度
 
-点击批量回传 → 自动弹出 **Windows 系统资源管理器进度对话框**（`Shell.Application.CopyHere`），用户可见且可中断。批量操作共用一个合并后的 CopyHere 窗口。
+点击批量回传 → 自动弹出 **Windows 系统资源管理器进度对话框**（`Shell.Application.CopyHere`），用户可见且可中断。批量操作共用一个合并后的 CopyHere 窗口。回传完成后弹出"打开回传目录 / 复制路径"窗口。
 
 ---
 
@@ -361,6 +385,14 @@ start.vbs            # 后台静默启动（无 CMD 窗口）
 | `POST` | `/api/bulk/import_episodes` | 批量导入 |
 | `GET` | `/api/fenji/suggest` | AI 分集建议 |
 | `POST` | `/api/export_fenji` | 导出 Excel 模板 |
+| `POST` | `/api/fenji/sync_from_excel` | **解析分集 Excel 同步到项目（工作量统计）** |
+| `GET` | `/api/fenji/person_templates` | 人员模板列表 |
+| `POST` | `/api/fenji/person_templates` | 保存人员模板 |
+| `DELETE` | `/api/fenji/person_templates` | 删除人员模板 |
+| `GET` | `/api/fenji/templates` | 导出模板列表 |
+| `POST` | `/api/fenji/upload_template` | 上传导出模板 |
+| `GET` | `/api/fenji/targets` | 累积目标文件列表 |
+| `POST` | `/api/fenji/upload_target` | 上传目标文件 |
 
 ### 📦 同步 & 交付
 
@@ -370,25 +402,34 @@ start.vbs            # 后台静默启动（无 CMD 窗口）
 | `GET` | `/api/sync/<name>/status` | 查询进度 |
 | `POST` | `/api/deliver/<name>` | 单文件交付 |
 | `POST` | `/api/deliver_batch/<name>` | **批量回传（Shell.Application 系统进度对话框）** |
-| `POST` | `/api/deliver_compare/<name>` | 对比组内/制作部差异 |
+| `POST` | `/api/deliver_folder/<name>` | 文件夹/整目录回传 |
+| `GET` | `/api/project/<name>/deliver_dst` | 获取回传目标目录（完成弹窗用） |
 
-### 👥 团队
-
-| 方法 | 路径 | 说明 |
-|:---:|:---|:---|
-| `GET` | `/api/team/members` | 列表 |
-| `POST` | `/api/team/members` | 新增 |
-| `PUT` | `/api/team/members/<id>` | 修改 |
-| `DELETE` | `/api/team/members/<id>` | 删除 |
-
-### 🎥 预览 & 🔍 质检
+### 📊 数据看板 & 设置
 
 | 方法 | 路径 | 说明 |
 |:---:|:---|:---|
-| `GET` | `/api/preview/<name>/<file>?mode=editing\|revising\|delivery` | 流式视频预览 |
-| `POST` | `/api/qa/<name>/start` | 启动质检 |
-| `GET` | `/api/qa/<name>/status` | 质检进度 |
-| `GET` | `/api/qa/<name>/report` | 获取 HTML 报告 |
+| `GET` | `/api/stats/dashboard` | **数据看板（剪辑师工作量/部门/趋势）** |
+| `GET` | `/api/report/monthly` | 月度报告 |
+| `GET` | `/api/report/monthly/export` | 月度报告 Excel 导出 |
+| `GET` | `/api/activity_log` | 活动日志 |
+| `GET` | `/api/settings` | 用户设置（key-value） |
+| `PUT` | `/api/settings` | 保存用户设置 |
+| `GET` | `/api/config/paths` | NAS 路径配置 |
+| `POST` | `/api/config/paths` | 新增/更新 NAS 路径 |
+| `DELETE` | `/api/config/paths` | 删除 NAS 路径 |
+| `POST` | `/api/config/path_check` | **NAS 路径可访问性检测** |
+
+### 🔍 质检
+
+| 方法 | 路径 | 说明 |
+|:---:|:---|:---|
+| `POST` | `/api/project/<name>/qa_start` | 启动质检（自动设质检中） |
+| `GET` | `/api/project/<name>/qa_status` | 质检进度 |
+| `GET` | `/api/project/<name>/qa_report` | HTML 报告 |
+| `GET` | `/api/qa/summary` | **质检统计概览** |
+| `POST` | `/api/qa/batch_start` | **批量启动质检** |
+| `GET` | `/api/qa/batch_report` | **批量质检汇总报告** |
 
 ---
 
@@ -397,16 +438,37 @@ start.vbs            # 后台静默启动（无 CMD 窗口）
 默认：`data/workbench.db`（SQLite，WAL 模式）
 
 ```sql
-projects          -- 项目（name, source_path, group_path, production_path, total_episodes, 
-                  --          custom_status, delivery_status, project_month, sync_status, ...）
-team_members      -- 成员（name, title, department, episode_count）
-episode_plans     -- 分集（project_name, episode_num, editor）
-qa_records        -- 质检（project_name, status, score, report_path）
-sync_log          -- 同步日志
-delivery_records  -- 交付记录
+projects          -- 项目（name, group_path, production_path, custom_status,
+                  --          delivery_status, total_episodes, episode_plan, project_month, ...）
+team_members      -- 成员（name, role, title, department, skills）
+qa_runs           -- 质检批次（project_name, status, total, passed, failed, ...）
+qa_results        -- 质检明细（qa_run_id, video_name, version, status, ...）
+sync_logs         -- 同步日志
+delivery_logs     -- 交付记录
+deliver_runs      -- 交付批次（src, dst, total_files, status, ...）
+app_settings      -- 用户设置（key-value：模板选择/目标路径/快捷键/人员模板等）
 ```
 
 **`project_month` 字段说明**：`TEXT` 类型，格式 `YYYY-MM`。为空或 NULL 表示该项目不参与月份统计。空壳项目（无状态 + 未交付 + 0 集）即使有月份也被前端 UI 过滤掉。
+
+---
+
+## ⌨️ 快捷键
+
+三组快捷键都可在**设置界面**录制自定义（点"🎹 录制"后按任意组合键，如 Ctrl+Alt+Z、Alt+1、Ctrl+Shift+F5）。
+
+| 快捷键 | 作用 | 默认 |
+|:---|:---|:---|
+| 🌐 全局搜索项目 | **系统级热键**，软件在后台/任意程序都可唤起搜索框 | Ctrl+Alt+S |
+| 📄 页面内搜索 | 软件窗口内弹出搜索框 | Ctrl+Space |
+| 🪟 全局唤醒窗口 | **系统级热键**，从托盘/后台唤回窗口 | Ctrl+Shift+B |
+
+**说明**：
+- 全局搜索/唤醒用 Windows `RegisterHotKey` 注册，**任意程序下可用**
+- 全局搜索按下列**唤起窗口 + 弹出搜索框**（通过 SSE 通知前端）
+- 页面内搜索支持模糊匹配（子串 + 子序列）
+- 搜索点击结果 → 定位到项目卡片 + 高亮动画
+- ⚠️ 全局热键修改后需**重启软件**生效
 
 ---
 
@@ -448,7 +510,9 @@ def my_feature():
 
 ### 扩展 NAS 路径
 
-修改 `backend/config.yaml` → `nas.production_roots`，然后在 `scan.py` 扫描逻辑中处理新目录层级。
+**推荐方式**：在**设置界面 → NAS路径**直接管理（组内/制作部路径列表、添加/删除/可访问性检测），自动写回 `config.yaml` 并重载。
+
+**手动方式**：修改 `backend/config.yaml` → `nas.production_roots` / `nas.group_root`，然后在 `scan.py` 扫描逻辑中处理新目录层级。
 
 ---
 
@@ -483,7 +547,29 @@ def my_feature():
 <details>
 <summary><b>批量回传进度在哪里？</b></summary>
 
-点击"批量回传"后会弹出 **Windows 系统资源管理器进度对话框**（蓝色复制进度条）。这是 `Shell.Application.CopyHere` 的原生效果，用户可见且可中断。批量操作通过临时目录硬链接合并，共用一个 CopyHere 窗口。
+点击"批量回传"后会弹出 **Windows 系统资源管理器进度对话框**（蓝色复制进度条）。这是 `Shell.Application.CopyHere` 的原生效果。后端会**轮询目标目录实时更新进度**，前端进度条显示真实百分比。回传完成后弹出"打开回传目录 / 复制路径"窗口。
+</details>
+
+<details>
+<summary><b>剪辑师工作量统计不准确？</b></summary>
+
+工作量基于项目的 `episode_plan`（分集 plan）。如果之前已完成的项目在软件里没设分集，会导致统计不准。解决：
+1. 到**分集管理 → 📥 从Excel同步**上传分集表格
+2. 系统自动解析并同步到项目，工作量即更新
+</details>
+
+<details>
+<summary><b>全局搜索/唤醒快捷键不生效？</b></summary>
+
+1. 全局热键在**软件启动时注册**，修改后需**重启软件**
+2. 如果注册失败（被其他程序占用），启动日志会提示，可换一个组合
+3. 页面内搜索快捷键修改后**立即生效**（F5 刷新页面）
+</details>
+
+<details>
+<summary><b>剪辑完成不提醒？</b></summary>
+
+系统每3分钟自动扫描"剪辑中"项目，达到设定集数（`当前集数 ≥ 总集数`）才提醒。如果项目没设总集数（`total_episodes` 为0），不会触发提醒。请先在分集管理中设置总集数。
 </details>
 
 <details>
@@ -536,9 +622,14 @@ Python 3.10+ 标准库：`subprocess`（robocopy）· `sqlite3` · `threading`�
 
 - [x] **v2.0** — 全流程状态机 + 分集面板 + 视频质检 + Watchdog
 - [x] **v2.1** — 项目月份统计 + 下拉框选择 + Shell.Application 系统原生复制 + 批量回传共用进度窗口 + 按名称去重统计 + 成片/修改/交付三场景一键打开资源管理器
-- [ ] **v2.2** — Premiere Pro CEP 插件联动（字幕自动导入）
-- [ ] **v2.3** — 多人实时协作（WebSocket 推送状态变更）
-- [ ] **v2.4** — 移动端适配（响应式 Dashboard）
+- [x] **v2.2** — 性能优化（目录缓存持久化、日志治理、Watchdog 启用）+ 交付完整性检测
+- [x] **v2.3** — 异常监控 + 质检工作流自动流转 + 质检统计 + 批量质检
+- [x] **v2.4** — 分集管理持久化（模板/目标文件/历史记录）+ 人员模板 + 快捷键录制自定义
+- [x] **v2.5** — 全局搜索/唤醒系统热键（RegisterHotKey）+ 搜索定位卡片动画 + 回传进度与完成反馈
+- [x] **v2.6** — 工作量/数据看板 + Excel 分集同步 + 剪辑完成自动提醒 + NAS 路径自定义
+- [ ] **v2.7** — Premiere Pro CEP 插件联动（字幕自动导入）
+- [ ] **v2.8** — 多人实时协作（WebSocket 推送状态变更）
+- [ ] **v2.9** — 移动端适配（响应式 Dashboard）
 
 ---
 
