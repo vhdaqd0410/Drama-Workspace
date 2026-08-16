@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# 系统
+.DS_Store
+Thumbs.db
+*.tmp
+~$*
+
+# 真实数据文件（严禁提交 —— 含真实人员姓名和项目数据）
+config.json
+一组AI项目.xlsx
+AI后期剪辑提成一组最新.xlsx
+AI后期剪辑提成一组*.xlsx
+data/*.xlsx
+
+# 输出文件
+output/
+AI后期剪辑提成一组_生成*.xlsx
+AI后期剪辑提成一组_仪表盘.html
+AI后期剪辑提成一组_new*.xlsx
+个人绩效卡片/
+backup/
+overtime.json
+*_分集.txt
+
+# Python 缓存
+.python_cache
+.python_cache/
+
+# Reasonix
+.reasonix/
+reasonix.toml
+
+# 生成的产出文件
+*_仪表盘.html
+*八月*.xlsx

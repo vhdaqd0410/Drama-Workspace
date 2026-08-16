@@ -55,6 +55,25 @@ async function npSaveAs(name) {
 
 function loadNameplateTab() { loadNameplateFiles(); }
 
+// 启动提成工具 GUI
+async function cmLaunch() {
+  var statusEl = document.getElementById('cmStatus');
+  if (statusEl) statusEl.textContent = '⏳ 正在启动提成工具窗口...';
+  try {
+    var d = await api('POST', '/api/commission/launch');
+    if (d && d.ok) {
+      if (statusEl) statusEl.textContent = '✅ ' + (d.message || '已启动');
+      toast('已启动提成工具，请在弹出的窗口中操作', 'success');
+    } else {
+      if (statusEl) statusEl.textContent = '❌ ' + ((d && d.message) || '启动失败');
+      toast((d && d.message) || '启动失败', 'error');
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '❌ ' + e.message;
+    toast('启动请求失败: ' + e.message, 'error');
+  }
+}
+
 async function loadNameplateFiles() {
   var box = document.getElementById('npFiles');
   if (!box) return;

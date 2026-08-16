@@ -85,3 +85,20 @@ data/fenji_targets/
 data/nameplate_output/
 data/nameplate_uploads/
 plugins/nameplate/calibration.json
+
+# ===========================
+# 提成工具插件 (plugins/commission) — 含真实人员/项目数据，严禁提交
+# ===========================
+plugins/commission/config.json
+plugins/commission/data/
+plugins/commission/output/
+plugins/commission/backup/
+plugins/commission/history/
+plugins/commission/个人绩效卡片/
+plugins/commission/.python_cache
+plugins/commission/.reasonix/
+plugins/commission/reasonix.toml
+plugins/commission/*.xlsx
+plugins/commission/*_仪表盘.html
+plugins/commission/*_分集.txt
+plugins/commission/overtime.json

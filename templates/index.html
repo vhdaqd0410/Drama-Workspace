@@ -950,6 +950,35 @@ a{color:var(--blue);text-decoration:none}
         </div>
       </div>
     </div>
+
+    <!-- 工具卡片：提成工具（可折叠） -->
+    <div class="tool-card" style="margin-top:16px;border:1px solid #e0e0e0;border-radius:10px;background:#fff;overflow:hidden">
+      <div class="tool-card-head" onclick="npToggle(this)"
+           style="display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;background:#fafafa;border-bottom:1px solid #eee;user-select:none">
+        <span style="font-size:20px">💰</span>
+        <div style="flex:1">
+          <strong>AI 后期剪辑提成表生成工具</strong>
+          <div style="font-size:12px;color:var(--text-sec);margin-top:2px">一键将 AI 项目分配表转换为提成表：自动计算绩效/超额/缺集扣除/提成合计，含仪表盘、智能分集、绩效卡片等完整功能</div>
+        </div>
+        <span class="np-toggle-arrow" style="font-size:14px;color:#999;transition:transform .2s">▼</span>
+      </div>
+
+      <div class="tool-card-body" style="padding:16px;display:none">
+        <div class="panel" style="box-shadow:none;padding:0;margin:0;background:transparent">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="cmLaunch()">🚀 启动提成工具</button>
+            <span id="cmStatus" style="font-size:13px;color:var(--text-sec)"></span>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-sec);line-height:1.7">
+            💡 点击「🚀 启动提成工具」会打开独立的提成工具窗口（保留全部功能）。
+            也可直接双击 <code>plugins/commission/启动工具.vbs</code> 启动，或命令行
+            <code>python src/generate_commission.py</code>。<br>
+            功能包括：智能计算（一卡70/二卡120基准）、生成 Excel 提成表、可视化仪表盘、
+            智能分集、个人绩效卡片、角色管理器、批量处理、月份对比、数据导入导出、统计图表等。
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 <div class="toast-container" id="toastContainer"></div>
