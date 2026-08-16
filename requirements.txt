@@ -7,3 +7,8 @@ Pillow>=8.0
 PyYAML>=6.0
 openpyxl>=3.0
 pystray>=0.19
+
+# 人名条识别插件 (plugins/nameplate) 依赖
+python-docx>=0.8.11      # docx 剧本解析
+pywin32>=305            # 生成含点击复制宏的 .xlsm（可选，缺则回退普通 xlsx）
+tkinterdnd2>=0.3        # GUI 拖拽导入（可选）

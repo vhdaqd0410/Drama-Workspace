@@ -1164,6 +1164,13 @@ try:
 except ImportError as e:
     print("[WARN] bulk_api 未加载:", e)
 
+try:
+    from nameplate import register_routes as _register_nameplate
+    _register_nameplate(app, db)
+    print("[OK] nameplate(人名条) 已注册")
+except ImportError as e:
+    print("[WARN] nameplate(人名条) 未加载:", e)
+
 
 def main():
     web_cfg = config.get("web", {})

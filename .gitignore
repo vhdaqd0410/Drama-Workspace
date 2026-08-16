@@ -78,3 +78,10 @@ data/config.json
 data/fenji_templates/
 data/fenji_backups/
 data/fenji_targets/
+
+# ===========================
+# 人名条插件 (plugins/nameplate) 运行时产物
+# ===========================
+data/nameplate_output/
+data/nameplate_uploads/
+plugins/nameplate/calibration.json

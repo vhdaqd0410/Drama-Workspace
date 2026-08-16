@@ -93,6 +93,7 @@
 | 📦 素材/成片回传 | 批量回传真实进度追踪 · 完成弹窗（打开目录/复制路径） |
 | 📅 项目月份 | 下拉框选择月份 · 后端持久化 · 按名称去重统计 |
 | 🔍 视频质检 | OpenCV 黑帧检测 · 花屏检测 · PSNR/SSIM · 批量质检报告 |
+| 🏷️ 人名条识别 | 插件式接入 · 上传 docx 剧本自动提取前 N 集首次出场人物/场景 · 生成可下载 Excel · 保留独立 GUI |
 | ⌨️ 全局快捷键 | 全局搜索/唤醒热键（系统级，任意程序可用）· 可录制自定义 |
 | 👥 团队管理 | 成员 CRUD · 职位下拉 · 部门归属 · 集数自动移位 |
 | 👀 Watchdog | 后台线程监听成片目录 · 稳定 30s 后自动标记 |
@@ -202,6 +203,7 @@ Drama-Workspace/
 │   ├── app.py                     # Flask 主入口 + 核心路由（1207 行）
 │   ├── enhanced_routes.py         # 扩展路由：团队/分集/Excel同步/质检/设置（1195 行）
 │   ├── bulk_api.py                # 批量操作/任务中心/月度报告/数据看板（369 行）
+│   ├── nameplate.py               # 人名条插件 Web 接入层（/api/nameplate/*）
 │   ├── scan.py ⭐ Mixin           # 项目扫描 + 按名称去重（481 行）
 │   ├── sync.py ⭐ Mixin           # robocopy + Shell.Application.CopyHere（597 行）
 │   ├── deliver.py ⭐ Mixin        # 成片/修改/交付 三场景回传 + 进度追踪（2081 行）
@@ -236,7 +238,15 @@ Drama-Workspace/
 │   ├── team.js                    # 团队成员 / 设置 / NAS路径 / 快捷键录制
 │   ├── qa.js                      # 质检中心 / 批量质检
 │   ├── tabs.js                    # 月度报告 / 任务中心
+│   ├── nameplate.js               # 人名条识别插件 前端逻辑
 │   └── app.js                     # 应用初始化 + SSE + 定时任务
+│
+├── 🧩 plugins/                    # ═══════ 扩展插件 ═══════
+│   └── nameplate/                 # 人名条识别工具（独立脚本，功能完整保留）
+│       ├── script_parser.py       # docx 剧本解析核心（GUI + CLI）
+│       ├── make_icon.py / icon.ico
+│       ├── start_tool.bat         # 独立启动（双击运行 GUI）
+│       └── examples/              # 示例剧本
 │
 └── 💾 data/                       # ═══════ 运行时数据（自动生成）═══════
     ├── workbench.db               # SQLite 数据库

@@ -345,6 +345,7 @@ function jumpToProject(name){
     if(typeof fjUpdateTargetBadge==='function')fjUpdateTargetBadge();
   }
   if(name==='qa'){ loadQAProjects(); if(typeof loadQASummary==='function') loadQASummary(); }
+  if(name==='nameplate' && typeof loadNameplateTab==='function'){ loadNameplateTab(); }
   if(name==='settings')loadConfig();
 }
 
