@@ -981,6 +981,33 @@ a{color:var(--blue);text-decoration:none}
         </div>
       </div>
     </div>
+
+    <!-- 工具卡片：拆集工具（可折叠） -->
+    <div class="tool-card" style="margin-top:16px;border:1px solid #e0e0e0;border-radius:10px;background:#fff;overflow:hidden">
+      <div class="tool-card-head" onclick="npToggle(this)"
+           style="display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;background:#fafafa;border-bottom:1px solid #eee;user-select:none">
+        <span style="font-size:20px">✂️</span>
+        <div style="flex:1">
+          <strong>拆集重命名工具</strong>
+          <div style="font-size:12px;color:var(--text-sec);margin-top:2px">批量拆集、重命名剧集文件，支持拖拽导入、任务合并、批量预览等完整功能</div>
+        </div>
+        <span class="np-toggle-arrow" style="font-size:14px;color:#999;transition:transform .2s">▼</span>
+      </div>
+
+      <div class="tool-card-body" style="padding:16px;display:none">
+        <div class="panel" style="box-shadow:none;padding:0;margin:0;background:transparent">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="dtLaunch()">🚀 启动拆集工具</button>
+            <span id="dtStatus" style="font-size:13px;color:var(--text-sec)"></span>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-sec);line-height:1.7">
+            💡 点击「🚀 启动拆集工具」会打开独立的拆集/重命名工具窗口（保留全部功能）。
+            也可直接双击 <code>plugins/dramatool/run.bat</code> 启动，或命令行
+            <code>python src/main.py</code>。
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 <div class="toast-container" id="toastContainer"></div>

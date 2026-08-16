@@ -53,6 +53,25 @@ async function npSaveAs(name) {
   }
 }
 
+// 启动拆集工具 GUI
+async function dtLaunch() {
+  var statusEl = document.getElementById('dtStatus');
+  if (statusEl) statusEl.textContent = '⏳ 正在启动拆集工具窗口...';
+  try {
+    var d = await api('POST', '/api/dramatool/launch');
+    if (d && d.ok) {
+      if (statusEl) statusEl.textContent = '✅ ' + (d.message || '已启动');
+      toast('已启动拆集工具，请在弹出的窗口中操作', 'success');
+    } else {
+      if (statusEl) statusEl.textContent = '❌ ' + ((d && d.message) || '启动失败');
+      toast((d && d.message) || '启动失败', 'error');
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '❌ ' + e.message;
+    toast('启动请求失败: ' + e.message, 'error');
+  }
+}
+
 function loadNameplateTab() { loadNameplateFiles(); }
 
 // 启动提成工具 GUI

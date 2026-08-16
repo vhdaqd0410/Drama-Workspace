@@ -1178,6 +1178,13 @@ try:
 except ImportError as e:
     print("[WARN] commission(提成工具) 未加载:", e)
 
+try:
+    from dramatool import register_routes as _register_dramatool
+    _register_dramatool(app, db)
+    print("[OK] dramatool(拆集工具) 已注册")
+except ImportError as e:
+    print("[WARN] dramatool(拆集工具) 未加载:", e)
+
 
 def main():
     web_cfg = config.get("web", {})
