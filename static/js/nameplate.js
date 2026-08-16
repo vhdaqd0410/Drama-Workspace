@@ -14,16 +14,24 @@ function npFileUrl(name) {
   return url;
 }
 
-// 折叠/展开工具卡片
-function npToggle(headEl) {
-  var card = headEl && headEl.closest('.tool-card');
+// 折叠/展开工具卡片（新版工具箱，基于 .open 类 + max-height 过渡）
+function tbToggle(headEl) {
+  var card = headEl && headEl.closest('.tb-card');
   if (!card) return;
-  var body = card.querySelector('.tool-card-body');
-  var arrow = card.querySelector('.np-toggle-arrow');
-  if (!body) return;
-  var collapsed = body.style.display === 'none';
-  body.style.display = collapsed ? '' : 'none';
-  if (arrow) arrow.style.transform = collapsed ? '' : 'rotate(180deg)';
+  var isOpen = card.classList.contains('open');
+  // 展开当前卡片时收起其他卡片
+  var all = document.querySelectorAll('.tb-card.open');
+  all.forEach(function(c){ if(c !== card) c.classList.remove('open'); });
+  card.classList.toggle('open', !isOpen);
+}
+
+// 按 id 展开某张卡片（底部"展开/使用"按钮用）
+function npToggleBy(id) {
+  var card = document.getElementById(id);
+  if (!card) return;
+  var all = document.querySelectorAll('.tb-card.open');
+  all.forEach(function(c){ if(c !== card) c.classList.remove('open'); });
+  card.classList.toggle('open');
 }
 
 // 打开：后端 os.startfile 本机直接开 Excel（桌面版最可靠）

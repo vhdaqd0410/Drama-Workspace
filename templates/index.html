@@ -464,6 +464,43 @@ a{color:var(--blue);text-decoration:none}
 .qa-browse-name{font-weight:600;font-size:14px}
 .qa-browse-path{display:block;width:100%;font-size:11px;color:var(--text-sec);font-family:Menlo,Consolas,monospace;margin-top:2px}
 .qa-passfail-row{display:flex;align-items:center}
+
+/* ===== 工具箱 (toolbox) 专属样式 ===== */
+.tb-wrap{padding:4px 2px}
+.tb-hero{position:relative;border-radius:18px;overflow:hidden;padding:26px 30px;color:#fff;background:linear-gradient(120deg,#1e2a3a 0%,#283a4f 40%,#3b526e 100%);box-shadow:0 6px 24px rgba(30,42,58,.18)}
+.tb-hero::after{content:"";position:absolute;inset:0;background:radial-gradient(560px 220px at 85% -20%,rgba(90,200,250,.28),transparent 60%),radial-gradient(420px 200px at -10% 130%,rgba(52,199,89,.18),transparent 60%);pointer-events:none}
+.tb-hero-inner{position:relative;display:flex;align-items:center;gap:18px;z-index:1}
+.tb-hero-icon{width:54px;height:54px;border-radius:15px;background:rgba(255,255,255,.14);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;font-size:27px;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.tb-hero h2{font-size:21px;font-weight:700;letter-spacing:.2px}
+.tb-hero p{font-size:13px;opacity:.82;margin-top:4px}
+.tb-hero-badges{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+.tb-hero-badges span{font-size:11.5px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2)}
+.tb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;margin-top:18px}
+.tb-card{position:relative;background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow);transition:box-shadow .2s ease,transform .2s ease;display:flex;flex-direction:column}
+.tb-card:hover{box-shadow:0 8px 28px rgba(0,0,0,.1);transform:translateY(-2px)}
+.tb-card-head{display:flex;align-items:center;gap:14px;padding:18px 18px 14px;cursor:pointer}
+.tb-card-icon{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.14)}
+.tb-card-icon.c1{background:linear-gradient(135deg,#e64a3f,#ff8a5c)}
+.tb-card-icon.c2{background:linear-gradient(135deg,#2f9e6e,#34c759)}
+.tb-card-icon.c3{background:linear-gradient(135deg,#4153c8,#5ac8fa)}
+.tb-card-title{font-size:15px;font-weight:650;color:var(--text);display:flex;align-items:center;gap:6px}
+.tb-card-desc{font-size:12.5px;color:var(--text-sec);margin-top:4px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tb-card-tags{margin-top:9px;display:flex;gap:6px;flex-wrap:wrap}
+.tb-tag{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--blue-light);color:var(--blue);font-weight:500}
+.tb-tag.green{background:#e7f8ec;color:#1e8e4e}
+.tb-tag.purple{background:#efeaff;color:#5b3dc4}
+.tb-card-foot{display:flex;align-items:center;justify-content:space-between;padding:12px 18px 16px;border-top:1px solid #f0f1f3;margin-top:auto}
+.tb-arrow{font-size:12px;color:#b0b3bb;transition:transform .25s ease;flex-shrink:0}
+.tb-card.open .tb-arrow{transform:rotate(180deg)}
+.tb-launch{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:9px;font-size:12.5px;font-weight:600;background:linear-gradient(135deg,var(--blue),#5ac8fa);color:#fff;transition:filter .15s;border:none;cursor:pointer}
+.tb-launch:hover{filter:brightness(1.06)}
+.tb-body{max-height:0;overflow:hidden;transition:max-height .3s ease;background:#fbfbfd;border-top:1px solid var(--border)}
+.tb-body-inner{padding:18px;font-size:13px;color:var(--text)}
+.tb-card.open .tb-body{max-height:900px}
+.tb-body .tb-note{font-size:12px;color:var(--text-sec);line-height:1.7;margin-top:12px}
+.tb-body .tb-note code{background:var(--blue-light);color:var(--blue);padding:1px 5px;border-radius:4px;font-size:11.5px}
+.tb-launch-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tb-status{font-size:12.5px;color:var(--text-sec)}
 </style>
 <style>
 .card-title-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
@@ -900,112 +937,113 @@ a{color:var(--blue);text-decoration:none}
     </div>
   </div>
 </div>
-  <!-- ===== 工具箱：可折叠工具卡片 ===== -->
+  <!-- ===== 工具箱 ===== -->
   <div class="tab-panel" id="tab-nameplate">
-    <div class="stats-row">
-      <div class="stat-card" style="grid-column:1/-1;background:linear-gradient(135deg,#37474f,#546e7a);color:#fff">
-        <div style="display:flex;align-items:center;gap:12px">
-          <span style="font-size:28px">🧰</span>
-          <div>
-            <div class="stat-num">工具箱</div>
-            <div class="stat-label">集中管理扩展工具，点击卡片展开/收起</div>
+    <div class="tb-wrap">
+      <!-- 顶部 Hero -->
+      <div class="tb-hero">
+        <div class="tb-hero-inner">
+          <div class="tb-hero-icon">🧰</div>
+          <div style="flex:1">
+            <h2>工具箱</h2>
+            <p>集中管理扩展工具，点击卡片展开使用全部功能</p>
+            <div class="tb-hero-badges">
+              <span>📄 剧本整理</span><span>💰 提成计算</span><span>✂️ 拆集重命名</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- 工具卡片：人名条识别（可折叠） -->
-    <div class="tool-card" style="margin-top:16px;border:1px solid #e0e0e0;border-radius:10px;background:#fff;overflow:hidden">
-      <div class="tool-card-head" onclick="npToggle(this)"
-           style="display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;background:#fafafa;border-bottom:1px solid #eee;user-select:none">
-        <span style="font-size:20px">🏷️</span>
-        <div style="flex:1">
-          <strong>剧本首次出场人物与场景整理</strong>
-          <div style="font-size:12px;color:var(--text-sec);margin-top:2px">上传 .docx 剧本，自动提取首次出场的人物、场景，生成 Excel（默认全本）</div>
-        </div>
-        <span class="np-toggle-arrow" style="font-size:14px;color:#999;transition:transform .2s">▼</span>
-      </div>
+      <!-- 工具网格 -->
+      <div class="tb-grid">
 
-      <div class="tool-card-body" style="padding:16px">
-        <div class="panel" style="box-shadow:none;padding:0;margin:0;background:transparent">
-          <div class="form-group" style="margin-top:4px">
-            <label>📄 剧本文档（.docx）</label>
-            <input type="file" id="npFile" accept=".docx">
+        <!-- 人名条识别 -->
+        <div class="tb-card open" id="tb-nameplate">
+          <div class="tb-card-head" onclick="tbToggle(this)">
+            <div class="tb-card-icon c1">🏷️</div>
+            <div style="flex:1;min-width:0">
+              <div class="tb-card-title">剧本首次出场整理</div>
+              <div class="tb-card-desc">上传 .docx 剧本，自动提取首次出场的人物、场景，生成 Excel（默认全本）</div>
+              <div class="tb-card-tags"><span class="tb-tag">全本解析</span><span class="tb-tag purple">人物/场景</span><span class="tb-tag green">Excel 导出</span></div>
+            </div>
+            <span class="tb-arrow">▼</span>
           </div>
-          <div class="form-group">
-            <label>🔢 解析范围（留空 = 全本，或填集数如 30）</label>
-            <input type="number" id="npEpisodes" value="" min="1" max="2000" placeholder="留空=全本" style="max-width:160px">
-            <small style="display:block;color:var(--text-sec);margin-top:4px">默认解析全本；填数字则只解析前 N 集。</small>
-          </div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="npParse()">🚀 开始解析</button>
-            <span id="npStatus" style="font-size:13px;color:var(--text-sec)"></span>
-          </div>
-          <div style="margin-top:8px;font-size:12px;color:var(--text-sec)">
-            💡 也可用插件自带界面：双击 <code>plugins/nameplate/start_tool.bat</code>，功能完全保留。
-          </div>
-        </div>
-
-        <div class="panel" style="box-shadow:none;padding:0;margin-top:16px;background:transparent">
-          <h3 style="margin:0 0 8px">📂 已生成的解析结果</h3>
-          <div id="npFiles" style="font-size:13px;color:var(--text-sec)">加载中...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 工具卡片：提成工具（可折叠） -->
-    <div class="tool-card" style="margin-top:16px;border:1px solid #e0e0e0;border-radius:10px;background:#fff;overflow:hidden">
-      <div class="tool-card-head" onclick="npToggle(this)"
-           style="display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;background:#fafafa;border-bottom:1px solid #eee;user-select:none">
-        <span style="font-size:20px">💰</span>
-        <div style="flex:1">
-          <strong>AI 后期剪辑提成表生成工具</strong>
-          <div style="font-size:12px;color:var(--text-sec);margin-top:2px">一键将 AI 项目分配表转换为提成表：自动计算绩效/超额/缺集扣除/提成合计，含仪表盘、智能分集、绩效卡片等完整功能</div>
-        </div>
-        <span class="np-toggle-arrow" style="font-size:14px;color:#999;transition:transform .2s">▼</span>
-      </div>
-
-      <div class="tool-card-body" style="padding:16px;display:none">
-        <div class="panel" style="box-shadow:none;padding:0;margin:0;background:transparent">
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="cmLaunch()">🚀 启动提成工具</button>
-            <span id="cmStatus" style="font-size:13px;color:var(--text-sec)"></span>
-          </div>
-          <div style="margin-top:10px;font-size:12px;color:var(--text-sec);line-height:1.7">
-            💡 点击「🚀 启动提成工具」会打开独立的提成工具窗口（保留全部功能）。
-            也可直接双击 <code>plugins/commission/启动工具.vbs</code> 启动，或命令行
-            <code>python src/generate_commission.py</code>。<br>
-            功能包括：智能计算（一卡70/二卡120基准）、生成 Excel 提成表、可视化仪表盘、
-            智能分集、个人绩效卡片、角色管理器、批量处理、月份对比、数据导入导出、统计图表等。
+          <div class="tb-body"><div class="tb-body-inner">
+            <div class="form-group" style="margin-top:2px">
+              <label>📄 剧本文档（.docx）</label>
+              <input type="file" id="npFile" accept=".docx">
+            </div>
+            <div class="form-group">
+              <label>🔢 解析范围（留空 = 全本，或填集数如 30）</label>
+              <input type="number" id="npEpisodes" value="" min="1" max="2000" placeholder="留空=全本" style="max-width:160px">
+              <small style="display:block;color:var(--text-sec);margin-top:4px">默认解析全本；填数字则只解析前 N 集。</small>
+            </div>
+            <div class="tb-launch-line">
+              <button class="tb-launch" onclick="npParse()">🚀 开始解析</button>
+              <span class="tb-status" id="npStatus"></span>
+            </div>
+            <div style="margin-top:16px;font-weight:600;font-size:13px;color:var(--text)">📂 已生成的解析结果</div>
+            <div id="npFiles" style="font-size:13px;color:var(--text-sec);margin-top:6px">加载中...</div>
+            <div class="tb-note">💡 也可用插件自带界面：双击 <code>plugins/nameplate/start_tool.bat</code>，功能完全保留。</div>
+          </div></div>
+          <div class="tb-card-foot">
+            <span style="font-size:11.5px;color:var(--text-sec)">📄 剧本 · 人物 · 场景</span>
+            <button class="tb-launch" onclick="npToggleBy('tb-nameplate')">展开 / 使用</button>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 工具卡片：拆集工具（可折叠） -->
-    <div class="tool-card" style="margin-top:16px;border:1px solid #e0e0e0;border-radius:10px;background:#fff;overflow:hidden">
-      <div class="tool-card-head" onclick="npToggle(this)"
-           style="display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;background:#fafafa;border-bottom:1px solid #eee;user-select:none">
-        <span style="font-size:20px">✂️</span>
-        <div style="flex:1">
-          <strong>拆集重命名工具</strong>
-          <div style="font-size:12px;color:var(--text-sec);margin-top:2px">批量拆集、重命名剧集文件，支持拖拽导入、任务合并、批量预览等完整功能</div>
+        <!-- 提成工具 -->
+        <div class="tb-card" id="tb-commission">
+          <div class="tb-card-head" onclick="tbToggle(this)">
+            <div class="tb-card-icon c2">💰</div>
+            <div style="flex:1;min-width:0">
+              <div class="tb-card-title">AI 提成表生成工具</div>
+              <div class="tb-card-desc">一键将项目分配表转为提成表：自动计算绩效/超额/缺集扣除，含仪表盘、智能分集、绩效卡片</div>
+              <div class="tb-card-tags"><span class="tb-tag green">智能计算</span><span class="tb-tag purple">仪表盘</span><span class="tb-tag">批量处理</span></div>
+            </div>
+            <span class="tb-arrow">▼</span>
+          </div>
+          <div class="tb-body"><div class="tb-body-inner">
+            <div class="tb-launch-line">
+              <button class="tb-launch" onclick="cmLaunch()">🚀 启动提成工具</button>
+              <span class="tb-status" id="cmStatus"></span>
+            </div>
+            <div class="tb-note">💡 点击「🚀 启动提成工具」打开独立窗口（保留全部功能）。也可双击
+              <code>plugins/commission/启动工具.vbs</code> 或命令行 <code>python src/generate_commission.py</code>。<br>
+              功能：智能计算（一卡70/二卡120基准）、生成 Excel 提成表、可视化仪表盘、智能分集、个人绩效卡片、
+              角色管理器、批量处理、月份对比、数据导入导出、统计图表等。</div>
+          </div></div>
+          <div class="tb-card-foot">
+            <span style="font-size:11.5px;color:var(--text-sec)">💰 提成 · 绩效 · 分集</span>
+            <button class="tb-launch" onclick="npToggleBy('tb-commission')">启动工具</button>
+          </div>
         </div>
-        <span class="np-toggle-arrow" style="font-size:14px;color:#999;transition:transform .2s">▼</span>
-      </div>
 
-      <div class="tool-card-body" style="padding:16px;display:none">
-        <div class="panel" style="box-shadow:none;padding:0;margin:0;background:transparent">
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="dtLaunch()">🚀 启动拆集工具</button>
-            <span id="dtStatus" style="font-size:13px;color:var(--text-sec)"></span>
+        <!-- 拆集工具 -->
+        <div class="tb-card" id="tb-dramatool">
+          <div class="tb-card-head" onclick="tbToggle(this)">
+            <div class="tb-card-icon c3">✂️</div>
+            <div style="flex:1;min-width:0">
+              <div class="tb-card-title">拆集重命名工具</div>
+              <div class="tb-card-desc">批量拆集、重命名剧集文件，支持拖拽导入、任务合并、批量预览等完整功能</div>
+              <div class="tb-card-tags"><span class="tb-tag purple">拖拽导入</span><span class="tb-tag">批量重命名</span><span class="tb-tag green">任务合并</span></div>
+            </div>
+            <span class="tb-arrow">▼</span>
           </div>
-          <div style="margin-top:10px;font-size:12px;color:var(--text-sec);line-height:1.7">
-            💡 点击「🚀 启动拆集工具」会打开独立的拆集/重命名工具窗口（保留全部功能）。
-            也可直接双击 <code>plugins/dramatool/run.bat</code> 启动，或命令行
-            <code>python src/main.py</code>。
+          <div class="tb-body"><div class="tb-body-inner">
+            <div class="tb-launch-line">
+              <button class="tb-launch" onclick="dtLaunch()">🚀 启动拆集工具</button>
+              <span class="tb-status" id="dtStatus"></span>
+            </div>
+            <div class="tb-note">💡 点击「🚀 启动拆集工具」打开独立窗口（保留全部功能）。也可双击
+              <code>plugins/dramatool/run.bat</code> 或命令行 <code>python src/main.py</code>。</div>
+          </div></div>
+          <div class="tb-card-foot">
+            <span style="font-size:11.5px;color:var(--text-sec)">✂️ 拆集 · 重命名</span>
+            <button class="tb-launch" onclick="npToggleBy('tb-dramatool')">启动工具</button>
           </div>
         </div>
+
       </div>
     </div>
   </div>
