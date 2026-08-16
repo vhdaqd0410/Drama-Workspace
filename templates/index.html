@@ -895,9 +895,34 @@ a{color:var(--blue);text-decoration:none}
       </div>
     </div>
     <div class="panel settings-section"><h3>🔧 QA 设置</h3>
-      <div class="form-group"><label>默认 Workers</label><input type="number" id="cfgWorkers" value="4"></div>
-      <div class="form-group"><label>ffmpeg 路径</label><input type="text" id="cfgFfmpeg"></div>
-      <div class="form-group"><label>ffprobe 路径</label><input type="text" id="cfgFfprobe"></div>
+      <div class="form-group"><label>质检并行线程（Workers）</label><input type="number" id="cfgWorkers" value="4" min="1" max="32"></div>
+      <div class="form-group"><label>ffmpeg 路径（留空=自动检测）</label><input type="text" id="cfgFfmpeg" placeholder="默认从 PATH 自动检测"></div>
+      <div class="form-group"><label>ffprobe 路径（留空=自动检测）</label><input type="text" id="cfgFfprobe" placeholder="默认从 PATH 自动检测"></div>
+      <div style="font-size:11px;color:var(--text-sec);margin-top:6px">💡 ffmpeg/ffprobe 一般无需填写，系统会从 PATH 自动检测；仅在异常时手动指定。</div>
+    </div>
+    <div class="panel settings-section"><h3>🚀 启动设置</h3>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="cfgAutostart" onchange="toggleAutostart()" style="width:16px;height:16px">
+          <b>开机自动启动</b>
+        </label>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">登录 Windows 后自动在后台启动工作台（可托盘运行）。</div>
+        <div id="autostartStatus" style="font-size:11px;margin-top:4px"></div>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="cfgMinToTray" onchange="saveConfig()" style="width:16px;height:16px">
+          启动后最小化到托盘
+        </label>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">启动时不弹主窗口，直接收进系统托盘。</div>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="cfgAutoScan" onchange="saveConfig()" style="width:16px;height:16px">
+          启动时自动扫描 NAS
+        </label>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">启动后自动开始扫描进行中的项目，无需手动刷新。</div>
+      </div>
     </div>
     <div class="panel settings-section"><h3>⚡ 快捷键设置</h3>
       <div class="form-group">

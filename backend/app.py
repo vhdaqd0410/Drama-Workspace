@@ -1185,6 +1185,13 @@ try:
 except ImportError as e:
     print("[WARN] dramatool(拆集工具) 未加载:", e)
 
+try:
+    from autostart import register_routes as _register_autostart
+    _register_autostart(app, db)
+    print("[OK] autostart(开机自启) 已注册")
+except ImportError as e:
+    print("[WARN] autostart(开机自启) 未加载:", e)
+
 
 def main():
     web_cfg = config.get("web", {})

@@ -227,7 +227,7 @@ async function loadConfig(){
   }catch(e){}
   // 加载 NAS 路径列表（组内 + 制作部）
   try{ await loadNasPaths(); }catch(_){}
-  // 加载快捷键配置
+  // 加载快捷键配置 + 启动设置
   try{
     const d = await api('GET', '/api/settings');
     if(d && d.ok && d.settings){
@@ -244,8 +244,54 @@ async function loadConfig(){
         var s3 = document.getElementById('cfgGlobalSearchShortcut');
         if(s3) s3.value = _fmtShortcut(cfg.global_search_shortcut);
       }
+      // 启动行为
+      var mt = document.getElementById('cfgMinToTray');
+      if(mt) mt.checked = cfg.min_to_tray === '1' || cfg.min_to_tray === true;
+      var as = document.getElementById('cfgAutoScan');
+      if(as) as.checked = cfg.auto_scan === '1' || cfg.auto_scan === true;
     }
   }catch(_){}
+  // 加载开机自启状态
+  try{ await loadAutostartStatus(); }catch(_){}
+}
+
+// 读取开机自启状态
+async function loadAutostartStatus(){
+  const box = document.getElementById('autostartStatus');
+  const chk = document.getElementById('cfgAutostart');
+  if(!chk) return;
+  try{
+    const d = await api('GET', '/api/autostart/status');
+    if(d && d.ok){
+      chk.checked = !!d.enabled;
+      if(box) box.textContent = d.enabled ? '✅ 已开启开机自启' : '尚未开启开机自启';
+    }
+  }catch(e){
+    if(box) box.textContent = '⚠️ 无法读取自启状态';
+  }
+}
+
+// 切换开机自启
+async function toggleAutostart(){
+  const chk = document.getElementById('cfgAutostart');
+  const box = document.getElementById('autostartStatus');
+  if(!chk) return;
+  const enabled = chk.checked;
+  try{
+    const d = await api('POST', '/api/autostart/set', { enabled });
+    if(d && d.ok){
+      if(box){ box.textContent = d.message || (enabled ? '✅ 已开启开机自启' : '已关闭开机自启'); }
+      toast(enabled ? '✅ 已开启开机自启' : '已关闭开机自启', 'success');
+    } else {
+      chk.checked = !enabled;
+      if(box) box.textContent = '❌ ' + ((d && d.message) || '设置失败');
+      toast('开机自启设置失败', 'error');
+    }
+  }catch(e){
+    chk.checked = !enabled;
+    if(box) box.textContent = '❌ ' + e.message;
+    toast('开机自启设置失败: ' + e.message, 'error');
+  }
 }
 async function saveConfig(){
   const cfg={
@@ -255,7 +301,17 @@ async function saveConfig(){
     ffprobe_path:$('cfgFfprobe').value,
     suggested_names:$('cfgNames').value.split('\n').map(s=>s.trim()).filter(Boolean)
   };
-  try{await api('POST','/api/config',cfg);toast('设置已保存','success')}catch(e){toast('保存失败: '+e.message,'error')}
+  try{await api('POST','/api/config',cfg);}catch(e){toast('保存失败: '+e.message,'error');return;}
+  // 保存启动行为到 settings（key-value）
+  try{
+    const mt = document.getElementById('cfgMinToTray');
+    const as = document.getElementById('cfgAutoScan');
+    await api('PUT','/api/settings',{
+      min_to_tray: mt ? (mt.checked?'1':'0') : '0',
+      auto_scan: as ? (as.checked?'1':'0') : '0'
+    });
+  }catch(_){}
+  toast('设置已保存','success');
 }
 async function migrateOld(){
   try{toast('正在迁移...','info');const r=await api('POST','/api/migrate');toast((r&&r.message)||'迁移完成','success')}catch(e){toast('迁移失败: '+e.message,'error')}
