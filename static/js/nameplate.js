@@ -1,10 +1,14 @@
 // ====== 人名条识别插件 前端逻辑 (plugins/nameplate) ======
 // API 走全局 api() 封装（自动携带 X-API-KEY）。
-// 下载用 <a href=?key=> 直链，因为原生下载不走 fetch，需把 key 放 query 参数。
+//
+// 说明：本应用桌面版用 pywebview 内嵌浏览器，对 <a download> / window.open
+// 的下载支持很差。因此：
+//   • "打开"：调后端 POST /api/nameplate/open/<file>，由后端 os.startfile()
+//     在本机直接用 Excel 打开 —— 桌面版最可靠
+//   • "下载"：走真实下载（fetch blob 或 <a href=?key=>）；桌面版下若不可靠，
+//     则回退为"打开"（文件本就在本机 data/nameplate_output/）
 
-function npKey() {
-  return window.__API_KEY__ || '';
-}
+function npKey() { return window.__API_KEY__ || ''; }
 
 function npFileUrl(name) {
   var url = '/api/nameplate/output/' + encodeURIComponent(name);
@@ -13,8 +17,23 @@ function npFileUrl(name) {
   return url;
 }
 
-// 触发浏览器下载（相当于"直接打开"，本地关联 Excel 会自动打开）
-function npTriggerDownload(name) {
+function npIsDesktop() { return !!window.__IS_DESKTOP__; }
+
+// 打开：后端 os.startfile 本机直接开 Excel（桌面版最可靠）
+async function npOpen(name) {
+  try {
+    var d = await api('POST', '/api/nameplate/open/' + encodeURIComponent(name));
+    if (d && d.ok) { toast('已用 Excel 打开', 'success'); }
+    else { toast((d && d.message) || '打开失败', 'error'); }
+  } catch (e) {
+    // 兜底：直接触发展示链接
+    toast('打开失败，尝试下载: ' + e.message, 'warning');
+    npDownload(name);
+  }
+}
+
+// 下载：真实下载文件
+function npDownload(name) {
   var a = document.createElement('a');
   a.href = npFileUrl(name);
   a.download = name || '';
@@ -23,9 +42,7 @@ function npTriggerDownload(name) {
   document.body.removeChild(a);
 }
 
-function loadNameplateTab() {
-  loadNameplateFiles();
-}
+function loadNameplateTab() { loadNameplateFiles(); }
 
 async function loadNameplateFiles() {
   var box = document.getElementById('npFiles');
@@ -36,11 +53,12 @@ async function loadNameplateFiles() {
     var files = d.files || [];
     if (!files.length) { box.innerHTML = '暂无生成结果。上传剧本解析后会自动出现在这里。'; return; }
     var rows = files.map(function (f) {
-      var href = npFileUrl(f.name);
+      var safe = String(f.name).replace(/'/g, "\\'");
       return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid #eee">'
         + '<span>📄 ' + esc(f.name) + ' <small style="color:#999">(' + f.mtime + ', ' + (f.size/1024).toFixed(1) + 'KB)</small></span>'
         + '<span style="display:flex;gap:6px">'
-        +   '<button class="btn btn-sm" onclick="npTriggerDownload(\'' + f.name.replace(/'/g, "\\'") + '\')" title="下载/打开">⬇️ 下载</button>'
+        +   '<button class="btn btn-sm btn-primary" onclick="npOpen(\'' + safe + '\')" title="用 Excel 打开">📂 打开</button>'
+        +   '<button class="btn btn-sm" onclick="npDownload(\'' + safe + '\')" title="下载保存文件">⬇️ 下载</button>'
         + '</span>'
         + '</div>';
     }).join('');
@@ -62,7 +80,6 @@ async function npParse() {
     toast('仅支持 .docx 剧本', 'error');
     return;
   }
-  // 集数：留空 = 全本
   var epInput = document.getElementById('npEpisodes');
   var episodes = (epInput && epInput.value || '').trim();
 
@@ -76,7 +93,6 @@ async function npParse() {
     if (d && d.ok) {
       statusEl.textContent = '⏳ ' + (d.message || '解析中...');
       toast('已提交' + (d.scope ? '（' + d.scope + '）' : '') + '解析任务', 'success');
-      // 轮询等待结果生成，完成后自动下载打开
       npWaitForResult(d.expected_output);
     } else {
       statusEl.textContent = '❌ ' + ((d && d.message) || '解析失败');
@@ -88,33 +104,25 @@ async function npParse() {
   }
 }
 
-// 轮询指定输出文件是否生成，生成后自动下载并刷新列表
+// 轮询结果生成后自动打开
 function npWaitForResult(expected, tries) {
   tries = tries || 0;
-  if (tries > 120) {  // 最多等 ~60s
+  if (tries > 400) {   // 最多等 ~200s
     document.getElementById('npStatus').textContent = '⏳ 等待超时，请手动刷新结果列表';
     return;
   }
   api('GET', '/api/nameplate/files').then(function (d) {
     var files = (d && d.files) || [];
-    if (expected) {
-      var hit = files.find(function (f) { return f.name === expected; });
-      if (hit) {
-        document.getElementById('npStatus').textContent = '✅ 解析完成，正在打开...';
-        npTriggerDownload(hit.name);          // 直接打开/下载
-        loadNameplateFiles();                 // 刷新结果列表
-        setTimeout(function () {
-          var el = document.getElementById('npStatus');
-          if (el) el.textContent = '✅ 已完成，可直接下载';
-        }, 4000);
-        return;
-      }
-    } else if (files.length) {
-      // 无预期文件名时，取最新生成的文件
-      var latest = files[0];
+    var hit = expected ? files.find(function (f) { return f.name === expected; })
+                       : (files.length ? files[0] : null);
+    if (hit) {
       document.getElementById('npStatus').textContent = '✅ 解析完成，正在打开...';
-      npTriggerDownload(latest.name);
       loadNameplateFiles();
+      npOpen(hit.name);   // 自动用 Excel 打开
+      setTimeout(function () {
+        var el = document.getElementById('npStatus');
+        if (el) el.textContent = '✅ 已完成（可在列表重新打开/下载）';
+      }, 4000);
       return;
     }
     setTimeout(function () { npWaitForResult(expected, tries + 1); }, 500);

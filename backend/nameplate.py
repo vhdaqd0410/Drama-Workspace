@@ -168,3 +168,24 @@ def register_routes(app, db):
         return send_file(path, as_attachment=True,
                          download_name=safe,
                          mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # ---- 直接打开结果（本机桌面应用最可靠，绕过 WebView 下载限制）----
+    @app.route("/api/nameplate/open/<path:filename>", methods=["POST"])
+    def nameplate_open(filename):
+        """用系统默认程序直接打开生成的 Excel（Windows os.startfile）。
+        桌面版(WebView)对 <a download>/window.open 支持差，本机后端打开最可靠。"""
+        safe = _sanitize_name(filename)
+        path = os.path.join(_OUTPUT_DIR, safe)
+        if not os.path.isfile(path):
+            return jsonify({"ok": False, "message": "文件不存在"}), 404
+        try:
+            if os.name == "nt":
+                os.startfile(path)
+            else:
+                import subprocess
+                subprocess.Popen(["open", path] if sys.platform == "darwin" else ["xdg-open", path])
+            logger.info("已用系统程序打开: %s", path)
+            return jsonify({"ok": True, "message": "已打开", "file": safe})
+        except Exception as e:
+            logger.exception("打开文件失败: %s", e)
+            return jsonify({"ok": False, "message": f"打开失败: {e}"}), 500
