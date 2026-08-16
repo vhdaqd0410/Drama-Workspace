@@ -134,6 +134,17 @@ def _parse_assign_line(plan, line):
             if m2:
                 plan[m2.group(1)] = editor
 
+def _auto_sync_delivery_dates(target_path):
+    """分集导出写入目标文件后，自动从表格读取胶片日期更新项目交付日期。"""
+    try:
+        import features as _feat
+        from db import db as _db
+        updated = _feat.sync_delivery_dates_from_target(target_path, _db)
+        _logger.info("自动同步交付日期完成: %d 个项目", len(updated))
+    except Exception as e:
+        _logger.warning("自动同步交付日期失败: %s", e)
+
+
 def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     @app.route("/api/project/<path:project_name>", methods=["GET"])
     def api_project_detail(project_name):
@@ -1211,6 +1222,17 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             except Exception as e:
                 _logger.exception('写目标文件失败')
                 return jsonify(ok=False, msg=f'保存目标文件失败: {e}'), 500
+            # 自动同步：写入目标后，自动从表格读取胶片日期更新项目交付日期（不阻塞响应）
+            try:
+                import threading as _th
+                import features as _feat
+                _th.Thread(
+                    target=_auto_sync_delivery_dates,
+                    args=(safe_tgt,),
+                    daemon=True,
+                ).start()
+            except Exception as e:
+                _logger.warning('自动同步交付日期失败: %s', e)
         else:
             # 只在没有 target_path 时才写回模板 (保持旧行为兼容)
             if tpl_name and not tpl_b64:

@@ -77,6 +77,42 @@ def _log_audit(db, project_name, action, detail="", username=""):
         logger.warning("写入审计日志失败: %s", e)
 
 
+def sync_delivery_dates_from_target(target_path, db=None):
+    """从分集目标表格读取胶片日期（col4），解析为 YYYY-MM-DD，写入项目 delivered_date。
+    返回已更新项目列表 [{project, date}]。失败抛异常。供路由与分集导出自动调用。
+    """
+    if db is None:
+        from db import db as _db
+        db = _db
+    import openpyxl
+    wb = openpyxl.load_workbook(target_path, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    updated = []
+    seen_names = set()
+    cur_name = None
+    cur_date = ""
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+        name = row[0].value if len(row) > 0 else None
+        if name and str(name).strip():
+            # 新项目块开始
+            if cur_name and cur_date and cur_name not in seen_names:
+                seen_names.add(cur_name)
+                parsed = _parse_time_text(cur_date)
+                if parsed:
+                    db.update_project_status(cur_name, delivered_date=parsed)
+                    updated.append({"project": cur_name, "date": parsed})
+            cur_name = str(name).strip()
+            cur_date = row[3].value if len(row) > 3 else None
+    # 处理最后一个块
+    if cur_name and cur_date and cur_name not in seen_names:
+        seen_names.add(cur_name)
+        parsed = _parse_time_text(cur_date)
+        if parsed:
+            db.update_project_status(cur_name, delivered_date=parsed)
+            updated.append({"project": cur_name, "date": parsed})
+    return updated
+
+
 def register_routes(app, db):
     # ==================== 项目待办事项 ====================
     @app.route("/api/project/<name>/todos", methods=["GET"])
@@ -342,7 +378,6 @@ def register_routes(app, db):
     def features_sync_delivery_dates():
         """从分集目标文件表格读取胶片日期（col4），解析为 YYYY-MM-DD，
         更新到项目 delivered_date 并刷新日历。body: {target_path?: 路径}"""
-        import openpyxl
         # 目标文件路径：优先 body，其次设置，再扫描 data/fenji_targets
         data = request.get_json(silent=True) or {}
         target = (data.get("target_path") or "").strip()
@@ -360,38 +395,8 @@ def register_routes(app, db):
                     target = os.path.join(tgt_dir, sorted(xlsx)[-1])
         if not target or not os.path.isfile(target):
             return jsonify({"ok": False, "message": "未找到目标文件，请先在分集管理设置目标文件"}), 400
-
-        updated = []
         try:
-            wb = openpyxl.load_workbook(target, data_only=True)
-            ws = wb[wb.sheetnames[0]]
-            # 遍历合并单元格定位项目块，读 col1(项目名) + col4(胶片日期)
-            seen_names = set()
-            for rng in ws.merged_cells.ranges:
-                if rng.min_col == 1 and rng.max_col == 1 and rng.min_row == rng.max_row:
-                    pass
-            # 更稳：逐行读，取每块第一行的 col1 与 col4
-            cur_name = None
-            cur_date = ""
-            for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
-                name = row[0].value if len(row) > 0 else None
-                if name and str(name).strip():
-                    # 新项目块开始
-                    if cur_name and cur_date and cur_name not in seen_names:
-                        seen_names.add(cur_name)
-                        parsed = _parse_time_text(cur_date)
-                        if parsed:
-                            db.update_project_status(cur_name, delivered_date=parsed)
-                            updated.append({"project": cur_name, "date": parsed})
-                    cur_name = str(name).strip()
-                    cur_date = row[3].value if len(row) > 3 else None
-            # 处理最后一个块
-            if cur_name and cur_date and cur_name not in seen_names:
-                seen_names.add(cur_name)
-                parsed = _parse_time_text(cur_date)
-                if parsed:
-                    db.update_project_status(cur_name, delivered_date=parsed)
-                    updated.append({"project": cur_name, "date": parsed})
+            updated = sync_delivery_dates_from_target(target, db)
             return jsonify({"ok": True, "updated": len(updated), "target": target, "items": updated})
         except Exception as e:
             return jsonify({"ok": False, "message": "解析失败: " + str(e)}), 500
