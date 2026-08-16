@@ -104,13 +104,20 @@ def register_routes(app, db):
         if not docx_path.lower().endswith(".docx"):
             return jsonify({"ok": False, "message": "仅支持 .docx 剧本"}), 400
 
-        max_ep = request.form.get("episodes") or (
-            (request.get_json(silent=True) or {}).get("episodes")) or 30
+        # 集数：留空/缺省 = 全本（与 GUI "留空=全本" 一致，用极大值解析全部集）
+        ep_raw = request.form.get("episodes")
+        if ep_raw is None:
+            ep_raw = (request.get_json(silent=True) or {}).get("episodes")
+        max_ep = 10 ** 9 if (ep_raw is None or str(ep_raw).strip() == "") else ep_raw
         try:
             max_ep = int(max_ep)
         except (TypeError, ValueError):
-            max_ep = 30
-        max_ep = max(1, min(max_ep, 200))
+            max_ep = 10 ** 9
+        # 默认全本；若非全本则限制在合理范围内
+        if max_ep != 10 ** 9:
+            max_ep = max(1, min(max_ep, 2000))
+
+        is_full = (max_ep == 10 ** 9)
 
         parser = _get_parser()
         if parser is None:
@@ -143,10 +150,12 @@ def register_routes(app, db):
                     pass
 
         threading.Thread(target=_do_parse, daemon=True).start()
+        scope = "全本" if is_full else f"前{max_ep}集"
         return jsonify({
             "ok": True,
-            "message": f"开始解析「{os.path.basename(docx_path)}」前{max_ep}集，完成后可下载",
+            "message": f"开始解析「{os.path.basename(docx_path)}」（{scope}），完成后自动打开并可下载",
             "expected_output": os.path.basename(out_path),
+            "scope": scope,
         })
 
     # ---- 下载结果 ----
