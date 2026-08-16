@@ -314,9 +314,18 @@ def _build_menu(visible=True):
             None, enabled=False,
         ),
         pystray.Menu.SEPARATOR,
+        # —— 快速操作 ——
         toggle_item,
-        pystray.MenuItem("立即刷新", lambda icon, item: _trigger_api("scan")),
+        pystray.MenuItem("🔄 立即刷新项目", lambda i, it: _trigger_api("scan")),
+        pystray.MenuItem("📦 同步交付日期", _tray_sync_delivery),
         pystray.Menu.SEPARATOR,
+        # —— 功能跳转 ——
+        pystray.MenuItem("📊 数据洞察", _tray_go_insights),
+        pystray.MenuItem("📅 交付日历", _tray_go_delivery),
+        pystray.MenuItem("📌 全局待办", _tray_go_todos),
+        pystray.MenuItem("🔔 通知中心", _tray_go_notifications),
+        pystray.Menu.SEPARATOR,
+        # —— 打开资源 ——
         pystray.MenuItem("📂 打开数据目录", _open_data_dir),
         pystray.MenuItem("📋 查看日志", _open_log),
         pystray.MenuItem("⚙️ 打开配置文件", _open_config),
@@ -344,15 +353,60 @@ def _trigger_api(action):
     """通过 HTTP 请求调 Flask API"""
     try:
         import urllib.request
+        key = _api_secret()
+        headers = {"X-API-KEY": key} if key else {}
         if action == "scan":
-            key = _api_secret()
-            headers = {"X-API-KEY": key} if key else {}
             req = urllib.request.Request(
                 f"http://127.0.0.1:{_SERVER_PORT}/api/scan",
                 method="POST", headers=headers)
             urllib.request.urlopen(req, timeout=3)
+        elif action == "sync_delivery":
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{_SERVER_PORT}/api/insights/sync_delivery_dates",
+                method="POST", headers=headers)
+            urllib.request.urlopen(req, timeout=10)
     except Exception as e:
         print(f"[tray] trigger_api {action} 失败: {e}")
+
+
+def _trigger_js(js_code):
+    """显示窗口（若隐藏）并在前端执行 JS，用于托盘菜单跳转功能。"""
+    if not _window_visible[0]:
+        _show_window()
+        _update_tray_label()
+    try:
+        w = _window_ref[0]
+        if w is not None and hasattr(w, "evaluate_js"):
+            w.evaluate_js(js_code)
+    except Exception as e:
+        print(f"[tray] evaluate_js 失败: {e}")
+
+
+def _tray_go_insights(icon=None, item=None):
+    _trigger_js("try{openInsightsDialog()}catch(e){}")
+
+
+def _tray_go_todos(icon=None, item=None):
+    _trigger_js("try{openGlobalTodos()}catch(e){}")
+
+
+def _tray_go_notifications(icon=None, item=None):
+    _trigger_js("try{openNotifications()}catch(e){}")
+
+
+def _tray_go_delivery(icon=None, item=None):
+    # 交付日历在数据洞察里，直接打开并切到日历
+    _trigger_js("try{openInsightsDialog()}catch(e){}")
+
+
+def _tray_sync_delivery(icon=None, item=None):
+    _trigger_api("sync_delivery")
+    try:
+        w = _window_ref[0]
+        if w is not None and hasattr(w, "evaluate_js"):
+            w.evaluate_js("try{loadInsightsCalendar()}catch(e){}")
+    except Exception as e:
+        print(f"[tray] 刷新日历失败: {e}")
 
 
 # ============================================================
@@ -614,6 +668,54 @@ def _run_tray():
 
 
 # ============================================================
+# 托盘通知：定期拉取 /api/notifications，交付提醒变化时弹气泡
+# ============================================================
+def _run_tray_notifier():
+    import time as _time
+    import json as _j
+    import urllib.request
+    key = _api_secret()
+    headers = {"X-API-KEY": key} if key else {}
+    last_overdue = -1          # 上次逾期数（-1 表示首次，不弹）
+    last_today = -1
+    notified_day = ""          # 避免当天重复提醒今日交付
+    while True:
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{_SERVER_PORT}/api/notifications",
+                headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                d = _j.loads(resp.read().decode("utf-8"))
+            overdue = len(d.get("overdue") or [])
+            today = len(d.get("today_deliver") or [])
+            tday = d.get("today") or ""
+            tray = _tray_ref[0]
+            # 逾期数上升 → 弹提醒
+            if tray is not None and last_overdue >= 0 and overdue > last_overdue:
+                new_n = overdue - last_overdue
+                names = "、".join(x.get("name","") for x in (d.get("overdue") or [])[:3])
+                try:
+                    tray.notify(f"新增 {new_n} 个逾期交付：{names}",
+                                APP_TITLE + " · 交付提醒")
+                except Exception:
+                    pass
+            # 今日有交付，且当天还没提醒过 → 弹一次
+            if tray is not None and today > 0 and tday != notified_day:
+                names = "、".join(x.get("name","") for x in (d.get("today_deliver") or [])[:3])
+                try:
+                    tray.notify(f"今日有 {today} 部交付：{names}",
+                                APP_TITLE + " · 交付提醒")
+                except Exception:
+                    pass
+                notified_day = tday
+            last_overdue = overdue
+            last_today = today
+        except Exception as e:
+            pass  # 后端未就绪时静默重试
+        _time.sleep(600)  # 每 10 分钟检查一次
+
+
+# ============================================================
 # Flask /api/quit 注册
 # ============================================================
 def _register_quit_api(flask_app):
@@ -699,6 +801,13 @@ def _main():
     # 3. 托盘 daemon（后台线程跑 pystray 主循环）
     threading.Thread(target=_run_tray, daemon=True).start()
     print("✅ 系统托盘已就绪")
+
+    # 3.4 托盘交付提醒（后台定期拉取通知，变化时弹气泡）
+    try:
+        threading.Thread(target=_run_tray_notifier, daemon=True).start()
+        print("📣 托盘交付提醒已启动")
+    except Exception as e:
+        print(f"[tray] 交付提醒启动失败: {e}")
 
     # 3.5 全局热键（唤回窗口，实际组合见线程日志）
     try:
