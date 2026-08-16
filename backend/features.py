@@ -403,7 +403,8 @@ def register_routes(app, db):
 
     @app.route("/api/insights/export")
     def features_insights_export():
-        """导出项目档案 CSV（项目名/状态/总集数/已生成/部门/路径/交付日期/创建时间）。"""
+        """导出项目档案 CSV（项目名/状态/总集数/已生成/部门/路径/交付日期/创建时间）。
+        ?save=1 时保存到 data/exports/ 并返回路径（桌面端用），否则返回流式下载。"""
         import io as _io
         import csv as _csv
         projs = db.get_all_projects() or []
@@ -424,11 +425,44 @@ def register_routes(app, db):
                 p.get("created_at", ""),
             ])
         data = "\ufeff" + buf.getvalue()  # BOM 便于 Excel 打开中文
+        save_mode = (request.args.get("save") or "") == "1"
+        if save_mode:
+            from datetime import datetime as _dt
+            try:
+                exp_dir = os.path.join(_DATA_DIR, "exports")
+                os.makedirs(exp_dir, exist_ok=True)
+                fname = "项目档案-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
+                fpath = os.path.join(exp_dir, fname)
+                with open(fpath, "w", encoding="utf-8-sig", newline="") as f:
+                    f.write(data)
+                return jsonify({
+                    "ok": True,
+                    "path": fpath,
+                    "filename": fname,
+                    "count": len(projs),
+                    "dir": exp_dir,
+                })
+            except Exception as e:
+                return jsonify({"ok": False, "message": "保存失败: " + str(e)}), 500
         from flask import Response
         return Response(
             data,
             mimetype="text/csv; charset=utf-8",
             headers={"Content-Disposition": "attachment; filename=projects.csv"})
+
+    @app.route("/api/insights/export/open_folder", methods=["POST"])
+    def features_insights_export_open_folder():
+        """打开导出文件夹（桌面端用 explorer 打开）。"""
+        exp_dir = os.path.join(_DATA_DIR, "exports")
+        os.makedirs(exp_dir, exist_ok=True)
+        try:
+            if os.name == "nt":
+                subprocess.Popen(["explorer", exp_dir])
+            else:
+                subprocess.Popen(["xdg-open", exp_dir])
+            return jsonify({"ok": True, "dir": exp_dir})
+        except Exception as e:
+            return jsonify({"ok": False, "message": str(e)}), 500
 
     # ==================== 视频缩略图（ffmpeg）====================
     @app.route("/api/thumbnail")

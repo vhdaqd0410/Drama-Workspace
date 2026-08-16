@@ -337,16 +337,36 @@ function closeDdEditor(){
 }
 
 function exportProjectCSV(){
-  api('GET','/api/insights/export').then(function(text){
-    const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = '项目档案-' + new Date().toISOString().slice(0,10) + '.csv';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 200);
-    toast('✅ 已导出项目档案','success');
+  api('GET','/api/insights/export?save=1').then(function(d){
+    if(d && d.ok){
+      toast('✅ 已导出 '+d.count+' 个项目档案', 'success');
+      // 弹窗提示保存位置 + 打开文件夹
+      const expPath = d.path || '';
+      const overlay = document.createElement('div');
+      overlay.id = 'exportHint';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99999;display:flex;align-items:center;justify-content:center';
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:14px;padding:24px;width:460px;max-width:92vw;box-shadow:0 12px 40px rgba(0,0,0,.2)">
+          <div style="font-size:17px;font-weight:700;margin-bottom:10px">📥 导出成功</div>
+          <div style="font-size:13px;color:#666;margin-bottom:6px">已导出 <b>${d.count||0}</b> 个项目档案到：</div>
+          <div style="background:#f5f5f7;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;word-break:break-all;font-family:monospace;margin-bottom:6px">${expPath}</div>
+          <div style="font-size:12px;color:#999;margin-bottom:16px">文件：${d.filename||''}（可用 Excel 打开）</div>
+          <div style="display:flex;justify-content:flex-end;gap:10px">
+            <button onclick="this.closest('#exportHint').remove()" style="padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:14px">关闭</button>
+            <button onclick="openExportFolder()" style="padding:8px 18px;border:none;border-radius:8px;background:#0071e3;color:#fff;cursor:pointer;font-size:14px">📂 打开文件夹</button>
+          </div>
+        </div>`;
+      overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+      document.body.appendChild(overlay);
+    } else toast((d&&d.message)||'导出失败','error');
   }).catch(function(e){ toast('导出失败: '+e.message,'error'); });
+}
+
+function openExportFolder(){
+  api('POST','/api/insights/export/open_folder').then(function(d){
+    if(d && d.ok) toast('已打开导出文件夹','success');
+    else toast((d&&d.message)||'打开失败','error');
+  }).catch(function(e){ toast('打开失败: '+e.message,'error'); });
 }
 
 async function syncDeliveryDates(){
