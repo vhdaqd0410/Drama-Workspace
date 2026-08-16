@@ -715,9 +715,44 @@ async function fjSaveSetting(key, value){
 function fjUpdateTplBadge(){
   const b = document.getElementById('fjTplBadge');
   if(!b) return;
-  const t = fjExportState.selectedTemplate || localStorage.getItem('fj_selected_template') || '';
+  const t = fjExportState.selectedTemplate || '';
   b.textContent = t ? t : '未选';
 }
+
+// ===== 从 Excel 分集表同步到项目 =====
+function fjSyncFromExcel(){
+  // 弹出文件选择
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xlsx,.xls,.xlsm';
+  input.onchange = async function(){
+    if(!input.files[0]) return;
+    if(!confirm('将解析所选 Excel 的分集数据并同步到项目（用于工作量统计），继续？')){
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    toast('📥 正在解析并同步分集...', 'info');
+    try{
+      const d = await api('POST', '/api/fenji/sync_from_excel', fd);
+      if(d && d.ok){
+        toast('✅ ' + (d.message || '同步完成'), 'success');
+        // 显示同步结果
+        const synced = d.synced || [];
+        const skipped = d.skipped || [];
+        const lines = synced.slice(0, 10).map(function(s){ return '  ✓ ' + s.name + '（' + s.episodes + '集）'; }).join('\n');
+        alert('同步完成：' + synced.length + ' 个项目，' + synced.reduce(function(a,s){return a+s.episodes;},0) + ' 集\n' + lines + (synced.length>10 ? '\n  ...' : '') + (skipped.length ? '\n\n跳过 ' + skipped.length + ' 个（' + skipped.map(function(s){return s.name;}).join(',') + '）' : ''));
+        if(typeof loadProjects === 'function') loadProjects();
+      } else {
+        toast('❌ ' + (d && d.msg || '同步失败'), 'error');
+      }
+    }catch(e){
+      toast('❌ 同步失败: ' + e.message, 'error');
+    }
+  };
+  input.click();
+}
+
 function fjUpdateTargetBadge(){
   const b = document.getElementById('fjTargetBadge');
   if(!b) return;

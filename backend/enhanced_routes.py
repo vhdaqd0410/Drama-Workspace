@@ -65,6 +65,35 @@ def _episode_summary_scan_tasks():
         tasks.append((root, o["skip"], o["depth"]))
     return tasks
 
+def _parse_assign_line(plan, line):
+    """解析一行 '剪辑师：1-3，44-45' 加入 plan（模块级辅助函数）。"""
+    line = (line or "").strip()
+    if '：' in line:
+        parts = line.split('：', 1)
+    elif ':' in line:
+        parts = line.split(':', 1)
+    else:
+        return
+    if len(parts) < 2:
+        return
+    editor = parts[0].strip()
+    ranges = parts[1].strip()
+    if not editor or not ranges:
+        return
+    for r in _re.split(r'[,，、;\s]+', ranges):
+        r = r.strip()
+        if not r:
+            continue
+        m = _re.match(r'^(\d+)\s*[-—~]\s*(\d+)$', r)
+        if m:
+            s, e = int(m.group(1)), int(m.group(2))
+            for ep in range(min(s, e), max(s, e) + 1):
+                plan[str(ep)] = editor
+        else:
+            m2 = _re.match(r'^(\d+)$', r)
+            if m2:
+                plan[m2.group(1)] = editor
+
 def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     @app.route("/api/project/<path:project_name>", methods=["GET"])
     def api_project_detail(project_name):
@@ -827,6 +856,77 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         f.save(save_path)
         size = _os.path.getsize(save_path)
         return jsonify(ok=True, name=safe_name, size=size, dir=_TEMPLATE_DIR)
+
+    # ============ Excel 分集表同步到项目 ============
+    @app.route('/api/fenji/sync_from_excel', methods=['POST'])
+    def fenji_sync_from_excel():
+        """解析用户上传的分集 Excel（项目名 + 每行'剪辑师：集数范围'），
+        把每个项目的分集 plan 同步到数据库 episode_plan，供工作量统计。"""
+        import openpyxl
+        if 'file' not in request.files:
+            return jsonify(ok=False, msg='无文件'), 400
+        f = request.files['file']
+        if not f.filename:
+            return jsonify(ok=False, msg='文件名为空'), 400
+
+        projects_plan = {}   # 项目名 -> {集号: 剪辑师}
+        try:
+            wb = openpyxl.load_workbook(_io.BytesIO(f.read()), data_only=True)
+            ws = wb.active if wb.sheetnames else None
+            if ws is None:
+                return jsonify(ok=False, msg='Excel 无工作表'), 400
+
+            cur_project = None
+            for row in ws.iter_rows(min_row=1, values_only=True):
+                if not row or not any(row):
+                    continue
+                proj_name = str(row[0] or '').strip() if row[0] else ''
+                assign_str = str(row[2] or '').strip() if len(row) > 2 else ''
+                if proj_name:
+                    cur_project = proj_name
+                    projects_plan.setdefault(cur_project, {})
+                elif not cur_project:
+                    continue
+                if assign_str and cur_project:
+                    _parse_assign_line(projects_plan[cur_project], assign_str)
+        except Exception as e:
+            return jsonify(ok=False, msg='Excel 解析失败: ' + str(e)), 400
+
+        if not projects_plan:
+            return jsonify(ok=False, msg='未解析到任何分集数据'), 400
+
+        synced, skipped = [], []
+        for name, plan in projects_plan.items():
+            if not plan:
+                skipped.append({'name': name, 'episodes': 0, 'reason': '无分集数据'})
+                continue
+            proj = db.get_project(name)
+            if not proj:
+                all_proj = db.get_all_projects()
+                match = None
+                for ap in all_proj:
+                    an = ap.get('name') or ''
+                    if an == name or an.startswith(name[:15]) or name.startswith(an[:15]):
+                        match = ap
+                        break
+                proj = match
+            if not proj:
+                skipped.append({'name': name, 'episodes': len(plan), 'reason': '未找到对应项目'})
+                continue
+            existing = db.get_episode_plan(proj['name'])
+            existing.update(plan)
+            db.set_episode_plan(proj['name'], existing)
+            total = int(proj.get('total_episodes') or 0)
+            if total < len(existing):
+                db.set_episodes(proj['name'], len(existing), len(existing))
+            synced.append({'name': proj['name'], 'episodes': len(plan)})
+
+        return jsonify({
+            'ok': True,
+            'message': '同步完成: {} 个项目，{} 集'.format(len(synced), sum(s['episodes'] for s in synced)),
+            'synced': synced,
+            'skipped': skipped,
+        })
 
     # ============ 用户设置持久化（模板选择/目标文件路径等） ============
     @app.route('/api/settings', methods=['GET'])

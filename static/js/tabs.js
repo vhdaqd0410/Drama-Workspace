@@ -124,8 +124,11 @@ async function loadReportTab(){
     <button class="btn btn-sm btn-primary" onclick="_loadReportData()">🔍 查看报告</button>
     <button class="btn btn-sm" onclick="_downloadExcel()" style="background:#34c759;color:#fff">📥 下载 Excel</button>
   </div>
+  <div id="reportWorkloadBoard" style="margin-bottom:20px"></div>
   <div id="reportBody">正在加载...</div>`;
   el.innerHTML = html;
+  // 渲染工作量/数据看板
+  try{ if(typeof renderWorkloadBoard==='function') await renderWorkloadBoard('reportWorkloadBoard'); }catch(_){}
   _loadReportData();
 }
 

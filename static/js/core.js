@@ -502,7 +502,6 @@ function renderStats(){
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='已完成';renderDashboard()" style="cursor:pointer"><div class="stat-icon green">✅</div><div><div class="stat-num">${thisMonthDone}</div><div class="stat-label">本月已完成</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';$('globalSearch').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>`;
   renderOverviewCharts();
-  try{ if(typeof renderWorkloadBoard==='function') renderWorkloadBoard(); }catch(_){}
 }
 
 // ===== 首页概览图表（部门分布 + 工作流状态分布，仅当月项目）=====
@@ -557,9 +556,9 @@ function renderOverviewCharts(){
     barChart('📊 工作流状态分布（本月）', statusArr, statusMax, l=>statusColor[l]||'#95a5a6');
 }
 
-// ===== 工作量 / 数据看板 =====
-async function renderWorkloadBoard(){
-  const board = document.getElementById('workloadBoard');
+// ===== 工作量 / 数据看板（可指定容器，月度报告复用） =====
+async function renderWorkloadBoard(containerId){
+  const board = document.getElementById(containerId || 'workloadBoard');
   if(!board) return;
   try{
     const d = await api('GET', '/api/stats/dashboard');

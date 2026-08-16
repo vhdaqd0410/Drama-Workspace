@@ -509,7 +509,6 @@ a{color:var(--blue);text-decoration:none}
 <div class="tab-panel active" id="tab-dashboard">
   <div class="stats-row" id="statsRow"><div class="loading-wrap"><div class="spinner"></div><div>加载统计数据...</div></div></div>
   <div id="overviewCharts" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px"></div>
-  <div id="workloadBoard" style="margin-bottom:20px"></div>
   <div class="filter-bar" id="filterBar">
     <div class="filter-group">
       <label>📅 月份</label>
@@ -596,6 +595,7 @@ a{color:var(--blue);text-decoration:none}
         <button class="btn btn-sm" onclick="readFromProject()">📥 从项目读取</button>
         <button class="btn btn-sm" onclick="showPasteEpisodesModal()">📋 粘贴分集</button>
         <button class="btn btn-sm" onclick="fjCopyResult()">📋 复制结果</button>
+        <button class="btn btn-sm" style="background:#5c6bc0;color:#fff" title="上传分集Excel表格，自动同步到项目（供工作量统计）" onclick="fjSyncFromExcel()">📥 从Excel同步</button>
         <button class="btn btn-sm" title="选择导出用的 Excel 模板" onclick="fjPickTemplate()">📄 模板<span id="fjTplBadge" style="background:var(--bg-border);padding:1px 6px;border-radius:8px;font-size:11px;margin-left:4px">未选</span></button>
         <button class="btn btn-sm btn-primary" onclick="fjExportExcel()">📊 导出预览</button>
         <button class="btn btn-sm" style="background:#2E7D32;color:#fff" title="设置固定目标文件，每次直接追加" onclick="fjPickTargetPath()">⚙️ 目标<span id="fjTargetBadge" style="background:rgba(255,255,255,.25);padding:1px 6px;border-radius:8px;font-size:11px;margin-left:4px">未设</span></button>
@@ -969,12 +969,12 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260815l"></script>
+<script src="/static/js/core.js?v=20260815m"></script>
 <script src="/static/js/project.js?v=20260815r"></script>
-<script src="/static/js/tabs.js?v=20260815n"></script>
+<script src="/static/js/tabs.js?v=20260815o"></script>
 <script src="/static/js/episode.js?v=20260815s"></script>
 <script src="/static/js/fenji-init.js?v=20260815n"></script>
-<script src="/static/js/fenji-assign.js?v=20260815n"></script>
+<script src="/static/js/fenji-assign.js?v=20260815o"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
 <script src="/static/js/team.js?v=20260815s"></script>
 <script src="/static/js/deliverables.js?v=20260815m"></script>
