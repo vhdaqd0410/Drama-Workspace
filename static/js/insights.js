@@ -219,16 +219,90 @@ function renderCalendar(){
     cells += `<div style="flex:1;min-width:44px;text-align:center;padding:6px 2px;margin:2px;border-radius:8px;background:${bg};color:${fg};font-size:12px;position:relative;cursor:${projs.length?'pointer':'default'}"
       data-cal-day="${key}" data-projs='${encodeURIComponent(JSON.stringify(projs))}'
       onmouseenter="calHover(this)" onmouseleave="calHide()"
-      onclick="calClickDay('${key}')">
+      onclick="calClickDay('${key}')"
+      ondragover="event.preventDefault();this.style.outline='2px dashed #0071e3';this.style.outlineOffset='-2px'"
+      ondragleave="this.style.outline=''"
+      ondrop="calDrop(event,'${key}')">
       <div>${day}</div>
       ${projs.length?`<div style="font-size:11px;font-weight:700">${projs.length}部</div>`:''}
     </div>`;
   }
-  box.innerHTML = `<div style="display:flex;flex-wrap:wrap">${cells}</div>
+  // 快捷视图 + 本月可拖拽项目
+  const chips = buildCalQuickChips();
+  const dragList = buildCalDragList();
+  box.innerHTML = `${chips}
+    <div style="display:flex;flex-wrap:wrap">${cells}</div>
+    ${dragList}
     <div style="font-size:11px;color:var(--text-sec);margin-top:6px">
-      <span style="color:#34c759">■</span> 当天交付部数（悬停看项目，点击修改交付日期）
+      <span style="color:#34c759">■</span> 当天交付部数（悬停看项目，点击修改）
       <span style="color:#0071e3;margin-left:8px">■</span> 今天
+      <span style="margin-left:8px;color:#86868b">🖱️ 拖拽下方项目到某天即可改期</span>
     </div>`;
+}
+
+// 快捷视图：今日 / 明日 / 逾期
+function buildCalQuickChips(){
+  const today = new Date();
+  const fmt = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const t = fmt(today);
+  const tm = fmt(new Date(today.getTime()+86400000));
+  const nowMonth = t.slice(0,7);
+  let todayCnt=0, tomorrowCnt=0, overdueCnt=0;
+  Object.keys(_calData).forEach(k=>{
+    if(k===t) todayCnt = _calData[k].length;
+    if(k===tm && k.slice(0,7)===nowMonth) tomorrowCnt = _calData[k].length;
+    if(k<t) overdueCnt += _calData[k].length;
+  });
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+    <button class="btn btn-sm" style="${t.slice(0,7)===insightsCalMonth?'background:#0071e3;color:#fff;border-color:#0071e3':''}" onclick="gotoCalDate('${t}')">📌 今日 (${todayCnt})</button>
+    <button class="btn btn-sm" style="${tm.slice(0,7)===insightsCalMonth?'background:#0071e3;color:#fff;border-color:#0071e3':''}" onclick="gotoCalDate('${tm}')">⏭ 明日 (${tomorrowCnt})</button>
+    <button class="btn btn-sm" style="color:#c5221f" onclick="gotoCalDate('${insightsCalMonth}')">⚠️ 本月逾期 (${overdueCnt})</button>
+  </div>`;
+}
+function gotoCalDate(dateKey){
+  insightsCalMonth = dateKey.slice(0,7);
+  loadInsightsCalendar();
+  // 滚动到该日
+  setTimeout(function(){
+    const el = document.querySelector(`[data-cal-day="${dateKey}"]`);
+    if(el){ el.scrollIntoView({block:'center', behavior:'smooth'}); el.style.boxShadow='0 0 0 3px rgba(0,113,227,.5)'; }
+  }, 150);
+}
+// 本月交付项目可拖拽芯片
+function buildCalDragList(){
+  const items = [];
+  Object.keys(_calData).forEach(k=>{
+    (_calData[k]||[]).forEach(p=>{ items.push({name:(p&&p.name)||p, date:k}); });
+  });
+  if(!items.length) return '';
+  return `<div style="margin-top:8px;padding:8px 10px;background:#fafafa;border:1px solid var(--border,#e5e5ea);border-radius:8px">
+    <div style="font-size:11px;color:var(--text-sec);margin-bottom:6px">🖱️ 拖拽项目到日历某天以改期：</div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:96px;overflow-y:auto">
+      ${items.map(it=>`<span draggable="true" ondragstart="calDragStart(event,'${it.date}','${(it.name||'').replace(/'/g,"")}')" style="padding:3px 9px;background:#fff;border:1px solid #d1d5db;border-radius:14px;font-size:11px;cursor:grab;user-select:none" title="${escHtml(it.name)} · ${it.date}">${escHtml(it.name)}</span>`).join('')}
+    </div>
+  </div>`;
+}
+let _calDrag = null;
+function calDragStart(e, oldDate, name){
+  _calDrag = { oldDate, name };
+  e.dataTransfer.setData('text/plain', name);
+  e.dataTransfer.effectAllowed = 'move';
+}
+function calDrop(e, newDate){
+  e.preventDefault();
+  e.currentTarget.style.outline = '';
+  if(!_calDrag){ return; }
+  const { oldDate, name } = _calDrag;
+  _calDrag = null;
+  if(oldDate === newDate){ toast('日期未变化','info'); return; }
+  if(!confirm(`将「${name}」的交付日期从 ${oldDate} 改到 ${newDate}？`)) return;
+  const p = '/api/project/' + encodeURIComponent(name) + '/delivered_date';
+  api('POST', p, { date: newDate }).then(function(d){
+    if(d && d.ok){
+      toast('✅ 已改期 ' + name + ' → ' + newDate, 'success');
+      loadInsightsCalendar();
+    } else toast((d&&d.message)||'改期失败','error');
+  }).catch(function(e){ toast('改期失败: '+e.message,'error'); });
 }
 
 // 悬停显示当天交付的项目名

@@ -211,29 +211,21 @@ function bindShortcuts(){
 }
 
 function openSearchModal(){
-  var secs = (typeof allSections !== 'undefined' && allSections) ? allSections : [];
-  var items = [];
-  secs.forEach(function(sec){
-    (sec.projects||[]).forEach(function(p){
-      items.push({ name: p.name, section: sec.name, month: p.project_month || '', status: p.custom_status || '' });
-    });
-  });
-  if(!items.length){ toast('暂无项目','info'); return; }
   // 已有搜索框则移除，避免重复
   var old = document.getElementById('searchModal');
   if(old) old.remove();
   var sc = _getSearchShortcut() || 'Ctrl+K / Ctrl+F';
-  var html = '<div id="searchModal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh" onclick="if(event.target===this)this.remove()">'
-    + '<div style="width:min(680px,90vw);background:#fff;border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.25);overflow:hidden">'
+  var html = '<div id="searchModal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:22000;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh" onclick="if(event.target===this)this.remove()">'
+    + '<div style="width:min(700px,92vw);background:#fff;border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.25);overflow:hidden">'
     + '<div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #e5e5ea">'
     + '<span style="font-size:18px">🔍</span>'
-    + '<input id="searchInput" placeholder="搜索项目名称、月份（如 2026-07）、拼音首字母..." autofocus style="flex:1;border:none;outline:none;font-size:16px;background:transparent" oninput="filterSearchResults()" onkeydown="if(event.key===\'Enter\')jumpToFirstResult();if(event.key===\'Escape\')this.closest(\'#searchModal\').remove()">'
+    + '<input id="searchInput" placeholder="搜索项目/月份/部门/剪辑师/交付日期/待办..." autofocus style="flex:1;border:none;outline:none;font-size:16px;background:transparent" oninput="filterSearchResults()" onkeydown="if(event.key===\'Enter\')jumpToFirstResult();if(event.key===\'Escape\')this.closest(\'#searchModal\').remove()">'
     + '<span style="font-size:11px;color:#86868b;background:#f0f2f5;padding:3px 8px;border-radius:6px;white-space:nowrap">'+sc+'</span>'
     + '</div>'
-    + '<div id="searchResults" style="max-height:56vh;overflow-y:auto"></div>'
-    + '<div style="padding:8px 16px;background:#fafafa;border-top:1px solid #f0f0f0;font-size:11px;color:#86868b;display:flex;gap:14px">'
+    + '<div id="searchResults" style="max-height:60vh;overflow-y:auto"></div>'
+    + '<div style="padding:8px 16px;background:#fafafa;border-top:1px solid #f0f0f0;font-size:11px;color:#86868b;display:flex;gap:14px;flex-wrap:wrap">'
     + '<span>↑↓ 选择 · Enter 打开 · Esc 关闭</span>'
-    + '<span style="margin-left:auto">模糊搜索</span>'
+    + '<span style="margin-left:auto">跨项目·待办·剪辑师 搜索</span>'
     + '</div>'
     + '</div></div>';
   document.body.insertAdjacentHTML('beforeend', html);
@@ -262,33 +254,54 @@ function fuzzyMatch(text, pattern){
   return pi === pattern.length;
 }
 
+function searchSectionTitle(title, items, builder){
+  if(!items || !items.length) return '';
+  var rows = items.map(builder).join('');
+  return '<div style="font-size:11px;font-weight:700;color:#86868b;padding:8px 12px 4px;text-transform:uppercase;letter-spacing:.4px;background:#fafafa">'+title+' ('+items.length+')</div>'+rows;
+}
+
 function filterSearchResults(){
-  var kw = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
+  var kw = (document.getElementById('searchInput')?.value || '').trim();
   var results = document.getElementById('searchResults');
   if(!results) return;
-  var secs = (typeof allSections !== 'undefined' && allSections) ? allSections : [];
-  var items = [];
-  secs.forEach(function(sec){
-    (sec.projects||[]).forEach(function(p){
-      var name = p.name||'';
-      var month = p.project_month||'';
-      if(!kw || fuzzyMatch(name, kw) || fuzzyMatch(month, kw)){
-        items.push({ name: name, section: sec.name, month: month, status: p.custom_status || '' });
-      }
-    });
-  });
-  if(!items.length){
-    results.innerHTML = '<div style="color:#86868b;padding:20px;text-align:center">未找到匹配的项目</div>';
+  if(!kw){
+    // 空关键词：显示本地项目列表
+    var secs = (typeof allSections !== 'undefined' && allSections) ? allSections : [];
+    var items = [];
+    secs.forEach(function(sec){ (sec.projects||[]).forEach(function(p){ items.push({name:p.name||'', section:sec.name, month:p.project_month||'', status:p.custom_status||''}); }); });
+    if(!items.length){ results.innerHTML = '<div style="color:#86868b;padding:20px;text-align:center">暂无项目</div>'; return; }
+    var html = items.slice(0, 50).map(searchItemRow).join('');
+    results.innerHTML = html;
     return;
   }
-  var html = items.slice(0, 50).map(function(it){
-    var monthBadge = it.month ? '<span style="background:#e3f2fd;color:#1565c0;padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px">📅 '+it.month+'</span>' : '';
-    return '<div class="search-result-item" data-name="' + it.name.replace(/"/g, "&quot;") + '" style="padding:10px 12px;cursor:pointer;border-radius:6px;display:flex;justify-content:space-between;align-items:center;font-size:13px;border-bottom:1px solid #f0f0f0" onclick="jumpToProjectItem(this)">'
-      + '<span><span style="font-weight:500">'+it.name+'</span>'+monthBadge+'</span>'
-      + '<span style="color:#86868b;font-size:11px">'+it.section+ (it.status?' · '+it.status:'')+'</span>'
-      + '</div>';
-  }).join('');
-  results.innerHTML = html;
+  // 有关键词：走后端全局搜索
+  api('GET','/api/search?q=' + encodeURIComponent(kw)).then(function(d){
+    if(!d || !d.ok){ results.innerHTML = '<div style="color:#86868b;padding:20px;text-align:center">搜索失败</div>'; return; }
+    var html = '';
+    html += searchSectionTitle('📁 项目', d.projects, searchItemRow);
+    html += searchSectionTitle('🎬 剪辑师', d.editors, function(ed){
+      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="toast(\''+escHtml(ed.name)+' 负责 '+ed.count+' 集 / '+ed.projects+' 部\',\'info\')"><b>'+escHtml(ed.name)+'</b> <span style="color:#86868b;font-size:11px;margin-left:6px">'+ed.count+' 集 · '+ed.projects+' 部项目</span></div>';
+    });
+    html += searchSectionTitle('📌 待办', d.todos, function(t){
+      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="jumpToProject(\''+(t.project||'').replace(/'/g,"")+'\')"><span style="color:#0071e3">📌</span> '+escHtml(t.text)+' <span style="color:#86868b;font-size:11px;margin-left:6px">· '+escHtml(t.project)+'</span></div>';
+    });
+    html += searchSectionTitle('📅 交付日期', d.delivered_dates, function(p){
+      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="jumpToProject(\''+(p.name||'').replace(/'/g,"")+'\')">📅 '+escHtml(p.date)+' · <b>'+escHtml(p.name)+'</b> <span style="color:#86868b;font-size:11px;margin-left:6px">'+escHtml(p.department)+'</span></div>';
+    });
+    if(!html) html = '<div style="color:#86868b;padding:20px;text-align:center">未找到匹配：项目 / 剪辑师 / 待办 / 交付日期</div>';
+    results.innerHTML = html;
+  }).catch(function(e){
+    results.innerHTML = '<div style="color:#86868b;padding:20px;text-align:center">搜索失败: '+escHtml(e.message)+'</div>';
+  });
+}
+
+function searchItemRow(it){
+  var monthBadge = it.month ? '<span style="background:#e3f2fd;color:#1565c0;padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px">📅 '+it.month+'</span>' : '';
+  var ddBadge = it.delivered_date ? '<span style="background:#e8f5e9;color:#137333;padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px">📦 '+it.delivered_date+'</span>' : '';
+  return '<div class="search-result-item" data-name="' + (it.name||'').replace(/"/g, "&quot;") + '" style="padding:10px 12px;cursor:pointer;border-radius:6px;display:flex;justify-content:space-between;align-items:center;font-size:13px;border-bottom:1px solid #f0f0f0" onclick="jumpToProjectItem(this)">'
+    + '<span><span style="font-weight:500">'+escHtml(it.name)+'</span>'+monthBadge+ddBadge+'</span>'
+    + '<span style="color:#86868b;font-size:11px">'+escHtml(it.section)+ (it.status?' · '+escHtml(it.status):'')+'</span>'
+    + '</div>';
 }
 
 function jumpToProjectItem(el){
@@ -733,7 +746,7 @@ function projectCardHTML(p){
     ? `<input type="checkbox" class="bulk-card-chk" data-pname="${p.name.replace(/"/g,'&quot;')}" onchange="updateBulkBar()" title="选择此项目">`
     : '';
   return`<div class="card">
-    <div class="card-head">${bulkChk}<div class="card-title"><span class="card-title-name" title="${p.name}">${p.name}</span>${dept}${month}</div>${(() => {
+    <div class="card-head">${bulkChk}<div class="card-title"><span class="card-title-name" title="${p.name}" data-project-name="${p.name.replace(/"/g,'&quot;')}">${p.name}</span>${dept}${month}</div>${(() => {
   const cur = p.custom_status || '';
   const optsHtml = WF_STATUS_OPTIONS.map(o =>
     `<option value="${o.v}" ${o.v===cur?'selected':''}>${o.label}</option>`

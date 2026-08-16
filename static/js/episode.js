@@ -704,10 +704,63 @@ function _isGroupActiveSection(sec){
 }
 
 // === 页面首次加载：只扫描"组内NAS进行中"的项目，其余按需加载 ===
+// 优化：视口懒加载——只扫描滚动到屏幕内的卡片（且只扫有分集数的进行中项目），
+// 滚动时增量补扫，避免一次并发扫描全部导致卡顿。可安全用于多次 re-render。
+let _episodeScanned = new Set();   // 已扫描/已排队的项目名
+let _episodeBusy = 0;
+let _episodeScanQueued = false;
 async function loadInitialEpisodeSummary(){
-  // 只扫"组内NAS进行中"且有分集数的项目（本部门当前真正要用的），数量很少、快速完成，
-  // 让进度条和预览尽早可用；已完成 / 其他部门项目完全不扫，点开时按需加载
-  await runRefreshAllProgress(null, true);
+  const targets = new Set();
+  if (allSections) {
+    for (const sec of allSections) {
+      if (!_isGroupActiveSection(sec)) continue;
+      for (const p of (sec.projects || [])) {
+        if (Number(p.total_episodes) > 0) targets.add(p.name);
+      }
+    }
+  }
+  _episodeScanned = new Set(); // 重新扫描时清空
+  window._episodeTargets = targets;
+
+  const scanInView = function(){
+    if (_episodeScanQueued) return;
+    _episodeScanQueued = true;
+    setTimeout(function(){
+      _episodeScanQueued = false;
+      if (_episodeBusy >= 3) return;
+      let found = false;
+      document.querySelectorAll('.card').forEach(function(card){
+        if (_episodeBusy >= 3) return;
+        const el = card.querySelector('[data-project-name]');
+        const name = el ? el.getAttribute('data-project-name') : null;
+        if (!name) return;
+        const r = card.getBoundingClientRect();
+        if (r.bottom < -100 || r.top > window.innerHeight + 100) return; // 不在视口
+        if (!window._episodeTargets.has(name)) return;
+        if (_episodeScanned.has(name)) return;
+        _episodeScanned.add(name);
+        found = true;
+        _episodeBusy++;
+        fetchEpisodeStatus(name).then(function(d){
+          if (d && d.ok) updateCardEpisodeSummary(name, d);
+        }).catch(function(){}).finally(function(){
+          _episodeBusy--;
+          scanInView();
+        });
+      });
+    }, 60);
+  };
+
+  // 绑定滚动/尺寸变化触发（去重）
+  if (!window._episodeLazyBound) {
+    window._episodeLazyBound = true;
+    const onScroll = function(){ scanInView(); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+  }
+  scanInView();
+  setTimeout(scanInView, 800);
+  setTimeout(scanInView, 2000);
 }
 
 // === 全项目进度刷新（自动 + 手动共用）===

@@ -570,6 +570,7 @@ a{color:var(--blue);text-decoration:none}
     <button class="btn btn-icon" onclick="showTeam()" title="团队">👥</button>
     <button class="btn btn-icon" onclick="openCommandPalette()" title="命令面板 (Ctrl+P)">⌘</button>
     <button class="btn btn-icon" onclick="openInsightsDialog()" title="数据洞察">📊</button>
+    <button class="btn btn-icon" onclick="openNotifications()" title="通知中心" style="position:relative">🔔<span id="notifBadge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--red);color:#fff;font-size:10px;font-weight:600;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px"></span></button>
     <button class="btn btn-icon" onclick="openDataCenter()" title="数据中心">🧭</button>
     <button class="btn btn-icon" onclick="switchTab('settings')" title="设置">⚙️</button>
     <button class="btn btn-danger btn-sm" id="btnQuit" style="display:none" onclick="quitApp()" title="退出桌面版">🚪 退出</button>
@@ -1216,6 +1217,7 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/thumbnail.js?v=20260816"></script>
 <script src="/static/js/insights.js?v=20260816"></script>
 <script src="/static/js/data-center.js?v=20260816"></script>
+<script src="/static/js/notifications.js?v=20260817"></script>
 <script src="/static/js/app.js?v=20260815p"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};

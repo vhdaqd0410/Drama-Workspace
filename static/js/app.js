@@ -59,6 +59,9 @@ document.addEventListener('DOMContentLoaded',async ()=>{
     // 3.8 剪辑完成自动扫描提醒
     try{ if(typeof initEditCompleteWatcher==='function') initEditCompleteWatcher(); }catch(_){}
 
+    // 3.9 通知中心角标（加载交付/待办提醒）
+    try{ if(typeof loadNotifications==='function') loadNotifications(); }catch(_){}
+
     // 4. 自动刷新已禁用 — 由用户手动点 🔄 刷新 按钮触发
     // pollDashboard=setInterval(loadProjects,30000);
   }catch(e){

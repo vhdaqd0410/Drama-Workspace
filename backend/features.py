@@ -512,6 +512,116 @@ def register_routes(app, db):
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
 
+    @app.route("/api/search", methods=["GET"])
+    def features_global_search():
+        """全局搜索：?q=关键词，跨 项目名/月份/部门/状态/剪辑师/交付日期/待办内容 匹配。
+        返回分组结果：projects / editors / todos / delivered_dates。
+        """
+        import json as _json
+        q = (request.args.get("q") or "").strip().lower()
+        if not q:
+            return jsonify({"ok": True, "projects": [], "editors": [], "todos": [], "delivered_dates": []})
+        try:
+            projs = db.get_all_projects() or []
+        except Exception:
+            projs = []
+        projects = []
+        editors = {}
+        delivered_dates = []
+        for p in projs:
+            name = str(p.get("name") or "")
+            month = str(p.get("project_month") or "")
+            dept = str(p.get("department") or "")
+            status = str(p.get("custom_status") or "")
+            dd = str(p.get("delivered_date") or "")
+            hay = " ".join([name.lower(), month.lower(), dept.lower(), status.lower(), dd.lower()])
+            # 剪辑师匹配（episode_plan）
+            plan = p.get("episode_plan") or "{}"
+            try:
+                plan = _json.loads(plan) if isinstance(plan, str) else (plan or {})
+            except Exception:
+                plan = {}
+            if isinstance(plan, dict):
+                for ep, ed in plan.items():
+                    if ed and q in str(ed).lower():
+                        editors.setdefault(str(ed).strip(), {"count": 0, "projects": set()})
+                        editors[str(ed).strip()]["count"] += 1
+                        editors[str(ed).strip()]["projects"].add(name)
+            if q in hay:
+                projects.append({
+                    "name": name, "department": dept, "month": month, "status": status,
+                    "delivered_date": dd,
+                })
+            if dd and q in dd.lower():
+                delivered_dates.append({"name": name, "date": dd, "department": dept})
+        # 待办匹配
+        try:
+            todos = db.get_all_todos(include_done=True, keyword=q) or []
+        except Exception:
+            todos = []
+        todo_results = [{"project": t.get("project_name"), "text": t.get("text"), "id": t.get("id")} for t in todos]
+        return jsonify({
+            "ok": True,
+            "q": q,
+            "projects": projects[:50],
+            "editors": [{"name": k, "count": v["count"], "projects": len(v["projects"])} for k, v in editors.items()],
+            "todos": todo_results[:50],
+            "delivered_dates": delivered_dates[:50],
+        })
+
+    @app.route("/api/notifications", methods=["GET"])
+    def features_notifications():
+        """通知中心：交付提醒 + 待办提醒。
+        交付：逾期(已到交付日未完成) / 今日交付 / 未来3天内交付。
+        待办：未完成待办按项目分组。
+        """
+        from datetime import datetime as _dt, timedelta as _td
+        today = _dt.now().strftime("%Y-%m-%d")
+        day3 = (_dt.now() + _td(days=3)).strftime("%Y-%m-%d")
+        try:
+            projs = db.get_all_projects() or []
+        except Exception:
+            projs = []
+        overdue = []
+        today_deliver = []
+        upcoming = []
+        for p in projs:
+            dd = (p.get("delivered_date") or "").strip()
+            st = str(p.get("custom_status") or "").strip()
+            if not dd or len(dd) != 10:
+                continue
+            done = (st == "已完成")
+            if dd == today:
+                today_deliver.append({"name": p.get("name") or "", "department": p.get("department") or ""})
+            elif dd < today and not done:
+                overdue.append({"name": p.get("name") or "", "department": p.get("department") or "", "date": dd})
+            elif today < dd <= day3 and not done:
+                upcoming.append({"name": p.get("name") or "", "department": p.get("department") or "", "date": dd})
+        # 待办提醒：未完成待办按项目聚合
+        try:
+            todos = db.get_all_todos(include_done=False) or []
+        except Exception:
+            todos = []
+        todo_by_project = {}
+        for t in todos:
+            todo_by_project.setdefault(t.get("project_name") or "", []).append(t)
+        todo_reminders = [
+            {"project": pname, "count": len(items),
+             "items": [{"id": t.get("id"), "text": t.get("text")} for t in items]}
+            for pname, items in todo_by_project.items()
+        ]
+        overdue.sort(key=lambda x: x.get("date", ""))
+        upcoming.sort(key=lambda x: x.get("date", ""))
+        return jsonify({
+            "ok": True,
+            "today": today,
+            "overdue": overdue,
+            "today_deliver": today_deliver,
+            "upcoming": upcoming,
+            "todos": todo_reminders,
+            "count": len(overdue) + len(today_deliver) + len(upcoming) + len(todo_reminders),
+        })
+
     # ==================== 视频缩略图（ffmpeg）====================
     @app.route("/api/thumbnail")
     def features_thumbnail():
