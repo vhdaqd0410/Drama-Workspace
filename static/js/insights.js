@@ -36,12 +36,13 @@ async function loadInsights(){
   try{
     const d = await api('GET','/api/insights/summary');
     if(!d || !d.ok) throw new Error((d&&d.message)||'加载失败');
-    // KPI 卡片
+    // KPI 卡片：优先用首页概览统计（window._overviewStats，与项目看板首页一致），兜底用 summary
+    const os = (typeof window._overviewStats !== 'undefined' && window._overviewStats && typeof window._overviewStats.total === 'number') ? window._overviewStats : null;
     const kpis = [
-      { label:'项目总数', value:d.projectCount, icon:'📁' },
-      { label:'当月项目数', value:d.monthProjectCount, icon:'🗓' },
-      { label:'当月已完成', value:d.monthCompleted, icon:'✅' },
-      { label:'进行中项目', value:d.inProgress, icon:'🔄' },
+      { label:'项目总数', value: os ? os.total : d.projectCount, icon:'📁' },
+      { label:'本月项目', value: os ? os.this_month : d.monthProjectCount, icon:'🗓' },
+      { label:'本月已完成', value: os ? os.this_month_done : d.monthCompleted, icon:'✅' },
+      { label:'制作中', value: os ? os.producing : d.inProgress, icon:'🔄' },
       { label:'成员', value:d.memberCount, icon:'👥' },
     ];
     let kpiHtml = kpis.map(k=>`
@@ -51,15 +52,19 @@ async function loadInsights(){
         <div style="font-size:11px;color:var(--text-sec);margin-top:2px">${k.label}</div>
       </div>`).join('');
 
-    // 当月状态分布
-    const statusMap = d.statusMap || {};
-    const total = Object.values(statusMap).reduce((s,v)=>s+v,0) || 1;
+    // 当月状态分布：与项目看板首页一致（projects 数组按 project_month == 当前月过滤）
+    const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
+    const allList = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
+    const monthList = allList.filter(p => (p.project_month || '') === nowMonth);
+    const statusMap = {};
+    monthList.forEach(p => { const s = (p.custom_status || '').trim() || '未设置'; statusMap[s] = (statusMap[s]||0) + 1; });
+    const totalStatus = Object.values(statusMap).reduce((s,v)=>s+v,0) || 1;
     let statusHtml;
     if(Object.keys(statusMap).length===0){
       statusHtml = '<div style="color:var(--text-sec);font-size:12px">本月暂无项目</div>';
     } else {
       statusHtml = Object.entries(statusMap).map(([st,cnt])=>{
-        const pct = Math.round(cnt/total*100);
+        const pct = Math.round(cnt/totalStatus*100);
         return `
           <div style="margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
@@ -72,8 +77,21 @@ async function loadInsights(){
       }).join('');
     }
 
-    // 各剪辑当月集数：环形图（SVG）
-    const editorEps = d.editorEpisodes || {};
+    // 各剪辑当月集数：从当月项目 episode_plan/episodes 聚合（与工作台同口径）
+    const editorEps = {};
+    monthList.forEach(p => {
+      let plan = p.episode_plan;
+      if (typeof plan === 'string') { try { plan = JSON.parse(plan); } catch(e){ plan = null; } }
+      if (plan && typeof plan === 'object' && Object.keys(plan).length > 0) {
+        Object.entries(plan).forEach(([ep, editor]) => {
+          if (!editor) return;
+          const n = parseInt(ep, 10);
+          if (!isNaN(n)) editorEps[editor] = (editorEps[editor]||0) + 1;
+        });
+      } else {
+        (p.episodes || []).forEach(e => { if (e.editor) editorEps[e.editor] = (editorEps[e.editor]||0) + 1; });
+      }
+    });
     const editorDonut = buildDonut(editorEps);
 
     body.innerHTML = `
@@ -217,61 +235,111 @@ function calHide(){
   const t = document.getElementById('calTip');
   if(t) t.remove();
 }
+// 点击日历某天：打开「交付日期编辑」，可搜索项目并「选定」设为当天交付
 function calClickDay(key){
-  const projs = _calData[key] || [];
   api('GET','/api/projects').then(async function(projResp){
     let all = [];
     if(projResp && projResp.sections){ projResp.sections.forEach(s=>(s.projects||[]).forEach(p=>{ if(!all.find(x=>x.name===p.name)) all.push(p); })); }
     else if(projResp && projResp.projects){ all = projResp.projects; }
+    else if(window.projects && Array.isArray(window.projects)){ all = window.projects; }
     if(!all.length){ toast('未加载到项目','warning'); return; }
-    const existing = projs.map(n=>all.find(p=>p.name===n)).filter(Boolean);
-    const others = all.filter(p=>!projs.includes(p.name)).slice(0,100);
-    openDeliveredDateEditor(key, existing, others);
-  }).catch(function(e){ toast('加载项目失败: '+e.message,'error'); });
+    openDeliveredDateEditor(key, all);
+  }).catch(function(e){
+    // 兜底：用全局 projects
+    const all = (window.projects && Array.isArray(window.projects)) ? window.projects : [];
+    if(all.length) openDeliveredDateEditor(key, all);
+    else toast('加载项目失败: '+e.message,'error');
+  });
 }
 
-function openDeliveredDateEditor(dateKey, existing, others){
+// 交付日期编辑弹窗：搜索 + 选定按钮
+function openDeliveredDateEditor(dateKey, allProjects){
   const overlay = document.createElement('div');
   overlay.id = 'ddEditorOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:41000;display:flex;align-items:center;justify-content:center';
-  const row = (p, dflt) => `
-    <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px">
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.name)}</span>
-      <input type="date" value="${dflt}" data-dd-name="${htm(p.name)}" style="padding:3px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px">
-    </div>`;
-  const section = (title, list, dflt) => list.length
-    ? `<div style="font-size:12px;font-weight:600;color:var(--text-sec);margin:8px 0 4px">${title} (${list.length})</div>` + list.map(p=>row(p, dflt)).join('')
-    : '';
+  const already = (_calData[dateKey] || []).slice();
+  // 全局保存的项目列表用于搜索渲染
+  window._ddAllProjects = allProjects;
+  window._ddDateKey = dateKey;
   overlay.innerHTML = `
-    <div style="background:var(--card,#fff);border-radius:14px;width:520px;max-width:94vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.3)">
+    <div style="background:var(--card,#fff);border-radius:14px;width:560px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.3)">
       <div style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border,#e5e5ea)">
-        <h3 style="margin:0;font-size:15px">📅 ${dateKey} 交付日期设置</h3>
+        <h3 style="margin:0;font-size:15px">📅 交付日期设置</h3>
         <button onclick="closeDdEditor()" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button>
       </div>
-      <div style="padding:14px 18px;flex:1;overflow-y:auto">
-        <div style="font-size:12px;color:var(--text-sec);margin-bottom:6px">修改日期保存后自动更新日历；清空日期则该项目从日历移除。</div>
-        ${section('当日已交付', existing, dateKey)}
-        ${section('其他项目（可补录为当天交付）', others, dateKey)}
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border,#e5e5ea)">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <label style="font-size:13px;font-weight:600;white-space:nowrap">交付日期</label>
+          <input type="date" id="ddDateInput" value="${dateKey}" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none">
+        </div>
+        <input id="ddSearchInput" type="text" placeholder="🔍 搜索项目（名称/编号）..." style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none" oninput="renderDdList()">
+        <div style="font-size:11px;color:var(--text-sec);margin-top:6px">搜索后点击「选定」把项目设为该交付日期；已在该日期的可「移除」。</div>
       </div>
+      <div style="padding:12px 18px;flex:1;overflow-y:auto" id="ddListBox"><div style="color:var(--text-sec);font-size:13px">加载中...</div></div>
       <div style="padding:14px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border,#e5e5ea)">
         <button class="btn btn-sm" onclick="closeDdEditor()">完成</button>
       </div>
     </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) closeDdEditor(); });
   document.body.appendChild(overlay);
-  overlay.querySelectorAll('input[data-dd-name]').forEach(inp=>{
-    inp.addEventListener('change', function(){
-      const name = this.dataset.ddName;
-      const val = this.value || '';
-      api('POST','/api/project/' + encodeURIComponent(name) + '/delivered_date', { date: val })
-        .then(function(d){ if(d && d.ok){ toast((val?'✅ 已设置 ':'已清除 ') + name,'success'); loadInsightsCalendar(); } else toast('保存失败','error'); })
-        .catch(function(e){ toast('保存失败: '+e.message,'error'); });
-    });
-  });
+  // 日期变化时刷新列表（更新选中状态）
+  document.getElementById('ddDateInput').addEventListener('change', renderDdList);
+  renderDdList();
 }
+
+function renderDdList(){
+  const box = document.getElementById('ddListBox');
+  if(!box) return;
+  const dateKey = document.getElementById('ddDateInput').value || window._ddDateKey;
+  const q = (document.getElementById('ddSearchInput').value || '').trim().toLowerCase();
+  const all = window._ddAllProjects || [];
+  let list = all;
+  if(q){
+    list = all.filter(p => (p.name||'').toLowerCase().indexOf(q) >= 0);
+  }
+  list = list.slice(0, 120);
+  // 已在该日期的项目
+  const already = (_calData[dateKey] || []).slice();
+  const marked = {};
+  already.forEach(n => { marked[n] = true; });
+  if(!list.length){
+    box.innerHTML = '<div style="color:var(--text-sec);font-size:13px;padding:10px 0">无匹配项目</div>';
+    return;
+  }
+  box.innerHTML = list.map(p=>{
+    const isOn = marked[p.name];
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid ${isOn?'#34c759':'var(--border,#e5e5ea)'};border-radius:10px;margin-bottom:6px;background:${isOn?'#f0fdf4':'#fff'}">
+        <span style="font-size:16px">${isOn?'✅':'📁'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.name)}</div>
+          <div style="font-size:11px;color:var(--text-sec)">${escHtml(p.custom_status||p.delivery_status||'')}${isOn?' · 已设置该日':''}</div>
+        </div>
+        ${isOn
+          ? `<button class="btn btn-sm danger" onclick="ddSetDate('${htm(p.name)}','')" title="从该日移除">🗑 移除</button>`
+          : `<button class="btn btn-sm btn-primary" onclick="ddSetDate('${htm(p.name)}','${dateKey}')">📌 选定</button>`}
+      </div>`;
+  }).join('');
+}
+
+// 「选定」/「移除」：立即设置/清除该项目的交付日期
+function ddSetDate(name, dateKey){
+  if(!dateKey && !confirm('确定从该交付日期移除该项目？')) return;
+  const apiPath = '/api/project/' + encodeURIComponent(name) + '/delivered_date';
+  api('POST', apiPath, { date: dateKey }).then(function(d){
+    if(d && d.ok){
+      toast(dateKey ? ('✅ 已设置 ' + name + ' → ' + dateKey) : ('🗑 已移除 ' + name), 'success');
+      loadInsightsCalendar();
+      renderDdList();
+    } else toast((d&&d.message)||'保存失败','error');
+  }).catch(function(e){ toast('保存失败: '+e.message,'error'); });
+}
+
 function closeDdEditor(){
   const o = document.getElementById('ddEditorOverlay');
   if(o) o.remove();
+  delete window._ddAllProjects;
+  delete window._ddDateKey;
 }
 
 function exportProjectCSV(){
