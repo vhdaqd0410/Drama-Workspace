@@ -4,6 +4,20 @@ from datetime import datetime
 from flask import jsonify, request, send_file
 
 
+def backfill_months(now, count=6):
+    """返回含 now 在内的最近 count 个月的 'YYYY-MM' 列表（降序，最新在前）。
+    安全处理跨年回溯：now.month - i 在 1~5 月会 <=0，datetime 会抛 ValueError。
+    """
+    out = []
+    for i in range(count - 1, -1, -1):
+        _y, _m = now.year, now.month - i
+        while _m <= 0:
+            _m += 12
+            _y -= 1
+        out.append(datetime(_y, _m, 1).strftime("%Y-%m"))
+    return out
+
+
 def register_routes(app, db):
     # ================================================================
     # 批量操作
@@ -390,10 +404,7 @@ def register_routes(app, db):
         dept_stats = [dict(r) for r in rows]
 
         # ---------- 3. 产能趋势（近6个月） ----------
-        months = []
-        for i in range(5, -1, -1):
-            d = _dt(now.year, now.month - i, 1)
-            months.append(d.strftime("%Y-%m"))
+        months = backfill_months(now, 6)
         trend = []
         for m in months:
             with db.get_conn() as conn:

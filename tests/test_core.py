@@ -197,3 +197,30 @@ class TestQAWorkflow:
         qa._auto_advance_workflow(name, passed=10, failed=0)
         p = tmp_db.get_project(name)
         assert p["custom_status"] == "剪辑中"
+
+
+# ============================================================
+# 产能趋势月份回溯（bulk_api.backfill_months）—— 防止 1~5 月崩溃
+# ============================================================
+
+class TestBackfillMonths:
+    def test_normal_month_rollback(self):
+        from datetime import datetime
+        from bulk_api import backfill_months
+        months = backfill_months(datetime(2026, 8, 16), 6)
+        assert months == ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"]
+
+    def test_cross_year_in_january(self):
+        # 关键回归：当前月为1月时，回溯5个月必须跨到上一年，不能抛 ValueError
+        from datetime import datetime
+        from bulk_api import backfill_months
+        months = backfill_months(datetime(2026, 1, 15), 6)
+        assert months == ["2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01"]
+
+    def test_no_crash_in_all_low_months(self):
+        from datetime import datetime
+        from bulk_api import backfill_months
+        for m in range(1, 6):
+            res = backfill_months(datetime(2026, m, 10), 6)
+            assert len(res) == 6
+            assert res[-1] == "2026-%02d" % m
