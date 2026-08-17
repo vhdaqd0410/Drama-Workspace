@@ -791,7 +791,7 @@ function projectCardHTML(p){
       <div class="status-row"><span class="sr-label">成片交付</span>${d}</div>
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
-    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this)" onmouseenter="cardHoverTodo('${jsq(pname)}', this)" onmouseleave="cardLeaveTodo(this)">📌 待办 <span class="ctodo-count"></span></div>
+    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this)">📌 待办 <span class="ctodo-count"></span></div>
     <div class="card-todo-popup" id="ctodo-popup-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>
     <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
@@ -852,29 +852,6 @@ function cardToggleTodo(name, el){
     pop.classList.add('show');
     pop.dataset.pinned = '1';
     cardLoadTodos(name, true);
-  }
-}
-// 悬停显示
-let _ctHoverTimer = null;
-function cardHoverTodo(name, el){
-  clearTimeout(_ctHoverTimer);
-  _ctHoverTimer = setTimeout(function(){
-    const pop = _ctPopup(name);
-    if(pop && !pop.classList.contains('show')){
-      _ctCloseOthers();
-      _ctPosition(pop, el);
-      pop.classList.add('show');
-      cardLoadTodos(name, false);
-    }
-  }, 180);
-}
-function cardLeaveTodo(el){
-  clearTimeout(_ctHoverTimer);
-  const pop = el.nextElementSibling;
-  if(pop && pop.classList.contains('show') && !pop.dataset.pinned){
-    setTimeout(function(){
-      if(!pop.matches(':hover')) _ctHide(pop);
-    }, 200);
   }
 }
 
