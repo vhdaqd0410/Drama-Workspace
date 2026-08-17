@@ -342,6 +342,13 @@ function jumpToProject(name){
       toast('未找到项目卡片（可能已不在当前数据中）', 'info');
       return;
     }
+    // 若目标所在分组处于折叠状态，先展开该分组，确保卡片可见可定位（已完成组默认折叠）
+    var secBlock = target.closest('.section-block');
+    if(secBlock && secBlock.classList.contains('section-collapsed')){
+      secBlock.classList.remove('section-collapsed');
+      var arrow = secBlock.querySelector('.section-arrow');
+      if(arrow) arrow.textContent = '▼';
+    }
     // 滚动到卡片
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     // 高亮动画
