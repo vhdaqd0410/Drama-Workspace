@@ -599,6 +599,19 @@ function renderOverviewCharts(){
 }
 
 // ===== 工作量 / 数据看板（可指定容器，月度报告复用） =====
+// 工作量看板排序状态
+let _wlSortKey = 'assigned';
+let _wlSortDir = 1;
+function workloadSort(val){
+  if(val === 'assigned'){ _wlSortKey='assigned'; _wlSortDir=1; }
+  else if(val === 'assigned_asc'){ _wlSortKey='assigned'; _wlSortDir=-1; }
+  else if(val === 'status'){ _wlSortKey='status'; _wlSortDir=1; }
+  else if(val === 'name'){ _wlSortKey='name'; _wlSortDir=1; }
+  // 重新渲染所有工作量看板（数据洞察/月度报告共用）
+  ['workloadBoard','reportWorkloadBoard'].forEach(function(id){
+    if(document.getElementById(id)) renderWorkloadBoard(id);
+  });
+}
 async function renderWorkloadBoard(containerId){
   const board = document.getElementById(containerId || 'workloadBoard');
   if(!board) return;
@@ -610,19 +623,33 @@ async function renderWorkloadBoard(containerId){
     const trend = d.trend || [];
     const summary = d.summary || {};
 
-    let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:20px">';
+    // === 剪辑师工作量看板（全宽卡片网格 + 排序） ===
+    let html = '<div style="margin-top:20px">';
 
-    // === 剪辑师工作量看板（紧凑卡片网格，无需滚动看全部） ===
+    // 排序状态（全局，点下拉切换）
+    const sortKey = _wlSortKey || 'assigned';
+    const sortDir = _wlSortDir === -1 ? -1 : 1;
+    // 排序后的编辑器列表：assigned 默认从高到低(dir=1)，assigned_asc 从低到高(dir=-1)
+    const sortedEditors = editors.slice().sort(function(a,b){
+      let va, vb;
+      if(sortKey === 'name'){ va=String(a.name||''); vb=String(b.name||''); return sortDir*(va<vb?-1:va>vb?1:0); }
+      if(sortKey === 'status'){
+        const rank = function(e){ if(!(e.quota||0)) return 1; return (e.assigned||0)>=(e.quota||0)?0:2; };
+        const r = rank(a)-rank(b); if(r!==0) return r; // 达标在前
+        va=a.assigned||0; vb=b.assigned||0; return vb-va; // 同状态按集数从高到低
+      }
+      va=a.assigned||0; vb=b.assigned||0;
+      return sortDir===1 ? (vb-va) : (va-vb); // assigned: dir1=高到低, dir-1=低到高
+    });
+
     const maxAssigned = editors.length ? editors[0].assigned : 1;
-    const editorCards = editors.map(function(e){
+    const editorCards = sortedEditors.map(function(e){
       const assigned = e.assigned || 0;
       const quota = e.quota || 0;
       const reached = quota>0 && assigned>=quota;
       const gap = quota>0 ? Math.max(0, quota-assigned) : 0;
-      // 相对卡点的进度（未达时红色，达标绿色）
       const qpct = quota>0 ? Math.min(100, Math.round(assigned/quota*100)) : (maxAssigned>0?Math.round(assigned/maxAssigned*100):0);
       const barColor = reached ? '#34c759' : '#ff3b30';
-      // 达标/未达图标
       let state;
       if(quota<=0) state = '<span style="font-size:11px;color:#86868b">组长</span>';
       else if(reached) state = '<span style="color:#34c759;font-weight:700">✓ 达标</span>';
@@ -644,27 +671,29 @@ async function renderWorkloadBoard(containerId){
       </div>`;
     }).join('');
 
+    // 排序下拉
+    const sortOpts = [
+      ['assigned','按集数','⬇ 从高到低'],
+      ['assigned_asc','按集数','⬆ 从低到高'],
+      ['status','按达标状态','达标在前'],
+      ['name','按姓名','A-Z'],
+    ];
+    const sortSelect = '<select id="wlSortSelect" onchange="workloadSort(this.value)" style="padding:5px 8px;border:1px solid var(--border,#e5e5ea);border-radius:6px;font-size:12px">'
+      + sortOpts.map(function(o){
+          const selVal = (sortKey==='assigned'&&sortDir===1)?'assigned':(sortKey==='assigned'?'assigned_asc':sortKey);
+          return '<option value="'+o[0]+'"'+(selVal===o[0]?' selected':'')+'>'+o[1]+' '+o[2]+'</option>';
+        }).join('')
+      + '</select>';
+
     html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="font-weight:700;font-size:14px">👥 剪辑师工作量（本月）</div>
-        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff3b30">红=未达卡点</span> · <span style="color:#34c759">绿=已达标</span> · <span style="color:#ff9500">橙线=卡点</span></span>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff3b30">红=未达</span> · <span style="color:#34c759">绿=达标</span> · <span style="color:#ff9500">橙=卡点</span></span>
+          ${sortSelect}
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${editorCards || '<div style="color:#86868b;padding:20px;text-align:center">暂无分集数据</div>'}</div>
-    </div>`;
-
-    // === 部门统计 ===
-    const deptMax = dept.length ? Math.max(...dept.map(x=>x.total||0), 1) : 1;
-    const deptRows = dept.map(function(s){
-      const pct = Math.round((s.total||0)/deptMax*100);
-      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <div style="width:90px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${htm(s.department||'未分部门')}">${htm(s.department||'未分部门')}</div>
-        <div style="flex:1;height:18px;background:#f0f2f5;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#5c6bc0,#7986cb);border-radius:4px"></div></div>
-        <div style="width:80px;font-size:11px;color:#666">${s.total||0}项目 · ${s.completed||0}完成</div>
-      </div>`;
-    }).join('');
-    html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
-      <div style="font-weight:700;font-size:14px;margin-bottom:12px">🏢 部门项目统计</div>
-      ${deptRows || '<div style="color:#86868b;padding:20px;text-align:center">暂无数据</div>'}
     </div>`;
 
     html += '</div>';
