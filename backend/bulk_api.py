@@ -391,6 +391,17 @@ def register_routes(app, db):
                 for name, item in sorted(editor_workload.items(), key=lambda x: -x[1]["assigned"])
             ]
 
+        # 为剪辑师附上角色/提成卡点(基准集数)，供工作量看板标注（功能：70集卡点标记）
+        try:
+            from commission_service import editor_quota_map
+            _quota = editor_quota_map()
+            for e in editor_list:
+                q = _quota.get(e.get("name"))
+                e["quota"] = q["quota"] if q else None
+                e["editor_role"] = q["role"] if q else ""
+        except Exception:
+            pass
+
         # ---------- 2. 部门项目统计 ----------
         with db.get_conn() as conn:
             rows = conn.execute(

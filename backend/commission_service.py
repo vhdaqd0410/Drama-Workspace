@@ -66,6 +66,21 @@ def _normalize_role(role):
     return "二卡剪辑" if role == "二卡剪辑" else "剪辑助理"
 
 
+def editor_quota_map(cfg_path=None):
+    """返回 {剪辑师姓名: {'role': 角色, 'quota': 基准集数}}，用于工作量看板标注卡点。
+    组长无基准(0)；其余按角色基准。"""
+    roles, rules, groups = load_config(cfg_path)
+    out = {}
+    for name, role_raw in roles.items():
+        role = _normalize_role(role_raw)
+        if role == "剪辑组长":
+            out[name] = {"role": role, "quota": 0}
+        else:
+            rule = rules.get(role, rules.get("剪辑助理", DEFAULT_RULES["剪辑助理"]))
+            out[name] = {"role": role, "quota": int(rule.get("基准集数", 120) or 120)}
+    return out
+
+
 def compute_commission_breakdown(editor_workload, month=None, cfg_path=None,
                                  group_completed_count=None):
     """从剪辑师集数计算每人绩效+提成。

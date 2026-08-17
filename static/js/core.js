@@ -618,10 +618,18 @@ async function renderWorkloadBoard(containerId){
       const pct = maxAssigned>0 ? Math.round(e.assigned/maxAssigned*100) : 0;
       const hue = Math.max(0, 210 - pct*1.2);  // 工作量高 → 偏红
       const color = pct>=80 ? '#e74c3c' : pct>=50 ? '#e67e22' : '#3498db';
+      // 提成卡点(基准集数)标记：70集/120集
+      const quota = e.quota || 0;
+      const quotaPct = quota && maxAssigned>0 ? Math.round(quota/maxAssigned*100) : 0;
+      const quotaMark = quota>0
+        ? `<div style="position:absolute;top:-3px;bottom:-3px;left:${quotaPct}%;width:2px;background:#ff9500;z-index:2" title="提成卡点 ${quota} 集"></div>
+           <div style="position:absolute;top:-12px;left:${quotaPct}%;transform:translateX(-50%);font-size:9px;color:#ff9500;font-weight:700;white-space:nowrap">${quota}提</div>`
+        : '';
+      const reached = quota>0 && e.assigned>=quota;
       return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <div style="width:70px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${htm(e.name)}">${htm(e.name)}</div>
-        <div style="flex:1;height:18px;background:#f0f2f5;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#3498db,${color});border-radius:4px;transition:width .5s"></div></div>
-        <div style="width:55px;font-size:12px;font-weight:600;color:#333">${e.assigned}集</div>
+        <div style="flex:1;height:18px;background:#f0f2f5;border-radius:4px;overflow:hidden;position:relative">${quotaMark}<div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#3498db,${color});border-radius:4px;transition:width .5s"></div></div>
+        <div style="width:55px;font-size:12px;font-weight:600;color:${reached?'#34c759':'#333'}">${e.assigned}集</div>
         <div style="width:50px;font-size:11px;color:#86868b">${e.projects}项目</div>
       </div>`;
     }).join('');
@@ -629,7 +637,7 @@ async function renderWorkloadBoard(containerId){
     html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div style="font-weight:700;font-size:14px">👥 剪辑师工作量（本月）</div>
-        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集</span>
+        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff9500;font-weight:600">橙色竖线=提成卡点(基准集数)</span></span>
       </div>
       <div style="max-height:340px;overflow-y:auto">${editorRows || '<div style="color:#86868b;padding:20px;text-align:center">暂无分集数据</div>'}</div>
     </div>`;
