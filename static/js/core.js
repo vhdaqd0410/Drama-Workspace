@@ -615,29 +615,40 @@ async function renderWorkloadBoard(containerId){
     // === 剪辑师工作量看板 ===
     const maxAssigned = editors.length ? editors[0].assigned : 1;
     const editorRows = editors.map(function(e){
-      const pct = maxAssigned>0 ? Math.round(e.assigned/maxAssigned*100) : 0;
-      const hue = Math.max(0, 210 - pct*1.2);  // 工作量高 → 偏红
-      const color = pct>=80 ? '#e74c3c' : pct>=50 ? '#e67e22' : '#3498db';
-      // 提成卡点(基准集数)标记：70集/120集
+      const assigned = e.assigned || 0;
+      const pct = maxAssigned>0 ? Math.round(assigned/maxAssigned*100) : 0;
       const quota = e.quota || 0;
-      const quotaPct = quota && maxAssigned>0 ? Math.round(quota/maxAssigned*100) : 0;
+      const quotaPct = quota && maxAssigned>0 ? Math.min(100, Math.round(quota/maxAssigned*100)) : 0;
+      const reached = quota>0 && assigned>=quota;
+      const gap = quota>0 ? (quota-assigned) : 0;
+      // 状态徽标：未达 / 已达标 / 组长无基准
+      let badge;
+      if(quota<=0) badge = '<span style="font-size:10px;color:#86868b;border:1px solid #d0d0d5;border-radius:4px;padding:0 4px">组长</span>';
+      else if(reached) badge = `<span style="font-size:10px;color:#fff;background:#34c759;border-radius:4px;padding:0 5px;font-weight:700">已达标 ✓</span>`;
+      else badge = `<span style="font-size:10px;color:#fff;background:#ff3b30;border-radius:4px;padding:0 5px;font-weight:700">未达 差${gap}集</span>`;
+      // 进度条：未达部分红色，达标部分绿色；卡点橙色竖线+数字
+      const barColor = reached ? 'linear-gradient(90deg,#34c759,#30d158)' : 'linear-gradient(90deg,#ff3b30,#ff9500)';
       const quotaMark = quota>0
-        ? `<div style="position:absolute;top:-3px;bottom:-3px;left:${quotaPct}%;width:2px;background:#ff9500;z-index:2" title="提成卡点 ${quota} 集"></div>
-           <div style="position:absolute;top:-12px;left:${quotaPct}%;transform:translateX(-50%);font-size:9px;color:#ff9500;font-weight:700;white-space:nowrap">${quota}提</div>`
+        ? `<div style="position:absolute;top:-4px;bottom:-4px;left:${quotaPct}%;width:3px;background:#ff9500;z-index:3;box-shadow:0 0 4px rgba(255,149,0,.6)"></div>
+           <div style="position:absolute;top:0;right:0;left:0;text-align:center;line-height:22px;font-size:0;z-index:2"></div>`
         : '';
-      const reached = quota>0 && e.assigned>=quota;
-      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <div style="width:70px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${htm(e.name)}">${htm(e.name)}</div>
-        <div style="flex:1;height:18px;background:#f0f2f5;border-radius:4px;overflow:hidden;position:relative">${quotaMark}<div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#3498db,${color});border-radius:4px;transition:width .5s"></div></div>
-        <div style="width:55px;font-size:12px;font-weight:600;color:${reached?'#34c759':'#333'}">${e.assigned}集</div>
-        <div style="width:50px;font-size:11px;color:#86868b">${e.projects}项目</div>
+      const quotaLabel = quota>0
+        ? `<div style="position:absolute;top:-16px;left:${quotaPct}%;transform:translateX(-50%);font-size:10px;color:#fff;background:#ff9500;border-radius:3px;padding:0 4px;font-weight:700;white-space:nowrap;z-index:3">${quota}提</div>`
+        : '';
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="width:76px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${htm(e.name)}">${htm(e.name)}</div>
+        <div style="flex:1;height:22px;background:#f0f2f5;border-radius:4px;overflow:hidden;position:relative;margin-top:16px">${quotaMark}${quotaLabel}<div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width .5s"></div></div>
+        <div style="width:64px;text-align:left">
+          <div style="font-size:13px;font-weight:700;color:${reached?'#34c759':'#e67e22'}">${assigned}集</div>
+        </div>
+        <div style="width:78px">${badge}</div>
       </div>`;
     }).join('');
 
     html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div style="font-weight:700;font-size:14px">👥 剪辑师工作量（本月）</div>
-        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff9500;font-weight:600">橙色竖线=提成卡点(基准集数)</span></span>
+        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff9500;font-weight:600">橙线=提成卡点</span> · <span style="color:#ff3b30">红=未达</span> · <span style="color:#34c759">绿=已达标</span></span>
       </div>
       <div style="max-height:340px;overflow-y:auto">${editorRows || '<div style="color:#86868b;padding:20px;text-align:center">暂无分集数据</div>'}</div>
     </div>`;
