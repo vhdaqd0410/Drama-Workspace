@@ -791,7 +791,7 @@ function projectCardHTML(p){
       <div class="status-row"><span class="sr-label">成片交付</span>${d}</div>
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
-    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this)">📌 待办 <span class="ctodo-count"></span></div>
+    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this, event)">📌 待办 <span class="ctodo-count"></span></div>
     <div class="card-todo-popup" id="ctodo-popup-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>
     <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
@@ -812,24 +812,17 @@ function _ctHide(pop){
     delete pop.dataset.pinned;
   }, 175);
 }
-// 把弹窗锚定到待办按钮下方，做视口边界钳制（稳定，不跟随鼠标，避免"乱飘"）
-function _ctPosition(pop, anchor){
-  const pad = 8;
-  const rect = anchor ? anchor.getBoundingClientRect() : null;
+// 把弹窗定位到鼠标点击处附近，做视口边界钳制
+function _ctPosition(pop, anchor, mx, my){
+  const pad = 12;
   const w = pop.offsetWidth || 290;
   const h = pop.offsetHeight || 240;
-  let x, y;
-  if(rect){
-    // 锚定到按钮右下角，向下展开
-    x = rect.left;
-    y = rect.bottom + pad;
-  } else {
-    x = pad;
-    y = pad;
-  }
+  // 优先用鼠标点击坐标，否则回退到按钮下方
+  let x = (typeof mx === 'number' && !isNaN(mx)) ? mx + pad : (anchor ? anchor.getBoundingClientRect().left : pad);
+  let y = (typeof my === 'number' && !isNaN(my)) ? my + pad : (anchor ? anchor.getBoundingClientRect().bottom + 8 : pad);
   // 视口边界钳制
-  if(x + w > window.innerWidth - 8) x = Math.max(8, window.innerWidth - w - 8);
-  if(y + h > window.innerHeight - 8) y = Math.max(8, rect ? rect.top - h - pad : 8);
+  if(x + w > window.innerWidth - 8) x = Math.max(8, (typeof mx === 'number' && !isNaN(mx)) ? mx - w - pad : window.innerWidth - w - 8);
+  if(y + h > window.innerHeight - 8) y = Math.max(8, (typeof my === 'number' && !isNaN(my)) ? my - h - pad : window.innerHeight - h - 8);
   pop.style.left = x + 'px';
   pop.style.top = y + 'px';
 }
@@ -840,15 +833,17 @@ function _ctCloseOthers(){
   });
 }
 
-// 打开/关闭待办弹层（点击，固定）
-function cardToggleTodo(name, el){
+// 打开/关闭待办弹层（点击，固定；弹窗跟随鼠标点击位置弹出）
+function cardToggleTodo(name, el, ev){
   const pop = _ctPopup(name);
   if(!pop) return;
   const isShow = pop.classList.contains('show');
   // 关闭所有已开的（含固定，淡出）
   document.querySelectorAll('.card-todo-popup.show').forEach(p=>{ _ctHide(p); });
   if(!isShow){
-    _ctPosition(pop, el);
+    const mx = ev && typeof ev.clientX === 'number' ? ev.clientX : null;
+    const my = ev && typeof ev.clientY === 'number' ? ev.clientY : null;
+    _ctPosition(pop, el, mx, my);
     pop.classList.add('show');
     pop.dataset.pinned = '1';
     cardLoadTodos(name, true);
