@@ -443,3 +443,41 @@ class TestPersonCards:
         assert data["cards"] == []  # 2025年的不算进2026
 
 
+# ============================================================
+# 12. 审核流超时提醒（compute_audit_alerts）—— 责任到人 + 超时预警
+# ============================================================
+
+class TestAuditAlerts:
+    def test_alert_stale_review(self, tmp_db):
+        from datetime import datetime, timedelta
+        import features
+        # 卡在质检中10天的项目
+        tmp_db.upsert_project("慢项目", "", "")
+        old = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
+        tmp_db.update_project_status("慢项目", custom_status="质检中", status_changed_at=old)
+        tmp_db.set_episode_plan("慢项目", {"1": "张三"})
+        # 刚变状态的项目不预警
+        tmp_db.upsert_project("新项目", "", "")
+        tmp_db.update_project_status("新项目", custom_status="质检中")
+        # 已完成不算
+        tmp_db.upsert_project("完成", "", "")
+        tmp_db.update_project_status("完成", custom_status="已完成")
+        data = features.compute_audit_alerts(tmp_db, stale_days=3)
+        names = {a["name"]: a for a in data["alerts"]}
+        assert "慢项目" in names
+        assert names["慢项目"]["days_stuck"] >= 9.9
+        # 责任到人：从分集回退到张三
+        assert names["慢项目"]["owner"] == "张三"
+        assert "新项目" not in names
+        assert "完成" not in names
+
+    def test_owner_explicit(self, tmp_db):
+        from datetime import datetime, timedelta
+        import features
+        tmp_db.upsert_project("P", "", "")
+        old = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d %H:%M:%S")
+        tmp_db.update_project_status("P", custom_status="修改中", status_changed_at=old, owner="李四")
+        data = features.compute_audit_alerts(tmp_db, stale_days=3)
+        assert any(a["name"] == "P" and a["owner"] == "李四" for a in data["alerts"])
+
+

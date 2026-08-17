@@ -94,7 +94,28 @@ function renderNotifBody(body){
   });
   if(!html) html = '<div style="color:#86868b;text-align:center;padding:40px 0">🎉 暂无提醒</div>';
   else html += '<div style="margin-top:16px"><button class="btn" style="width:100%" onclick="openGlobalTodos()">📌 查看全部待办</button></div>';
+  // 审核流超时预警（功能5）
+  html += '<div id="auditAlertSlot"></div>';
   body.innerHTML = html;
+  loadAuditAlerts();
+}
+
+// 审核流超时提醒（功能5）：卡在审核/质检/修改超过3天的项目，责任到人
+async function loadAuditAlerts(){
+  const slot = document.getElementById('auditAlertSlot');
+  if(!slot) return;
+  try{
+    const d = await api('GET','/api/audit/alerts?stale_days=3');
+    if(!d || !d.ok || !d.alerts || !d.alerts.length){ return; }
+    const rows = d.alerts.slice(0, 10).map(function(a){
+      return '<div style="padding:8px 10px;background:#fff5f5;border:1px solid #ffd7d7;border-radius:8px;margin-bottom:6px;font-size:12px">'
+        + '<b>'+escHtml(a.name)+'</b> <span style="color:#c5221f">卡在「'+escHtml(a.status)+'」'+a.days_stuck+' 天</span>'
+        + '<div style="color:#86868b;margin-top:3px">👤 负责人：'+escHtml(a.owner||'未指派')+' · '+escHtml(a.department||'')+'</div>'
+        + '</div>';
+    }).join('');
+    slot.innerHTML = '<div style="margin-top:16px;font-size:13px;font-weight:700">⚠️ 审核流超时预警 ('+d.alerts.length+')</div>' + rows
+      + '<div style="margin-top:6px"><button class="btn btn-sm" onclick="openGlobalTodos()">📌 处理待办</button></div>';
+  }catch(e){}
 }
 
 // 改期：弹日期选择器，设置新交付日期

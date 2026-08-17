@@ -136,6 +136,7 @@ async function openProjectDetail(name){
       <div class="detail-actions">
         <button onclick="setProjectMonth('${jsq(p.name)}')" class="secondary">📅 设置月份</button>
         <button onclick="setProjectDeliveredDate('${jsq(p.name)}')" class="secondary">🗓 交付日期</button>
+        <button onclick="setProjectOwner('${jsq(p.name)}')" class="secondary" title="指派/修改项目负责人（审核流责任到人）">👤 负责人${p.owner?':'+escHtml(p.owner):''}</button>
         ${p.group_path?`<button onclick="openFolder('group','${jsq(p.name)}')" class="secondary">📁 打开组内文件夹</button>`:''}
         ${p.production_path?`<button onclick="openFolder('production','${jsq(p.name)}')" class="secondary">📁 打开制作文件夹</button>`:''}
         <button onclick="$('detailModal').classList.remove('active');openFenjiFor('${jsq(p.name)}')" class="secondary">📑 管理分集</button>
@@ -236,6 +237,17 @@ function openSmart(name, which){
     if(data.ok) toast('已打开: ' + (data.message || '成功'), 'success');
     else toast(data.message || '打开失败', 'error');
   }).catch(function(e){ toast('打开失败: ' + e.message, 'error'); });
+}
+
+// 设置/清除项目负责人（功能5，审核流责任到人）
+function setProjectOwner(name){
+  const cur = prompt('项目负责人姓名（留空清除）：\n' + name, '');
+  if(cur === null) return;
+  const owner = cur.trim();
+  api('POST','/api/project/' + encodeURIComponent(name) + '/owner', {owner: owner}).then(function(d){
+    if(d && d.ok){ toast(owner ? '✅ 已设负责人：'+owner : '已清除负责人', 'success'); loadProjectDetail && loadProjectDetail(name); }
+    else toast('设置失败', 'error');
+  }).catch(function(e){ toast('设置失败: '+e.message, 'error'); });
 }
 
 // 设置/清除项目交付日期（交付日历用）

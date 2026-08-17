@@ -236,6 +236,16 @@ class Database:
                 c.execute("ALTER TABLE projects ADD COLUMN due_date TEXT DEFAULT ''")
             except Exception:
                 pass
+            # owner：项目负责人（审核流责任到人）
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN owner TEXT DEFAULT ''")
+            except Exception:
+                pass
+            # status_changed_at：最近一次 custom_status 变更时间（超时提醒用）
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN status_changed_at TEXT DEFAULT ''")
+            except Exception:
+                pass
 
     # ---------- migration from legacy DB ----------
 
@@ -400,6 +410,10 @@ class Database:
                     from datetime import datetime as _dt
                     dd = _dt.now().strftime("%Y-%m-%d")
                 kwargs["delivered_date"] = dd
+        # 审核流：custom_status 变化时记录变更时间（超时提醒用）；除非显式传入 status_changed_at
+        if kwargs.get("custom_status") is not None and "status_changed_at" not in kwargs:
+            from datetime import datetime as _dt2
+            kwargs["status_changed_at"] = _dt2.now().strftime("%Y-%m-%d %H:%M:%S")
         fields = ", ".join(f"{k}=?" for k in kwargs)
         values = list(kwargs.values()) + [name]
         with self.get_conn() as conn:

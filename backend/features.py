@@ -43,6 +43,56 @@ def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def compute_audit_alerts(db, stale_days=3):
+    """审核流超时提醒（功能5）：找出卡在审核/质检/修改等状态超过 stale_days 天的项目。
+    返回 [{'name','owner','status','status_changed_at','days_stuck','department'}]。
+    责任到人：owner 为空时回退到分集里第一个剪辑师。
+    """
+    import json as _json
+    from datetime import datetime
+    now = datetime.now()
+    review_states = ("待质检", "质检中", "质检中", "审核中", "修改中")
+    try:
+        projs = db.get_all_projects() or []
+    except Exception:
+        projs = []
+    alerts = []
+    for p in projs:
+        st = (p.get("custom_status") or "").strip()
+        if st not in review_states:
+            continue
+        changed = (p.get("status_changed_at") or "").strip()
+        days_stuck = None
+        if changed:
+            try:
+                dt = datetime.strptime(changed[:19], "%Y-%m-%d %H:%M:%S")
+                days_stuck = (now - dt).total_seconds() / 86400.0
+            except Exception:
+                days_stuck = None
+        if days_stuck is None or days_stuck < stale_days:
+            continue
+        # 责任到人：owner，否则从分集取第一个剪辑师
+        owner = (p.get("owner") or "").strip()
+        if not owner:
+            plan = p.get("episode_plan") or "{}"
+            try:
+                plan = _json.loads(plan) if isinstance(plan, str) else plan
+            except Exception:
+                plan = {}
+            editors = [e for e in (plan.values() if isinstance(plan, dict) else []) if e]
+            owner = editors[0] if editors else ""
+        alerts.append({
+            "name": p.get("name") or "",
+            "owner": owner,
+            "status": st,
+            "status_changed_at": changed,
+            "days_stuck": round(days_stuck, 1),
+            "department": p.get("department") or "",
+        })
+    alerts.sort(key=lambda a: -a["days_stuck"])
+    return {"stale_days": stale_days, "alerts": alerts}
+
+
 def _parse_time_text(text):
     """解析分集目标表格的胶片日期文本（如 '8.15上午10点交'、'8.15'、'2026-8-15'）
     为 'YYYY-MM-DD'。解析失败返回空串。"""
@@ -661,6 +711,25 @@ def compute_delivery_stats(db, month=None):
         db.update_project_status(name, due_date="")
         _log_audit(db, name, "清除预计交付日期")
         return jsonify({"ok": True, "date": ""})
+
+    @app.route("/api/project/<name>/owner", methods=["POST"])
+    def features_set_owner(name):
+        """设置项目负责人（审核流责任到人）。body: {owner: '姓名' 或 ''清空}"""
+        data = request.get_json(silent=True) or {}
+        owner = (data.get("owner") or "").strip()
+        db.update_project_status(name, owner=owner)
+        _log_audit(db, name, "设置负责人" if owner else "清除负责人", owner)
+        return jsonify({"ok": True, "owner": owner})
+
+    @app.route("/api/audit/alerts", methods=["GET"])
+    def features_audit_alerts():
+        """审核流超时提醒。?stale_days=3"""
+        try:
+            stale = int(request.args.get("stale_days", "3") or "3")
+        except Exception:
+            stale = 3
+        data = compute_audit_alerts(db, stale_days=stale)
+        return jsonify({"ok": True, **data})
 
     @app.route("/api/insights/calendar/export")
     def features_insights_calendar_export():
