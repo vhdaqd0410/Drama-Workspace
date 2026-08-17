@@ -93,6 +93,79 @@ def compute_audit_alerts(db, stale_days=3):
     return {"stale_days": stale_days, "alerts": alerts}
 
 
+def compute_delivery_stats(db, month=None):
+    """交付日历增强统计（功能8）：
+    - 当月项目交付情况：已交付/未交付
+    - 按时交付率：有 due_date 且 delivered_date <= due_date 视为按时
+    - 延迟预警：due_date 已过但未交付，或 delivered_date > due_date
+    纯函数，供 /api/insights/delivery_stats 调用，便于单测。
+    """
+    from datetime import datetime
+    if not month:
+        month = datetime.now().strftime("%Y-%m")
+    try:
+        projs = db.get_all_projects() or []
+    except Exception:
+        projs = []
+    month_projs = [p for p in projs
+                   if (p.get("project_month") or "").startswith(month)
+                   or (p.get("delivered_date") or "").startswith(month)]
+    delivered = []
+    undelivered = []
+    overdue = []       # due_date 已过且未交付
+    late = []          # 已交付但 delivered_date > due_date
+    ontime = 0
+    today = datetime.now().date()
+
+    def _d(s):
+        s = (s or "").strip()
+        if len(s) >= 10 and s[4] == "-":
+            try:
+                return datetime.strptime(s[:10], "%Y-%m-%d").date()
+            except Exception:
+                return None
+        return None
+
+    for p in month_projs:
+        name = p.get("name") or ""
+        dd = _d(p.get("delivered_date"))
+        due = _d(p.get("due_date"))
+        status = (p.get("custom_status") or "").strip()
+        rec = {
+            "name": name, "department": p.get("department") or "",
+            "delivered_date": (p.get("delivered_date") or "").strip()[:10],
+            "due_date": (p.get("due_date") or "").strip()[:10],
+            "status": status,
+        }
+        if dd is not None:
+            delivered.append(rec)
+            if due is not None and dd <= due:
+                ontime += 1
+            elif due is not None and dd > due:
+                rec["late"] = True
+                late.append(rec)
+        else:
+            undelivered.append(rec)
+            if due is not None and due < today:
+                rec["overdue"] = True
+                overdue.append(rec)
+    total_delivered = len(delivered)
+    with_due = [r for r in delivered if _d(r.get("due_date"))]
+    on_time_rate = (ontime / len(with_due) * 100) if with_due else None
+    return {
+        "month": month,
+        "delivered_count": total_delivered,
+        "undelivered_count": len(undelivered),
+        "on_time_rate": round(on_time_rate, 1) if on_time_rate is not None else None,
+        "ontime_count": ontime,
+        "late_count": len(late),
+        "overdue_count": len(overdue),
+        "delivered": sorted(delivered, key=lambda x: x["delivered_date"]),
+        "undelivered": undelivered,
+        "overdue": sorted(overdue, key=lambda x: x["due_date"]),
+    }
+
+
 def _parse_time_text(text):
     """解析分集目标表格的胶片日期文本（如 '8.15上午10点交'、'8.15'、'2026-8-15'）
     为 'YYYY-MM-DD'。解析失败返回空串。"""
@@ -422,7 +495,10 @@ def register_routes(app, db):
         text = (data.get("text") or "").strip()
         if not text:
             return jsonify({"ok": False, "message": "请输入待办内容"}), 400
-        todo_id = db.add_project_todo(name, text, data.get("priority", 0))
+        todo_id = db.add_project_todo(
+            name, text, data.get("priority", 0),
+            status=data.get("status") or "todo",
+            remind_at=data.get("remind_at") or "")
         _log_audit(db, name, "添加待办", text)
         return jsonify({"ok": True, "id": todo_id})
 
@@ -436,6 +512,10 @@ def register_routes(app, db):
             db.update_project_todo(todo_id, text=data.get("text"))
         if "priority" in data:
             db.update_project_todo(todo_id, priority=data.get("priority"))
+        if "status" in data:
+            db.update_project_todo(todo_id, status=data.get("status"))
+        if "remind_at" in data:
+            db.update_project_todo(todo_id, remind_at=data.get("remind_at"))
         return jsonify({"ok": True})
 
     @app.route("/api/project/<name>/todos/<int:todo_id>", methods=["DELETE"])
@@ -443,6 +523,38 @@ def register_routes(app, db):
         db.delete_project_todo(todo_id)
         _log_audit(db, name, "删除待办")
         return jsonify({"ok": True})
+
+    @app.route("/api/todos/board", methods=["GET"])
+    def features_todos_board():
+        """任务看板（功能6）：全部待办按 status 分组（todo/in_progress/done）。
+        返回 {columns: {'todo':[..], 'in_progress':[..], 'done':[..]}}
+        """
+        try:
+            rows = db.get_all_todos(include_done=True) or []
+            columns = {"todo": [], "in_progress": [], "done": []}
+            for r in rows:
+                st = (r.get("status") or "todo")
+                if st not in columns:
+                    st = "todo"
+                columns[st].append(r)
+            return jsonify({"ok": True, "columns": columns})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return jsonify({"ok": False, "message": str(e)}), 500
+
+    @app.route("/api/todos/<int:todo_id>/status", methods=["PUT"])
+    def features_todos_status(todo_id):
+        """任务看板拖拽改状态（不依赖项目名）。body: {status: 'todo'|'in_progress'|'done'}"""
+        data = request.get_json(silent=True) or {}
+        st = (data.get("status") or "").strip()
+        if st not in ("todo", "in_progress", "done"):
+            return jsonify({"ok": False, "message": "非法状态"}), 400
+        try:
+            db.update_project_todo(todo_id, status=st)
+            return jsonify({"ok": True, "status": st})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return jsonify({"ok": False, "message": str(e)}), 500
 
     @app.route("/api/todos/global", methods=["GET"])
     def features_todos_global():
@@ -612,80 +724,6 @@ def register_routes(app, db):
         for k in days:
             days[k] = sorted(days[k], key=lambda x: x.get("name") or "")
         return jsonify({"ok": True, "month": month, "dept": dept, "days": days})
-
-
-def compute_delivery_stats(db, month=None):
-    """交付日历增强统计（功能8）：
-    - 当月项目交付情况：已交付/未交付
-    - 按时交付率：有 due_date 且 delivered_date <= due_date 视为按时
-    - 延迟预警：due_date 已过但未交付，或 delivered_date > due_date
-    纯函数，供 /api/insights/delivery_stats 调用，便于单测。
-    """
-    from datetime import datetime
-    if not month:
-        month = datetime.now().strftime("%Y-%m")
-    try:
-        projs = db.get_all_projects() or []
-    except Exception:
-        projs = []
-    # 筛选当月项目（project_month 或 delivered_date 落在本月）
-    month_projs = [p for p in projs
-                   if (p.get("project_month") or "").startswith(month)
-                   or (p.get("delivered_date") or "").startswith(month)]
-    delivered = []
-    undelivered = []
-    overdue = []       # due_date 已过且未交付
-    late = []          # 已交付但 delivered_date > due_date
-    ontime = 0
-    today = datetime.now().date()
-
-    def _d(s):
-        s = (s or "").strip()
-        if len(s) >= 10 and s[4] == "-":
-            try:
-                return datetime.strptime(s[:10], "%Y-%m-%d").date()
-            except Exception:
-                return None
-        return None
-
-    for p in month_projs:
-        name = p.get("name") or ""
-        dd = _d(p.get("delivered_date"))
-        due = _d(p.get("due_date"))
-        status = (p.get("custom_status") or "").strip()
-        rec = {
-            "name": name, "department": p.get("department") or "",
-            "delivered_date": (p.get("delivered_date") or "").strip()[:10],
-            "due_date": (p.get("due_date") or "").strip()[:10],
-            "status": status,
-        }
-        if dd is not None:
-            delivered.append(rec)
-            if due is not None and dd <= due:
-                ontime += 1
-            elif due is not None and dd > due:
-                rec["late"] = True
-                late.append(rec)
-        else:
-            undelivered.append(rec)
-            if due is not None and due < today:
-                rec["overdue"] = True
-                overdue.append(rec)
-    total_delivered = len(delivered)
-    with_due = [r for r in delivered if _d(r.get("due_date"))]
-    on_time_rate = (ontime / len(with_due) * 100) if with_due else None
-    return {
-        "month": month,
-        "delivered_count": total_delivered,
-        "undelivered_count": len(undelivered),
-        "on_time_rate": round(on_time_rate, 1) if on_time_rate is not None else None,
-        "ontime_count": ontime,
-        "late_count": len(late),
-        "overdue_count": len(overdue),
-        "delivered": sorted(delivered, key=lambda x: x["delivered_date"]),
-        "undelivered": undelivered,
-        "overdue": sorted(overdue, key=lambda x: x["due_date"]),
-    }
 
     @app.route("/api/insights/delivery_stats")
     def features_insights_delivery_stats():

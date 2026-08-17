@@ -6,6 +6,7 @@ function openDataCenter(){
   const cards = [
     { icon:'📊', title:'数据洞察', desc:'KPI / 状态分布 / 剪辑集数 / 交付日历', fn:'openInsightsDialog()' },
     { icon:'✅', title:'全局待办', desc:'跨项目查看与处理待办事项', fn:'openGlobalTodos()' },
+    { icon:'🗂️', title:'任务看板', desc:'多状态看板：待办/进行中/已完成，支持拖拽', fn:'openTaskBoard()' },
     { icon:'🛡️', title:'数据备份', desc:'数据库备份 / 恢复', fn:'openBackupDialog()' },
     { icon:'📥', title:'导出档案', desc:'导出项目档案 CSV（含交付日期）', fn:'exportProjectCSV()' },
     { icon:'📈', title:'产能趋势', desc:'近 6 个月立项/完成/交付趋势', fn:'openCapacityTrend()' },
@@ -149,4 +150,73 @@ async function openCapacityTrend(){
     const body = document.getElementById('capTrendBody');
     if(body) body.innerHTML = '<div style="color:var(--red);text-align:center;padding:20px">加载失败: '+escHtml(e.message)+'</div>';
   }
+}
+
+// ===== 任务看板（功能6）：待办/进行中/已完成 三列 + 拖拽改状态 =====
+function openTaskBoard(){
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:23000;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `<div style="background:#f0f2f5;border-radius:14px;width:980px;max-width:96vw;height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+    <div style="padding:14px 20px;display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:14px 14px 0 0">
+      <h3 style="margin:0;font-size:15px">🗂️ 任务看板</h3>
+      <button onclick="this.closest('.modal-overlay,div').parentNode.remove()" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px" id="taskBoardCols"></div>
+  </div>`;
+  // 修正关闭按钮：找到 overlay 并移除
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+  const closeBtn = overlay.querySelector('button');
+  if(closeBtn) closeBtn.onclick = function(){ overlay.remove(); };
+  document.body.appendChild(overlay);
+  loadTaskBoard();
+}
+
+async function loadTaskBoard(){
+  const cols = document.getElementById('taskBoardCols');
+  if(!cols) return;
+  try{
+    const d = await api('GET','/api/todos/board');
+    const c = d.columns || {};
+    const labels = {todo:{t:'待办',c:'#86868b'}, in_progress:{t:'进行中',c:'#0071e3'}, done:{t:'已完成',c:'#34c759'}};
+    let html = '';
+    Object.keys(labels).forEach(function(key){
+      const items = c[key] || [];
+      html += `<div style="background:#fff;border-radius:10px;padding:10px;display:flex;flex-direction:column;max-height:100%">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          <span style="width:10px;height:10px;border-radius:3px;background:${labels[key].c};display:inline-block"></span>${labels[key].t}
+          <span style="font-size:11px;color:var(--text-sec)">(${items.length})</span>
+        </div>
+        <div style="flex:1;overflow-y:auto;min-height:120px" data-col="${key}" ondragover="event.preventDefault()" ondrop="boardDrop(event,'${key}')">
+          ${items.map(t => boardCard(t,key)).join('') || '<div style="color:var(--text-sec);font-size:11px;text-align:center;padding:20px">暂无</div>'}
+        </div>
+      </div>`;
+    });
+    cols.innerHTML = html;
+  }catch(e){
+    cols.innerHTML = '<div style="color:var(--red);padding:20px">加载失败: '+escHtml(e.message)+'</div>';
+  }
+}
+
+function boardCard(t, col){
+  const remind = t.remind_at ? '<span style="font-size:10px;color:#ff9f0a;margin-left:6px">⏰ '+escHtml(t.remind_at)+'</span>' : '';
+  const doneMark = col === 'done' ? '<span style="color:#34c759">☑️</span>' : '⬜';
+  return `<div draggable="true" ondragstart="boardDrag(event,'${t.id}')" style="background:#f5f7fa;border:1px solid var(--border,#e5e5ea);border-radius:8px;padding:8px 10px;margin-bottom:6px;cursor:grab;font-size:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
+      <span style="font-weight:600">${doneMark} ${escHtml(t.text)}</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-sec);margin-top:4px">📁 ${escHtml(t.project_name||'')}${remind}</div>
+  </div>`;
+}
+
+function boardDrag(ev, id){
+  ev.dataTransfer.setData('text/plain', id);
+}
+function boardDrop(ev, status){
+  ev.preventDefault();
+  const id = ev.dataTransfer.getData('text/plain');
+  if(!id) return;
+  api('PUT','/api/todos/'+id+'/status', {status:status}).then(function(d){
+    if(d && d.ok){ loadTaskBoard(); toast('已移动到'+(status==='done'?'已完成':status==='in_progress'?'进行中':'待办'),'success'); }
+    else toast('更新失败','error');
+  }).catch(function(e){ toast('更新失败: '+e.message,'error'); });
 }

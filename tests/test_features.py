@@ -481,3 +481,35 @@ class TestAuditAlerts:
         assert any(a["name"] == "P" and a["owner"] == "李四" for a in data["alerts"])
 
 
+# ============================================================
+# 13. 任务看板（todo status + remind_at）
+# ============================================================
+
+class TestTodoBoard:
+    def test_todo_status_default(self, tmp_db):
+        tmp_db.upsert_project("P", "", "")
+        tid = tmp_db.add_project_todo("P", "任务A")
+        todos = tmp_db.get_project_todos("P")
+        t = [x for x in todos if x["id"] == tid][0]
+        assert t["status"] == "todo"
+
+    def test_todo_status_update_and_remind(self, tmp_db):
+        tmp_db.upsert_project("P", "", "")
+        tid = tmp_db.add_project_todo("P", "任务B", status="in_progress")
+        tmp_db.update_project_todo(tid, status="done", remind_at="2026-08-20 09:00")
+        todos = tmp_db.get_project_todos("P")
+        t = [x for x in todos if x["id"] == tid][0]
+        assert t["status"] == "done"
+        assert t["remind_at"] == "2026-08-20 09:00"
+        assert t["done"] == 0  # done 与 status 独立，看板用 status
+
+    def test_board_grouping(self, tmp_db):
+        tmp_db.upsert_project("P", "", "")
+        tmp_db.add_project_todo("P", "A", status="todo")
+        tmp_db.add_project_todo("P", "B", status="in_progress")
+        tmp_db.add_project_todo("P", "C", status="done")
+        # 三种状态都能存读，看板据此分组
+        statuses = {t["status"] for t in tmp_db.get_all_todos(include_done=True)}
+        assert statuses == {"todo", "in_progress", "done"}
+
+

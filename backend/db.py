@@ -193,6 +193,15 @@ class Database:
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_todos_project ON project_todos(project_name)")
+            # 任务看板增强：status(待办/进行中/已完成) + remind_at(定时提醒时间)
+            try:
+                c.execute("ALTER TABLE project_todos ADD COLUMN status TEXT DEFAULT 'todo'")
+            except Exception:
+                pass
+            try:
+                c.execute("ALTER TABLE project_todos ADD COLUMN remind_at TEXT DEFAULT ''")
+            except Exception:
+                pass
             c.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_name TEXT,
@@ -814,14 +823,14 @@ class Database:
         except Exception:
             return []
 
-    def add_project_todo(self, project_name, text, priority=0):
+    def add_project_todo(self, project_name, text, priority=0, status='todo', remind_at=''):
         with self.get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO project_todos(project_name, text, priority) VALUES(?,?,?)",
-                (project_name, text, int(priority or 0)))
+                "INSERT INTO project_todos(project_name, text, priority, status, remind_at) VALUES(?,?,?,?,?)",
+                (project_name, text, int(priority or 0), str(status), str(remind_at or '')))
             return cur.lastrowid
 
-    def update_project_todo(self, todo_id, done=None, text=None, priority=None):
+    def update_project_todo(self, todo_id, done=None, text=None, priority=None, status=None, remind_at=None):
         with self.get_conn() as conn:
             if done is not None:
                 conn.execute("UPDATE project_todos SET done=? WHERE id=?",
@@ -832,6 +841,12 @@ class Database:
             if priority is not None:
                 conn.execute("UPDATE project_todos SET priority=? WHERE id=?",
                              (int(priority or 0), todo_id))
+            if status is not None:
+                conn.execute("UPDATE project_todos SET status=? WHERE id=?",
+                             (str(status), todo_id))
+            if remind_at is not None:
+                conn.execute("UPDATE project_todos SET remind_at=? WHERE id=?",
+                             (str(remind_at).strip(), todo_id))
 
     def delete_project_todo(self, todo_id):
         with self.get_conn() as conn:
