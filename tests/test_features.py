@@ -144,6 +144,29 @@ class TestEpisodePlanSync:
         assert "项目B" in res["cleared"]
         assert tmp_db.get_episode_plan("项目B") == {}
 
+    def test_sync_populates_independent_workload(self, tmp_db, tmp_path):
+        # 同一项目内分集范围重叠（张靖杰21-25 与 张淯升16-28）：
+        # editor_workload 必须独立计数，不被 episode_plan 覆盖丢失。
+        import openpyxl
+        p = str(tmp_path / "ov.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["项目O", None, None, None])
+        ws.append([None, None, "张靖杰：4-7,21-25", None])
+        ws.append([None, None, "张淯升：16-28", None])
+        wb.save(p)
+        tmp_db.upsert_project("项目O", "", "")
+        from features import sync_episode_plan_from_target
+        res = sync_episode_plan_from_target(p, tmp_db, clear_stale=False)
+        wl = tmp_db.get_editor_workload("项目O")
+        # 独立计数：张靖杰 4-7(4) + 21-25(5) = 9；张淯升 16-28(13)
+        assert wl["张靖杰"] == 9
+        assert wl["张淯升"] == 13
+        # episode_plan 因重叠，张靖杰只剩4集(21-25被张淯升覆盖)
+        plan = tmp_db.get_episode_plan("项目O")
+        zhang = sum(1 for v in plan.values() if v == "张靖杰")
+        assert zhang == 4
+
 
 # ============================================================
 # 5. 统一剪辑师工作量口径（aggregate_editor_workload）
@@ -173,4 +196,29 @@ class TestAggregateEditorWorkload:
         by_name = {e["name"]: e["assigned"] for e in wl}
         assert by_name.get("张三") == 1
         assert "李四" not in by_name
+
+    def test_workload_overlap_uses_independent_count(self, tmp_db):
+        # 权威文件里某项目张靖杰=4-7,21-25，而张淯升=16-28 重叠了21-25。
+        # episode_plan 是{集号:剪辑师}，重叠被后写覆盖成张靖杰只4集；
+        # 但 editor_workload 独立计数应为张靖杰=9。统计必须以独立计数为准。
+        tmp_db.upsert_project("P5", "", "")
+        # 模拟同步后：episode_plan 因重叠丢失21-25，但 editor_workload 保留9
+        tmp_db.set_episode_plan("P5", {"4": "张靖杰", "5": "张靖杰", "6": "张靖杰",
+                                        "7": "张靖杰", "21": "张淯升", "22": "张淯升"})
+        tmp_db.set_editor_workload("P5", {"张靖杰": 9, "张淯升": 13})
+        from features import aggregate_editor_workload
+        wl = aggregate_editor_workload(tmp_db)
+        by_name = {e["name"]: e["assigned"] for e in wl}
+        # 必须用独立计数 editor_workload，而不是被覆盖的 episode_plan
+        assert by_name["张靖杰"] == 9
+        assert by_name["张淯升"] == 13
+
+    def test_workload_fallback_to_episode_plan(self, tmp_db):
+        # 无 editor_workload 时回退到 episode_plan
+        tmp_db.upsert_project("P6", "", "")
+        tmp_db.set_episode_plan("P6", {"1": "张三", "2": "张三"})
+        from features import aggregate_editor_workload
+        wl = aggregate_editor_workload(tmp_db)
+        by_name = {e["name"]: e["assigned"] for e in wl}
+        assert by_name["张三"] == 2
 

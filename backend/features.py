@@ -78,8 +78,9 @@ def _log_audit(db, project_name, action, detail="", username=""):
 
 
 def aggregate_editor_workload(db, month=None):
-    """统一剪辑师工作量口径：从项目 episode_plan 聚合每人集数。
-    month: 若指定 'YYYY-MM'，仅统计 project_month==month 的项目；否则统计全部有 plan 的项目。
+    """统一剪辑师工作量口径：从项目 editor_workload（独立计数）聚合每人集数。
+    优先使用独立计数的 editor_workload（不受分集重叠覆盖影响），无则回退 episode_plan。
+    month: 若指定 'YYYY-MM'，仅统计 project_month==month 的项目；否则统计全部。
     返回 [{'name','assigned','projects'}]（按 assigned 降序），剔除空/空白剪辑师。
     """
     import json as _json
@@ -91,21 +92,37 @@ def aggregate_editor_workload(db, month=None):
     for p in projs:
         if month and (p.get("project_month") or "") != month:
             continue
-        ep = p.get("episode_plan") or ""
-        if not ep or ep == "{}":
-            continue
-        try:
-            plan = _json.loads(ep) if isinstance(ep, str) else (ep or {})
-        except Exception:
-            continue
-        if not isinstance(plan, dict):
-            continue
-        for ep_num, editor in plan.items():
-            if not editor or not str(editor).strip():
-                continue
+        # 优先独立计数 workload
+        raw_wl = p.get("editor_workload") or ""
+        per_editor = {}
+        if raw_wl and raw_wl != "{}":
+            try:
+                parsed = _json.loads(raw_wl) if isinstance(raw_wl, str) else (raw_wl or {})
+                if isinstance(parsed, dict):
+                    per_editor = parsed
+            except Exception:
+                per_editor = {}
+        if not per_editor:
+            # 回退：从 episode_plan 聚合（无独立计数时）
+            ep = p.get("episode_plan") or ""
+            if ep and ep != "{}":
+                try:
+                    plan = _json.loads(ep) if isinstance(ep, str) else (ep or {})
+                except Exception:
+                    plan = {}
+                if isinstance(plan, dict):
+                    from collections import Counter as _Counter
+                    tmp = _Counter()
+                    for _epn, editor in plan.items():
+                        if editor and str(editor).strip():
+                            tmp[str(editor).strip()] += 1
+                    per_editor = dict(tmp)
+        for editor, cnt in per_editor.items():
             ed = str(editor).strip()
+            if not ed or not cnt:
+                continue
             item = editor_workload.setdefault(ed, {"assigned": 0, "projects": set()})
-            item["assigned"] += 1
+            item["assigned"] += int(cnt)
             item["projects"].add(p.get("name") or "")
     return [
         {"name": name, "assigned": item["assigned"], "projects": len(item["projects"])}
@@ -145,22 +162,25 @@ def _parse_assign_range_str(plan, line):
 
 
 def sync_episode_plan_from_target(target_path, db=None, clear_stale=True):
-    """从分集目标表格（权威来源）重建各项目的 episode_plan。
-    读取每个项目块第 C 列的 '剪辑师：集数范围'，生成 {集号: 剪辑师} 并覆盖写入 DB，
-    替换失真的旧分集数据（含假人员）。返回 [{'name','episodes','editor_count'}]。
-    若 clear_stale=True：把 DB 中已有 episode_plan 但不在目标文件里的项目清空，
-    避免过时/测试数据污染统计。
+    """从分集目标表格（权威来源）重建各项目的 episode_plan 与 editor_workload。
+    读取每个项目块第 C 列的 '剪辑师：集数范围'：
+      - episode_plan  = {集号: 剪辑师}（供分集 UI 用，重叠会被后写覆盖）
+      - editor_workload = {剪辑师: 集数}（独立计数，不被重叠覆盖，作为统计口径唯一来源）
+    返回 {synced, skipped, cleared, total_episodes, total_projects}。
+    若 clear_stale=True：把 DB 中已有数据但不在目标文件里的项目清空。
     """
     if db is None:
         from db import db as _db
         db = _db
     import openpyxl
+    import re as _re
     wb = openpyxl.load_workbook(target_path, data_only=True)
     ws = wb[wb.sheetnames[0]]
     months = ['一月份','二月份','三月份','四月份','五月份','六月份',
               '七月份','八月份','九月份','十月份','十一月份','十二月份']
-    # 项目名 -> {集号: 剪辑师}
+    # 项目名 -> (episode_plan dict, editor_workload dict{剪辑师:独立集数})
     raw_plans = {}
+    raw_workloads = {}
     cur_name = None
     for row in ws.iter_rows(values_only=True):
         if not row or not any(row):
@@ -170,8 +190,32 @@ def sync_episode_plan_from_target(target_path, db=None, clear_stale=True):
         if a and a not in months:
             cur_name = a
             raw_plans.setdefault(cur_name, {})
+            raw_workloads.setdefault(cur_name, {})
         elif c and cur_name:
             _parse_assign_range_str(raw_plans[cur_name], c)
+            # 独立计数（逐行算每人出现的集数，不与其他行去重）
+            if '：' in c:
+                parts = c.split('：', 1)
+            elif ':' in c:
+                parts = c.split(':', 1)
+            else:
+                parts = []
+            if len(parts) == 2:
+                editor = parts[0].strip()
+                if editor:
+                    _eps = set()
+                    for r in _re.split(r'[,，、;；+\s]+', parts[1].strip()):
+                        r = r.strip()
+                        if not r:
+                            continue
+                        m = _re.match(r'^(\d+)\s*[-—~]\s*(\d+)$', r)
+                        if m:
+                            s, e = int(m.group(1)), int(m.group(2))
+                            _eps.update(range(min(s, e), max(s, e) + 1))
+                        elif _re.match(r'^\d+$', r):
+                            _eps.add(int(r))
+                    if _eps:
+                        raw_workloads[cur_name][editor] = raw_workloads[cur_name].get(editor, 0) + len(_eps)
     # 空项目块剔除
     raw_plans = {k: v for k, v in raw_plans.items() if v}
     # 匹配 DB 项目并覆盖写入
@@ -196,6 +240,7 @@ def sync_episode_plan_from_target(target_path, db=None, clear_stale=True):
             skipped.append({'name': tname, 'episodes': len(plan), 'reason': '未找到对应项目'})
             continue
         db.set_episode_plan(proj['name'], plan)
+        db.set_editor_workload(proj['name'], raw_workloads.get(tname, {}))
         matched_db_names.add(proj['name'])
         total = int(proj.get('total_episodes') or 0)
         if total < len(plan):
@@ -220,6 +265,7 @@ def sync_episode_plan_from_target(target_path, db=None, clear_stale=True):
                     plan = {}
                 if plan:
                     db.set_episode_plan(n, {})
+                    db.set_editor_workload(n, {})
                     cleared.append(n)
     return {'synced': synced, 'skipped': skipped, 'cleared': cleared,
             'total_episodes': sum(s['episodes'] for s in synced),

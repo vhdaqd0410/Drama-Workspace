@@ -226,6 +226,11 @@ class Database:
                 c.execute("ALTER TABLE projects ADD COLUMN project_month TEXT DEFAULT ''")
             except Exception:
                 pass
+            # editor_workload：独立计数的工作量（{剪辑师: 集数}），不受分集重叠覆盖影响，统计口径来源
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN editor_workload TEXT DEFAULT '{}'")
+            except Exception:
+                pass
 
     # ---------- migration from legacy DB ----------
 
@@ -419,6 +424,27 @@ class Database:
         if not p:
             return {}
         raw = p.get("episode_plan") or "{}"
+        try:
+            v = json.loads(raw) if isinstance(raw, str) else raw
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+
+    def set_editor_workload(self, name, workload_dict):
+        """写入项目独立计数的工作量 {剪辑师: 集数}（统计口径来源）。"""
+        if not isinstance(workload_dict, dict):
+            workload_dict = {}
+        with self.get_conn() as conn:
+            conn.execute(
+                "UPDATE projects SET editor_workload=? WHERE name=?",
+                (json.dumps(workload_dict, ensure_ascii=False), name),
+            )
+
+    def get_editor_workload(self, name):
+        p = self.get_project(name)
+        if not p:
+            return {}
+        raw = p.get("editor_workload") or "{}"
         try:
             v = json.loads(raw) if isinstance(raw, str) else raw
             return v if isinstance(v, dict) else {}
