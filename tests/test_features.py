@@ -220,3 +220,32 @@ class TestAggregateEditorWorkload:
         by_name = {e["name"]: e["assigned"] for e in wl}
         assert by_name["张三"] == 2
 
+
+# ============================================================
+# 6. 以分集数据为准同步工作量（sync_workload_from_episode_plan）
+# ============================================================
+
+class TestSyncWorkloadFromEpisodePlan:
+    def test_rebuilds_workload_from_episode_plan(self, tmp_db):
+        # 分集数据是最终口径：sync 应从 episode_plan 重建 editor_workload，不读Excel
+        tmp_db.upsert_project("PA", "", "")
+        tmp_db.set_episode_plan("PA", {"1": "张三", "2": "张三", "3": "李四"})
+        # 先放一个错误旧值
+        tmp_db.set_editor_workload("PA", {"张三": 99})
+        from features import sync_workload_from_episode_plan
+        res = sync_workload_from_episode_plan(tmp_db)
+        assert res["total_projects"] == 1
+        assert res["total_episodes"] == 3
+        wl = tmp_db.get_editor_workload("PA")
+        assert wl == {"张三": 2, "李四": 1}
+
+    def test_leaves_episode_plan_untouched(self, tmp_db):
+        tmp_db.upsert_project("PB", "", "")
+        tmp_db.set_episode_plan("PB", {"1": "王五", "2": "王五"})
+        from features import sync_workload_from_episode_plan
+        sync_workload_from_episode_plan(tmp_db)
+        # episode_plan 不被覆盖
+        assert tmp_db.get_episode_plan("PB") == {"1": "王五", "2": "王五"}
+        assert tmp_db.get_editor_workload("PB") == {"王五": 2}
+
+

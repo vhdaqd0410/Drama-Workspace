@@ -120,6 +120,47 @@ def aggregate_editor_workload(db, month=None):
     ]
 
 
+def sync_workload_from_episode_plan(db=None):
+    """以当前分集数据(episode_plan)为准，重建各项目的 editor_workload。
+    统计口径始终跟随分集数据：本项目循环读取每个有 episode_plan 的项目，
+    按 {集号:剪辑师} 聚合每人集数，写入 editor_workload（供向下兼容）。
+    不读取任何目标 Excel，不覆盖 episode_plan。返回统计结果。
+    """
+    if db is None:
+        from db import db as _db
+        db = _db
+    import json as _json
+    from collections import Counter as _Counter
+    try:
+        projs = db.get_all_projects() or []
+    except Exception:
+        projs = []
+    synced = []
+    total = 0
+    for p in projs:
+        ep = p.get("episode_plan") or ""
+        if not ep or ep == "{}":
+            continue
+        try:
+            plan = _json.loads(ep) if isinstance(ep, str) else (ep or {})
+        except Exception:
+            continue
+        if not isinstance(plan, dict) or not plan:
+            continue
+        cnt = _Counter()
+        for _epn, editor in plan.items():
+            if editor and str(editor).strip():
+                cnt[str(editor).strip()] += 1
+        per_editor = dict(cnt)
+        if per_editor:
+            db.set_editor_workload(p.get("name") or "", per_editor)
+            synced.append({"name": p.get("name") or "", "episodes": len(plan),
+                           "editor_count": len(per_editor)})
+            total += len(plan)
+    return {"synced": synced, "total_projects": len(synced),
+            "total_episodes": total, "skipped": []}
+
+
 def _parse_assign_range_str(plan, line):
     """解析一行 '剪辑师：1-3，44-45' 加入 plan 字典（{集号str: 剪辑师}）。"""
     line = (line or "").strip()
