@@ -35,7 +35,7 @@ a{color:var(--blue);text-decoration:none}
 .btn-danger{background:var(--red);color:#fff;border-color:var(--red)}.btn-danger:hover{background:#e6352b}
 .btn-success{background:var(--green);color:#fff;border-color:var(--green)}
 .btn-sm{padding:5px 10px;font-size:12px}.btn-icon{padding:7px;border-radius:8px}
-.tabs{display:flex;gap:4px;padding:0 28px;background:#fff;border-bottom:1px solid var(--border)}
+.tabs{display:flex;gap:4px;padding:0 28px;background:#fff;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:30;box-shadow:0 1px 0 rgba(0,0,0,.03)}
 .tab{display:flex;align-items:center;gap:6px;padding:14px 18px;font-size:14px;color:var(--text-sec);border-bottom:2px solid transparent;cursor:pointer;transition:color .15s;font-weight:500}
 .tab:hover{color:var(--text)}.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
 .tab svg{width:16px;height:16px}
@@ -109,7 +109,7 @@ a{color:var(--blue);text-decoration:none}
 .fj-chip.selected{background:var(--blue);color:#fff;border-color:var(--blue)}
 .fj-chip-actions{display:flex;gap:8px;align-items:center;margin-bottom:4px}
 .fj-add-person{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px}
-.fj-headrow{display:flex;gap:8px;align-items:center;margin:14px 0 8px;flex-wrap:wrap}
+.fj-headrow{display:flex;gap:8px;align-items:center;margin:14px 0 8px;flex-wrap:wrap;position:sticky;top:49px;z-index:20;background:#fff;padding:8px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .fj-headtail{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-sec);margin-left:auto}
 .fj-headtail select,.fj-headtail input{padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px}
 .fj-empty{padding:24px;text-align:center;color:var(--text-sec);font-size:13px;background:#fafafa;border-radius:8px;border:1px dashed var(--border)}
@@ -221,7 +221,7 @@ a{color:var(--blue);text-decoration:none}
 .episode-alert-item button:hover{background:var(--blue-light)}
 
 .section-block{margin-bottom:24px;background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden}
-.section-header{display:flex;align-items:center;gap:10px;padding:14px 20px;background:linear-gradient(135deg,#fafbfc,#f0f2f5);cursor:pointer;user-select:none;border-bottom:1px solid var(--border);transition:background .15s}
+.section-header{display:flex;align-items:center;gap:10px;padding:14px 20px;background:linear-gradient(135deg,#fafbfc,#f0f2f5);cursor:pointer;user-select:none;border-bottom:1px solid var(--border);transition:background .15s;position:sticky;top:49px;z-index:20;box-shadow:0 1px 0 rgba(0,0,0,.04)}
 .section-header:hover{background:linear-gradient(135deg,#f0f2f5,#e8ebf0)}
 .section-arrow{font-size:10px;color:var(--text-sec);width:16px;text-align:center}
 .section-title{font-weight:600;font-size:15px;color:var(--text)}
@@ -1202,7 +1202,7 @@ window.onerror = function(msg, url, line, col, err){
 </script>
 <script src="/static/js/core.js?v=20260818d"></script>
 <script src="/static/js/project.js?v=20260815r"></script>
-<script src="/static/js/tabs.js?v=20260819c"></script>
+<script src="/static/js/tabs.js?v=20260820a"></script>
 <script src="/static/js/episode.js?v=20260819d"></script>
 <script src="/static/js/fenji-init.js?v=20260815n"></script>
 <script src="/static/js/fenji-assign.js?v=20260818a"></script>

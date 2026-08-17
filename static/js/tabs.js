@@ -122,8 +122,8 @@ async function loadReportTab(){
       ${_monthOptions()}
     </select>
     <button class="btn btn-sm btn-primary" onclick="_loadReportData()">🔍 查看报告</button>
-    <button class="btn btn-sm" onclick="_loadCommissionReport()" style="background:#af52de;color:#fff" title="从分集数据计算本月每人绩效与提成">💰 提成/绩效</button>
-    <button class="btn btn-sm" onclick="_loadPersonCards()" style="background:#0071e3;color:#fff" title="年度每人工作量卡片与趋势">👥 个人卡片</button>
+    <button class="btn btn-sm" id="btnCommission" onclick="showCommissionReport()" style="background:#af52de;color:#fff" title="从分集数据计算本月每人绩效与提成">💰 提成/绩效</button>
+    <button class="btn btn-sm" id="btnPersonCards" onclick="showPersonCards()" style="background:#0071e3;color:#fff" title="年度每人工作量卡片与趋势">👥 个人卡片</button>
     <button class="btn btn-sm" onclick="_downloadExcel()" style="background:#34c759;color:#fff">📥 下载 Excel</button>
   </div>
   <div id="reportWorkloadBoard" style="margin-bottom:20px"></div>
@@ -136,7 +136,30 @@ async function loadReportTab(){
   _loadReportData();
 }
 
+// 按钮反馈：高亮当前视图按钮 + 显示加载态
+function _setActiveBtn(activeId){
+  ['btnCommission','btnPersonCards'].forEach(function(id){
+    const b = document.getElementById(id);
+    if(!b) return;
+    if(id === activeId){ b.style.outline = '2px solid #fff'; b.style.boxShadow = '0 0 0 3px rgba(0,0,0,.25)'; b.style.transform='scale(1.04)'; }
+    else { b.style.outline = ''; b.style.boxShadow = ''; b.style.transform=''; }
+  });
+}
+function _btnLoading(id, on){
+  const b = document.getElementById(id);
+  if(!b) return;
+  const txt = id === 'btnCommission' ? '💰 提成/绩效' : '👥 个人卡片';
+  if(on){ b.dataset.orig = b.innerHTML; b.innerHTML = txt + ' ⏳'; b.disabled = true; }
+  else { b.innerHTML = b.dataset.orig || txt; b.disabled = false; b.dataset.orig=''; }
+}
+
 // 个人工作量卡片（功能2）：年度逐月集数 + 角色 + 汇总 + 趋势
+async function showPersonCards(){
+  _setActiveBtn('btnPersonCards');
+  _btnLoading('btnPersonCards', true);
+  await _loadPersonCards();
+  _btnLoading('btnPersonCards', false);
+}
 async function _loadPersonCards(){
   const el = document.getElementById('personCardsBoard');
   if(!el) return;
@@ -152,6 +175,7 @@ async function _loadPersonCards(){
     let html = '<div style="background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:14px">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
       + '<h4 style="margin:0;font-size:14px">👥 个人工作量卡片（'+escHtml(d.year)+' 年 · '+cards.length+' 人）</h4>'
+      + '<span style="font-size:11px;color:var(--text-sec)">点击上方按钮即可刷新 · 数据实时来自分集</span>'
       + '</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
     cards.forEach(c => {
       const barW = Math.round(c.annual_total/maxTotal*100);
@@ -178,7 +202,14 @@ async function _loadPersonCards(){
   }
 }
 
-// 提成/绩效全链路报表（功能1）：从分集数据计算每人绩效+提成
+// 提成/绩效全链路报表（功能1）：从分集数据计算每人绩效+提成，支持各维度排序
+let _commissionSort = {key:'commission', dir:-1};
+async function showCommissionReport(){
+  _setActiveBtn('btnCommission');
+  _btnLoading('btnCommission', true);
+  await _loadCommissionReport();
+  _btnLoading('btnCommission', false);
+}
 async function _loadCommissionReport(){
   const el = document.getElementById('commissionBoard');
   if(!el) return;
@@ -188,19 +219,43 @@ async function _loadCommissionReport(){
     const d = await api('GET','/api/commission/monthly?month=' + encodeURIComponent(month));
     if(!d || !d.ok){ el.innerHTML = '<div style="color:var(--red);padding:12px">' + escHtml(d?.message||'加载失败') + '</div>'; return; }
     const s = d.summary || {};
-    const rows = d.rows || [];
+    let rows = d.rows || [];
+    // 排序：按当前 key + dir
+    const {key, dir} = _commissionSort;
+    rows = rows.slice().sort(function(a,b){
+      let va=a[key], vb=b[key];
+      if(key==='name'||key==='role'){ va=String(va||''); vb=String(vb||''); return dir*(va<vb?-1:va>vb?1:0); }
+      va=Number(va||0); vb=Number(vb||0);
+      return dir*(va-vb);
+    });
+    // 可排序列定义
+    const cols = [
+      {k:'name', label:'姓名'},
+      {k:'role', label:'角色'},
+      {k:'episodes', label:'集数', right:true},
+      {k:'quota', label:'基准', right:true},
+      {k:'is_complete', label:'达标', center:true},
+      {k:'overtime_bonus', label:'超额', right:true},
+      {k:'shortage_penalty', label:'缺集扣', right:true},
+      {k:'group_bonus', label:'组奖', right:true},
+      {k:'commission', label:'提成', right:true},
+    ];
     let html = '<div style="background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:14px">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:10px">'
       + '<h4 style="margin:0;font-size:14px">💰 提成 / 绩效（' + escHtml(month) + ' · 分集数据）</h4>'
-      + '<span style="font-size:12px;color:var(--text-sec)">总提成 <b style="color:#af52de">'+ (s.total_commission||0) +'</b> 元 · 达标 '+s.met_quota+'/'+s.total_people+' · 集数 '+s.total_episodes+'</span>'
+      + '<span style="font-size:12px;color:var(--text-sec)">总提成 <b style="color:#af52de">'+ (s.total_commission||0) +'</b> 元 · 达标 '+s.met_quota+'/'+s.total_people+' · 集数 '+s.total_episodes+' · 点击表头排序</span>'
       + '</div>';
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">'
       + '<thead><tr style="background:#f5f5f7;border-bottom:2px solid #e5e5ea">'
-      + '<th style="padding:8px;text-align:left">姓名</th><th style="padding:8px;text-align:left">角色</th>'
-      + '<th style="padding:8px;text-align:right">集数</th><th style="padding:8px;text-align:right">基准</th>'
-      + '<th style="padding:8px;text-align:center">达标</th><th style="padding:8px;text-align:right">超额</th>'
-      + '<th style="padding:8px;text-align:right">缺集扣</th><th style="padding:8px;text-align:right">组奖</th>'
-      + '<th style="padding:8px;text-align:right">提成</th></tr></thead><tbody>';
+      + cols.map(function(c){
+        const align = c.right ? 'text-align:right' : (c.center ? 'text-align:center' : 'text-align:left');
+        const arrow = key===c.k ? (dir>0?' ▲':' ▼') : '';
+        const sortable = c.k !== 'is_complete';
+        return '<th style="padding:8px;'+align+';cursor:'+(sortable?'pointer':'default')+';user-select:none" '
+          + (sortable ? 'onclick="commissionSort(\''+c.k+'\')" title="点击排序"' : '')
+          + '>'+c.label+arrow+'</th>';
+      }).join('')
+      + '</tr></thead><tbody>';
     rows.forEach(r => {
       html += '<tr style="border-bottom:1px solid #f0f0f0">'
         + '<td style="padding:6px 8px">'+escHtml(r.name)+'</td>'
@@ -219,6 +274,12 @@ async function _loadCommissionReport(){
   }catch(e){
     el.innerHTML = '<div style="color:var(--red);padding:12px">加载失败: '+escHtml(e.message)+'</div>';
   }
+}
+// 表头点击排序（功能2）
+function commissionSort(key){
+  if(_commissionSort.key === key) _commissionSort.dir = -_commissionSort.dir;
+  else _commissionSort = {key:key, dir:key==='name'||key==='role'?1:-1};
+  _loadCommissionReport();
 }
 
 function _monthOptions(){

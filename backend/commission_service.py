@@ -49,10 +49,11 @@ def load_config(cfg_path=None):
         roles.update({k: v for k, v in cfg.get("人员角色", {}).items() if v})
         rules = dict(DEFAULT_RULES)
         rules.update(cfg.get("rules", {}) or {})
-        return roles, rules
+        groups = cfg.get("小组", {}) or {}
+        return roles, rules, groups
     except Exception as e:
         logger.warning("读取提成配置失败(%s)，使用内置默认: %s", path, e)
-        return dict(DEFAULT_ROLES), dict(DEFAULT_RULES)
+        return dict(DEFAULT_ROLES), dict(DEFAULT_RULES), {}
 
 
 def _normalize_role(role):
@@ -65,16 +66,19 @@ def _normalize_role(role):
     return "二卡剪辑" if role == "二卡剪辑" else "剪辑助理"
 
 
-def compute_commission_breakdown(editor_workload, month=None, cfg_path=None):
+def compute_commission_breakdown(editor_workload, month=None, cfg_path=None,
+                                 group_completed_count=None):
     """从剪辑师集数计算每人绩效+提成。
 
     editor_workload: [{'name','assigned','projects'}]（来自 aggregate_editor_workload）
+    group_completed_count: {组长姓名: 组内当月完成部数}（功能3：组长组奖按组内全部完成部数计）。
+                          若不传，组长按"有分集的项目数"计。
     返回:
       rows: [{'name','role','episodes','quota','is_complete','overtime_bonus',
               'shortage_penalty','group_bonus','commission','desc'}]
       summary: {'total_commission','total_people','met_quota','unmet_quota','total_episodes'}
     """
-    roles, rules = load_config(cfg_path)
+    roles, rules, groups = load_config(cfg_path)
     rows = []
     for ed in editor_workload:
         name = ed.get("name") or ""
@@ -82,8 +86,11 @@ def compute_commission_breakdown(editor_workload, month=None, cfg_path=None):
         role = _normalize_role(roles.get(name, "剪辑助理"))
         rule = rules.get(role, rules.get("剪辑助理", DEFAULT_RULES["剪辑助理"]))
         if role == "剪辑组长":
-            # 组长：集数×单价 + 组内每部×项目数（项目数取当月有分集的项目总数）
-            project_count = int(ed.get("projects") or 0)
+            # 功能3：组长组奖 = 组内当月完成部数 × 每部提成
+            # 优先用传入的组内完成部数（数据来源=项目看板本月项目），否则回退到有分集的项目数
+            project_count = int(group_completed_count.get(name) if group_completed_count else ed.get("projects") or 0)
+            if not project_count:
+                project_count = int(ed.get("projects") or 0)
             group_bonus = project_count * int(rule.get("组内每部提成", 100) or 0)
             commission = total * int(rule.get("每集单价", 20) or 0) + group_bonus
             rows.append({
@@ -124,6 +131,49 @@ def compute_commission_breakdown(editor_workload, month=None, cfg_path=None):
     return rows, summary
 
 
+def compute_group_completed(db, month=None, cfg_path=None):
+    """功能3：统计每个组长所在组的当月完成部数。
+
+    组内某部"完成" = 该项目 custom_status=='已完成' 且 project_month==当月。
+    项目归属某组：该组任一成员出现在该项目 episode_plan 中即计入。
+    返回 {组长姓名: 完成部数}。
+    """
+    import json as _json
+    from datetime import datetime
+    if not month:
+        month = datetime.now().strftime("%Y-%m")
+    roles, rules, groups = load_config(cfg_path)
+    # 组长 -> 成员集合
+    leader_members = {}
+    for gname, g in (groups or {}).items():
+        leader = (g.get("组长") or "").strip()
+        members = set(g.get("成员") or [])
+        if leader and members:
+            leader_members[leader] = members
+    try:
+        projs = db.get_all_projects() or []
+    except Exception:
+        projs = []
+    result = {leader: 0 for leader in leader_members}
+    for p in projs:
+        if (p.get("project_month") or "") != month:
+            continue
+        if str(p.get("custom_status") or "").strip() != "已完成":
+            continue
+        plan = p.get("episode_plan") or "{}"
+        try:
+            plan = _json.loads(plan) if isinstance(plan, str) else plan
+        except Exception:
+            plan = {}
+        if not isinstance(plan, dict):
+            continue
+        editors = set(e for e in plan.values() if e)
+        for leader, members in leader_members.items():
+            if editors & members:
+                result[leader] = result.get(leader, 0) + 1
+    return result
+
+
 def compute_person_cards(db, year=None, cfg_path=None):
     """个人工作量卡片（功能2）：每人年度逐月集数 + 角色 + 汇总。
 
@@ -136,7 +186,7 @@ def compute_person_cards(db, year=None, cfg_path=None):
     from collections import defaultdict
     if not year:
         year = str(datetime.now().year)
-    roles, _rules = load_config(cfg_path)
+    roles, _rules, _groups = load_config(cfg_path)
     # 逐月集数
     monthly = defaultdict(lambda: defaultdict(int))  # name -> month -> eps
     try:

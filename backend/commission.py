@@ -58,12 +58,16 @@ def register_routes(app, db):
         month = request.args.get("month", "") or datetime.now().strftime("%Y-%m")
         try:
             from features import aggregate_editor_workload
-            from commission_service import compute_commission_breakdown
+            from commission_service import compute_commission_breakdown, compute_group_completed
             workload = aggregate_editor_workload(db, month=month)
-            rows, summary = compute_commission_breakdown(workload, month)
+            # 功能3：组长组奖按组内当月全部完成部数计（数据来自项目本月完成数）
+            group_completed = compute_group_completed(db, month=month)
+            rows, summary = compute_commission_breakdown(
+                workload, month, group_completed_count=group_completed)
             return jsonify({
                 "ok": True, "month": month,
                 "rows": rows, "summary": summary,
+                "group_completed": group_completed,
                 "mode": "分集数据",
             })
         except Exception as e:

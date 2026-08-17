@@ -513,3 +513,36 @@ class TestTodoBoard:
         assert statuses == {"todo", "in_progress", "done"}
 
 
+# ============================================================
+# 14. 组长组奖按组内当月完成部数（compute_group_completed）
+# ============================================================
+
+class TestGroupCompleted:
+    def test_counts_completed_projects_by_group(self, tmp_db):
+        # 构造一个组长张大为 + 组员张四、李五 的测试配置
+        import tempfile, os, json
+        cfg = {
+            "人员角色": {"张大为": "剪辑组长", "张四": "一卡剪辑", "李五": "一卡剪辑"},
+            "小组": {"A组": {"组长": "张大为", "成员": ["张大为", "张四", "李五"]}},
+            "rules": {},
+        }
+        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8')
+        json.dump(cfg, tmp, ensure_ascii=False); tmp.close()
+        try:
+            # 项目1: A组完成(张四参与)  项目2: A组完成(李五参与)  项目3: 非A组
+            tmp_db.upsert_project("P1", "", ""); tmp_db.update_project_status("P1", project_month="2026-08", custom_status="已完成")
+            tmp_db.set_episode_plan("P1", {"1": "张四"})
+            tmp_db.upsert_project("P2", "", ""); tmp_db.update_project_status("P2", project_month="2026-08", custom_status="已完成")
+            tmp_db.set_episode_plan("P2", {"1": "李五"})
+            tmp_db.upsert_project("P3", "", ""); tmp_db.update_project_status("P3", project_month="2026-08", custom_status="已完成")
+            tmp_db.set_episode_plan("P3", {"1": "外人"})
+            tmp_db.upsert_project("P4", "", ""); tmp_db.update_project_status("P4", project_month="2026-08", custom_status="剪辑中")
+            tmp_db.set_episode_plan("P4", {"1": "张四"})
+            from commission_service import compute_group_completed
+            result = compute_group_completed(tmp_db, month="2026-08", cfg_path=tmp.name)
+            # 组长组内完成 = P1 + P2 = 2（P4 未完成不计，P3 非组员不计）
+            assert result["张大为"] == 2
+        finally:
+            os.unlink(tmp.name)
+
+
