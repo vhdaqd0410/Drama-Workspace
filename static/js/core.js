@@ -791,7 +791,7 @@ function projectCardHTML(p){
       <div class="status-row"><span class="sr-label">成片交付</span>${d}</div>
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
-    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this)" onmouseenter="cardHoverTodo('${jsq(pname)}', this)" onmousemove="cardTodoMouse(event)" onmouseleave="cardLeaveTodo(this)">📌 待办 <span class="ctodo-count"></span></div>
+    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this)" onmouseenter="cardHoverTodo('${jsq(pname)}', this)" onmouseleave="cardLeaveTodo(this)">📌 待办 <span class="ctodo-count"></span></div>
     <div class="card-todo-popup" id="ctodo-popup-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>
     <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
@@ -802,8 +802,6 @@ function projectCardHTML(p){
 function _ctSanitize(name){ return name.replace(/[^a-zA-Z0-9_]/g,'_'); }
 function _ctPopup(name){ return document.getElementById('ctodo-popup-' + _ctSanitize(name)); }
 function _ctTrigger(name){ return document.getElementById('ctodo-trigger-' + _ctSanitize(name)); }
-let _ctMouse = { x: 0, y: 0 };
-function cardTodoMouse(e){ _ctMouse.x = e.clientX; _ctMouse.y = e.clientY; }
 // 关闭弹窗（带淡出动画）
 function _ctHide(pop){
   if(!pop || !pop.classList.contains('show')) return;
@@ -814,15 +812,24 @@ function _ctHide(pop){
     delete pop.dataset.pinned;
   }, 175);
 }
-// 把弹窗定位到鼠标附近（跟随鼠标），并做视口边界钳制
-function _ctPosition(pop){
-  const pad = 14;
-  let x = _ctMouse.x + pad;
-  let y = _ctMouse.y + pad;
+// 把弹窗锚定到待办按钮下方，做视口边界钳制（稳定，不跟随鼠标，避免"乱飘"）
+function _ctPosition(pop, anchor){
+  const pad = 8;
+  const rect = anchor ? anchor.getBoundingClientRect() : null;
   const w = pop.offsetWidth || 290;
   const h = pop.offsetHeight || 240;
-  if (x + w > window.innerWidth - 8) x = Math.max(8, _ctMouse.x - w - pad);
-  if (y + h > window.innerHeight - 8) y = Math.max(8, _ctMouse.y - h - pad);
+  let x, y;
+  if(rect){
+    // 锚定到按钮右下角，向下展开
+    x = rect.left;
+    y = rect.bottom + pad;
+  } else {
+    x = pad;
+    y = pad;
+  }
+  // 视口边界钳制
+  if(x + w > window.innerWidth - 8) x = Math.max(8, window.innerWidth - w - 8);
+  if(y + h > window.innerHeight - 8) y = Math.max(8, rect ? rect.top - h - pad : 8);
   pop.style.left = x + 'px';
   pop.style.top = y + 'px';
 }
@@ -841,7 +848,7 @@ function cardToggleTodo(name, el){
   // 关闭所有已开的（含固定，淡出）
   document.querySelectorAll('.card-todo-popup.show').forEach(p=>{ _ctHide(p); });
   if(!isShow){
-    _ctPosition(pop);
+    _ctPosition(pop, el);
     pop.classList.add('show');
     pop.dataset.pinned = '1';
     cardLoadTodos(name, true);
@@ -855,7 +862,7 @@ function cardHoverTodo(name, el){
     const pop = _ctPopup(name);
     if(pop && !pop.classList.contains('show')){
       _ctCloseOthers();
-      _ctPosition(pop);
+      _ctPosition(pop, el);
       pop.classList.add('show');
       cardLoadTodos(name, false);
     }
