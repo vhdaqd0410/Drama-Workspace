@@ -590,7 +590,7 @@ async function renderWorkloadBoard(containerId){
 
     // === 剪辑师工作量看板 ===
     const maxAssigned = editors.length ? editors[0].assigned : 1;
-    const editorRows = editors.slice(0, 15).map(function(e){
+    const editorRows = editors.map(function(e){
       const pct = maxAssigned>0 ? Math.round(e.assigned/maxAssigned*100) : 0;
       const hue = Math.max(0, 210 - pct*1.2);  // 工作量高 → 偏红
       const color = pct>=80 ? '#e74c3c' : pct>=50 ? '#e67e22' : '#3498db';
