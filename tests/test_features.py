@@ -364,3 +364,52 @@ class TestDeliveryStats:
         assert s["overdue"][0]["name"] == "C"
 
 
+# ============================================================
+# 10. 提成/绩效全链路（commission_service.compute_commission_breakdown）
+# ============================================================
+
+class TestCommissionBreakdown:
+    def _mk_editor(self, name, eps):
+        return {"name": name, "assigned": eps, "projects": 1}
+
+    def test_一卡_超额(self):
+        from commission_service import compute_commission_breakdown
+        rows, summary = compute_commission_breakdown(
+            [self._mk_editor("陈春阳", 90), self._mk_editor("程梦", 80)])
+        by = {r["name"]: r for r in rows}
+        # 陈春阳 一卡(基准70)，超额20集×20=400
+        assert by["陈春阳"]["role"] == "一卡剪辑"
+        assert by["陈春阳"]["commission"] == (90 - 70) * 20
+        assert by["陈春阳"]["is_complete"] is True
+
+    def test_二卡_缺集扣款(self):
+        from commission_service import compute_commission_breakdown
+        rows, summary = compute_commission_breakdown(
+            [self._mk_editor("王田田", 100)])  # 二卡基准120，缺20×50
+        by = {r["name"]: r for r in rows}
+        assert by["王田田"]["role"] == "二卡剪辑"
+        assert by["王田田"]["is_complete"] is False
+        assert by["王田田"]["commission"] == -(120 - 100) * 50
+
+    def test_组长_组奖(self):
+        from commission_service import compute_commission_breakdown
+        rows, summary = compute_commission_breakdown(
+            [{"name": "张大强", "assigned": 8, "projects": 4}])
+        by = {r["name"]: r for r in rows}
+        # 组长：8×20 + 4×100 = 160+400=560
+        assert by["张大强"]["role"] == "剪辑组长"
+        assert by["张大强"]["commission"] == 8 * 20 + 4 * 100
+        assert summary["total_people"] == 1
+
+    def test_summary_totals(self):
+        from commission_service import compute_commission_breakdown
+        rows, summary = compute_commission_breakdown([
+            self._mk_editor("陈春阳", 90),
+            self._mk_editor("王田田", 100),
+        ])
+        # 陈春阳 +400，王田田 -1000，合计 -600
+        assert summary["total_commission"] == (90 - 70) * 20 - (120 - 100) * 50
+        assert summary["met_quota"] == 1
+        assert summary["unmet_quota"] == 1
+
+

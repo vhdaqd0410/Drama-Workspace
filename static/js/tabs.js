@@ -1,4 +1,4 @@
-﻿/* ============ 任务中心 Tab ============ */
+/* ============ 任务中心 Tab ============ */
 let _activityCache = null;
 async function loadActivityTab(){
   const el = document.getElementById('activityContent');
@@ -122,14 +122,59 @@ async function loadReportTab(){
       ${_monthOptions()}
     </select>
     <button class="btn btn-sm btn-primary" onclick="_loadReportData()">🔍 查看报告</button>
+    <button class="btn btn-sm" onclick="_loadCommissionReport()" style="background:#af52de;color:#fff" title="从分集数据计算本月每人绩效与提成">💰 提成/绩效</button>
     <button class="btn btn-sm" onclick="_downloadExcel()" style="background:#34c759;color:#fff">📥 下载 Excel</button>
   </div>
   <div id="reportWorkloadBoard" style="margin-bottom:20px"></div>
+  <div id="commissionBoard" style="margin-bottom:20px"></div>
   <div id="reportBody">正在加载...</div>`;
   el.innerHTML = html;
   // 渲染工作量/数据看板
   try{ if(typeof renderWorkloadBoard==='function') await renderWorkloadBoard('reportWorkloadBoard'); }catch(_){}
   _loadReportData();
+}
+
+// 提成/绩效全链路报表（功能1）：从分集数据计算每人绩效+提成
+async function _loadCommissionReport(){
+  const el = document.getElementById('commissionBoard');
+  if(!el) return;
+  const month = document.getElementById('reportMonth')?.value || '';
+  el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-sec)">💰 正在计算提成/绩效...</div>';
+  try{
+    const d = await api('GET','/api/commission/monthly?month=' + encodeURIComponent(month));
+    if(!d || !d.ok){ el.innerHTML = '<div style="color:var(--red);padding:12px">' + escHtml(d?.message||'加载失败') + '</div>'; return; }
+    const s = d.summary || {};
+    const rows = d.rows || [];
+    let html = '<div style="background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:14px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:10px">'
+      + '<h4 style="margin:0;font-size:14px">💰 提成 / 绩效（' + escHtml(month) + ' · 分集数据）</h4>'
+      + '<span style="font-size:12px;color:var(--text-sec)">总提成 <b style="color:#af52de">'+ (s.total_commission||0) +'</b> 元 · 达标 '+s.met_quota+'/'+s.total_people+' · 集数 '+s.total_episodes+'</span>'
+      + '</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:#f5f5f7;border-bottom:2px solid #e5e5ea">'
+      + '<th style="padding:8px;text-align:left">姓名</th><th style="padding:8px;text-align:left">角色</th>'
+      + '<th style="padding:8px;text-align:right">集数</th><th style="padding:8px;text-align:right">基准</th>'
+      + '<th style="padding:8px;text-align:center">达标</th><th style="padding:8px;text-align:right">超额</th>'
+      + '<th style="padding:8px;text-align:right">缺集扣</th><th style="padding:8px;text-align:right">组奖</th>'
+      + '<th style="padding:8px;text-align:right">提成</th></tr></thead><tbody>';
+    rows.forEach(r => {
+      html += '<tr style="border-bottom:1px solid #f0f0f0">'
+        + '<td style="padding:6px 8px">'+escHtml(r.name)+'</td>'
+        + '<td style="padding:6px 8px;color:var(--text-sec)">'+escHtml(r.role)+'</td>'
+        + '<td style="padding:6px 8px;text-align:right">'+r.episodes+'</td>'
+        + '<td style="padding:6px 8px;text-align:right">'+(r.quota||'—')+'</td>'
+        + '<td style="padding:6px 8px;text-align:center;color:'+(r.is_complete?'#34c759':'#ff3b30')+'">'+(r.is_complete?'✔':'✘')+'</td>'
+        + '<td style="padding:6px 8px;text-align:right;color:#34c759">'+(r.overtime_bonus||0)+'</td>'
+        + '<td style="padding:6px 8px;text-align:right;color:#ff3b30">'+(r.shortage_penalty||0)+'</td>'
+        + '<td style="padding:6px 8px;text-align:right">'+(r.group_bonus||0)+'</td>'
+        + '<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+(r.commission>=0?'#0071e3':'#c5221f')+'">'+(r.commission||0)+'</td>'
+        + '</tr>';
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+  }catch(e){
+    el.innerHTML = '<div style="color:var(--red);padding:12px">加载失败: '+escHtml(e.message)+'</div>';
+  }
 }
 
 function _monthOptions(){

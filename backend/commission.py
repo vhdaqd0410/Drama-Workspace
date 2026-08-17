@@ -49,6 +49,27 @@ def register_routes(app, db):
             "gui": os.path.basename(_GUI_SCRIPT) if _plugin_available() else None,
         })
 
+    @app.route("/api/commission/monthly", methods=["GET"])
+    def commission_monthly():
+        """提成/绩效全链路报表（功能1）：从分集数据(episode_plan)计算每人绩效+提成。
+        ?month=YYYY-MM（默认当月）。返回 rows + summary。
+        """
+        from datetime import datetime
+        month = request.args.get("month", "") or datetime.now().strftime("%Y-%m")
+        try:
+            from features import aggregate_editor_workload
+            from commission_service import compute_commission_breakdown
+            workload = aggregate_editor_workload(db, month=month)
+            rows, summary = compute_commission_breakdown(workload, month)
+            return jsonify({
+                "ok": True, "month": month,
+                "rows": rows, "summary": summary,
+                "mode": "分集数据",
+            })
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return jsonify({"ok": False, "message": str(e)}), 500
+
     @app.route("/api/commission/launch", methods=["POST"])
     def commission_launch():
         """启动提成工具 GUI（子进程，新窗口打开，保留全部功能）。"""
