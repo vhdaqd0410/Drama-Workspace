@@ -8,7 +8,7 @@ function fjRenderChips(){
   } else {
     wrap.innerHTML = fjPersons.map(p => {
       const sel = fjSelected.includes(p) ? 'selected' : '';
-      return `<div class="fj-chip ${sel}" onclick="fjToggle('${p.replace(/'/g,"\\'")}')">${p}</div>`;
+      return `<div class="fj-chip ${sel}" onclick="fjToggle('${jsq(p)}')">${p}</div>`;
     }).join('');
   }
   $('fjSelCount').textContent = `(已选 ${fjSelected.length} 人)`;

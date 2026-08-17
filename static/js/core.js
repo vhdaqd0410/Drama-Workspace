@@ -8,6 +8,23 @@ function $(id){return document.getElementById(id)}
 function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!==undefined)e.innerHTML=html;return e}
 async function api(method,path,body){const opts={method,headers:{}};if(body!==undefined){if(body instanceof FormData){opts.body=body}else{opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body)}}const r=await fetch(API+path,opts);if(!r.ok)throw new Error(r.status+' '+r.statusText);const ct=r.headers.get('content-type')||'';return ct.includes('application/json')?r.json():r.text()}
 
+// 安全地把任意字符串嵌入 JS 单引号字符串（用于 onclick 属性等）。
+// escHtml/htm 只处理 HTML 实体，浏览器解析 onclick 属性时会先解码实体再交给 JS，
+// 导致 ' 被实体转义后仍能逃逸出 JS 字符串 → XSS。jsq 额外转义 \ 与换行、</script>。
+function jsq(s){
+  if(s===undefined||s===null)return '';
+  return String(s)
+    .replace(/\\/g,'\\\\')
+    .replace(/'/g,"\\'")
+    .replace(/"/g,'&quot;')
+    .replace(/\r/g,'\\r')
+    .replace(/\n/g,'\\n')
+    .replace(/</g,'\\u003C')
+    .replace(/>/g,'\\u003E');
+}
+// 统一 HTML 内容转义（各文件已有的 escHtml/htm 行为不一致，这里给一个兜底别名）
+window.jsq = jsq;
+
 function toast(msg,type='info'){
   const container=$('toastContainer');
   const icons={success:'✅',error:'❌',warning:'⚠️',info:'ℹ️'};
@@ -135,7 +152,7 @@ function showEditCompleteDialog(name, total, current){
     </div>
     <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove()">稍后</button>
-      <button class="btn btn-sm btn-primary" onclick="confirmEditComplete('${name.replace(/'/g,"\\'")}', this)">✅ 进入审核</button>
+      <button class="btn btn-sm btn-primary" onclick="confirmEditComplete('${jsq(name)}', this)">✅ 进入审核</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -280,13 +297,13 @@ function filterSearchResults(){
     var html = '';
     html += searchSectionTitle('📁 项目', d.projects, searchItemRow);
     html += searchSectionTitle('🎬 剪辑师', d.editors, function(ed){
-      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="toast(\''+escHtml(ed.name)+' 负责 '+ed.count+' 集 / '+ed.projects+' 部\',\'info\')"><b>'+escHtml(ed.name)+'</b> <span style="color:#86868b;font-size:11px;margin-left:6px">'+ed.count+' 集 · '+ed.projects+' 部项目</span></div>';
+      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="toast(\''+jsq(ed.name+' 负责 '+ed.count+' 集 / '+ed.projects+' 部')+'\',\'info\')"><b>'+escHtml(ed.name)+'</b> <span style="color:#86868b;font-size:11px;margin-left:6px">'+ed.count+' 集 · '+ed.projects+' 部项目</span></div>';
     });
     html += searchSectionTitle('📌 待办', d.todos, function(t){
-      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="jumpToProject(\''+(t.project||'').replace(/'/g,"")+'\')"><span style="color:#0071e3">📌</span> '+escHtml(t.text)+' <span style="color:#86868b;font-size:11px;margin-left:6px">· '+escHtml(t.project)+'</span></div>';
+      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="jumpToProject(\''+jsq(t.project||'')+'\')"><span style="color:#0071e3">📌</span> '+escHtml(t.text)+' <span style="color:#86868b;font-size:11px;margin-left:6px">· '+escHtml(t.project)+'</span></div>';
     });
     html += searchSectionTitle('📅 交付日期', d.delivered_dates, function(p){
-      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="jumpToProject(\''+(p.name||'').replace(/'/g,"")+'\')">📅 '+escHtml(p.date)+' · <b>'+escHtml(p.name)+'</b> <span style="color:#86868b;font-size:11px;margin-left:6px">'+escHtml(p.department)+'</span></div>';
+      return '<div class="search-result-item" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px" onclick="jumpToProject(\''+jsq(p.name||'')+'\')">📅 '+escHtml(p.date)+' · <b>'+escHtml(p.name)+'</b> <span style="color:#86868b;font-size:11px;margin-left:6px">'+escHtml(p.department)+'</span></div>';
     });
     if(!html) html = '<div style="color:#86868b;padding:20px;text-align:center">未找到匹配：项目 / 剪辑师 / 待办 / 交付日期</div>';
     results.innerHTML = html;
@@ -774,7 +791,7 @@ function projectCardHTML(p){
       <div class="status-row"><span class="sr-label">成片交付</span>${d}</div>
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
-    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${pname.replace(/'/g,"\\'")}', this)" onmouseenter="cardHoverTodo('${pname.replace(/'/g,"\\'")}', this)" onmousemove="cardTodoMouse(event)" onmouseleave="cardLeaveTodo(this)">📌 待办 <span class="ctodo-count"></span></div>
+    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this)" onmouseenter="cardHoverTodo('${jsq(pname)}', this)" onmousemove="cardTodoMouse(event)" onmouseleave="cardLeaveTodo(this)">📌 待办 <span class="ctodo-count"></span></div>
     <div class="card-todo-popup" id="ctodo-popup-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>
     <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
@@ -868,17 +885,17 @@ async function cardLoadTodos(name, isClick){
     const listHtml = todos.length
       ? todos.map(t=>`
           <div style="display:flex;align-items:center;gap:6px;padding:5px 0;font-size:12px;border-bottom:1px dashed var(--border)">
-            <button onclick="cardToggleTodoItem('${name.replace(/'/g,"\\'")}',${t.id},${t.done?0:1})" style="background:none;border:none;font-size:15px;cursor:pointer;padding:0" title="切换完成">${t.done?'☑️':'⬜'}</button>
+            <button onclick="cardToggleTodoItem('${jsq(name)}',${t.id},${t.done?0:1})" style="background:none;border:none;font-size:15px;cursor:pointer;padding:0" title="切换完成">${t.done?'☑️':'⬜'}</button>
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text-sec)':''}" title="${htm(t.text)}">${htm(t.text)}</span>
-            <button onclick="cardDelTodo('${name.replace(/'/g,"\\'")}',${t.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:13px" title="删除">🗑</button>
+            <button onclick="cardDelTodo('${jsq(name)}',${t.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:13px" title="删除">🗑</button>
           </div>`).join('')
       : '<div style="color:var(--text-sec);font-size:12px;padding:6px 0">暂无待办</div>';
     pop.innerHTML = `
       <div class="ctp-head"><span>📌 ${htm(name)}</span><span style="color:var(--text-sec);font-weight:400">${doneCnt}/${todos.length} 完成</span></div>
       <div class="ctp-list">${listHtml}</div>
       <div class="ctp-add">
-        <input id="ctodo-input-${_ctSanitize(name)}" type="text" placeholder="添加待办..." onkeydown="if(event.key==='Enter')cardAddTodo('${name.replace(/'/g,"\\'")}')">
-        <button onclick="cardAddTodo('${name.replace(/'/g,"\\'")}')">添加</button>
+        <input id="ctodo-input-${_ctSanitize(name)}" type="text" placeholder="添加待办..." onkeydown="if(event.key==='Enter')cardAddTodo('${jsq(name)}')">
+        <button onclick="cardAddTodo('${jsq(name)}')">添加</button>
       </div>`;
     const inp = document.getElementById('ctodo-input-' + _ctSanitize(name));
     if(inp && isClick) setTimeout(function(){ inp.focus(); }, 30);
@@ -1171,7 +1188,7 @@ async function bulkSetMonth(){
       </div>
       <div class="modal-foot">
         <button class="btn" onclick="document.querySelectorAll('.modal-overlay').forEach(m=>m.remove());document.getElementById('bulkModal').remove()">取消</button>
-        <button class="btn btn-primary" onclick="_bulkSetMonthGo('${names.join('||').replace(/'/g,"")}')">确定</button>
+        <button class="btn btn-primary" onclick="_bulkSetMonthGo('${jsq(names.join('||'))}')">确定</button>
       </div>
     </div></div>`;
   document.body.insertAdjacentHTML('beforeend', html);
@@ -1200,7 +1217,7 @@ async function bulkSetStatus(){
       </div>
       <div class="modal-foot">
         <button class="btn" onclick="document.querySelectorAll('.modal-overlay').forEach(m=>m.remove())">取消</button>
-        <button class="btn btn-primary" onclick="_bulkSetStatusGo('${names.join('||').replace(/'/g,"")}')">确定</button>
+        <button class="btn btn-primary" onclick="_bulkSetStatusGo('${jsq(names.join('||'))}')">确定</button>
       </div>
     </div></div>`;
   document.body.insertAdjacentHTML('beforeend', html);
@@ -1229,7 +1246,7 @@ async function bulkSetDeliveredDate(){
       </div>
       <div class="modal-foot">
         <button class="btn" onclick="document.querySelectorAll('.modal-overlay').forEach(m=>m.remove())">取消</button>
-        <button class="btn btn-primary" onclick="_bulkDDGo('${names.join('||').replace(/'/g,"")}')">确定</button>
+        <button class="btn btn-primary" onclick="_bulkDDGo('${jsq(names.join('||'))}')">确定</button>
       </div>
     </div></div>`;
   document.body.insertAdjacentHTML('beforeend', html);

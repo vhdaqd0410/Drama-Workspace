@@ -249,3 +249,86 @@ class TestSyncWorkloadFromEpisodePlan:
         assert tmp_db.get_editor_workload("PB") == {"王五": 2}
 
 
+# ============================================================
+# 7. 数据洞察 KPI 口径（compute_insights_summary）
+# ============================================================
+
+class TestInsightsSummary:
+    def _mk(self, tmp_db, name, month, status, total_eps=70):
+        tmp_db.upsert_project(name, "", "")
+        tmp_db.update_project_status(name, project_month=month, custom_status=status)
+        try:
+            tmp_db.set_episodes(name, total_eps, total_eps)
+        except Exception:
+            pass
+        return name
+
+    def test_month_completed_uses_custom_status(self, tmp_db):
+        # 关键口径：本月已完成 = 本月项目里 custom_status=='已完成'（而非 delivered_date）
+        self._mk(tmp_db, "A", "2026-08", "已完成")
+        self._mk(tmp_db, "B", "2026-08", "剪辑中")
+        self._mk(tmp_db, "C", "2026-07", "已完成")  # 其他月不算
+        from features import compute_insights_summary
+        s = compute_insights_summary(tmp_db, month="2026-08")
+        assert s["monthProjectCount"] == 2
+        assert s["monthCompleted"] == 1
+        assert s["inProgress"] == 1
+
+    def test_active_project_filter(self, tmp_db):
+        # 空壳项目（无状态/无集数/未交付）不计入
+        tmp_db.upsert_project("空壳", "", "")   # 无任何制作痕迹
+        self._mk(tmp_db, "实项目", "2026-08", "剪辑中")
+        from features import compute_insights_summary
+        s = compute_insights_summary(tmp_db, month="2026-08")
+        assert s["projectCount"] == 1
+        assert "空壳" not in s["statusMap"]
+        assert s["monthProjectCount"] == 1
+
+    def test_editor_episodes_from_episode_plan(self, tmp_db):
+        self._mk(tmp_db, "P", "2026-08", "剪辑中")
+        tmp_db.set_episode_plan("P", {"1": "张三", "2": "张三", "3": "李四"})
+        from features import compute_insights_summary
+        s = compute_insights_summary(tmp_db, month="2026-08")
+        assert s["editorEpisodes"] == {"张三": 2, "李四": 1}
+
+
+# ============================================================
+# 8. 统一分集解析器（fenji_parser）—— 消除多份重复漂移
+# ============================================================
+
+class TestFenjiParser:
+    def test_parse_assign_line_fullwidth_separators(self):
+        from fenji_parser import parse_assign_line
+        plan = {}
+        # 全角分号、加号、顿号、中横线都要解析
+        parse_assign_line(plan, "张三：1-3，44-45")
+        parse_assign_line(plan, "李四：5；6-7")
+        parse_assign_line(plan, "王五：8 9")  # 空格分隔
+        assert plan == {"1": "张三", "2": "张三", "3": "张三", "44": "张三", "45": "张三",
+                        "5": "李四", "6": "李四", "7": "李四",
+                        "8": "王五", "9": "王五"}
+
+    def test_parse_assign_line_descending_range(self):
+        from fenji_parser import parse_assign_line
+        plan = {}
+        parse_assign_line(plan, "张三：10-7")  # 降序范围
+        assert plan == {"7": "张三", "8": "张三", "9": "张三", "10": "张三"}
+
+    def test_expand_ranges(self):
+        from fenji_parser import expand_ranges
+        assert expand_ranges("4-7,21-25") == {4, 5, 6, 7, 21, 22, 23, 24, 25}
+        assert expand_ranges("3") == {3}
+
+    def test_all_three_call_sites_delegate_to_same_impl(self):
+        # 三处解析入口最终都落到同一实现，行为一致
+        from fenji_parser import parse_assign_line
+        from features import _parse_assign_range_str
+        from enhanced_routes import _parse_assign_line as er_parse
+        p1, p2, p3 = {}, {}, {}
+        line = "张三：1-3；44-45"  # 含全角分号
+        parse_assign_line(p1, line)
+        _parse_assign_range_str(p2, line)
+        er_parse(p3, line)
+        assert p1 == p2 == p3
+
+

@@ -125,8 +125,8 @@ async function openProjectDetail(name){
           <div style="color:var(--text-sec);font-size:13px;padding:8px 0">加载中...</div>
         </div>
         <div style="display:flex;gap:6px;margin-top:8px">
-          <input id="todoInput" placeholder="添加待办，如：补字幕 / 调色 / 等审片..." style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;outline:none" onkeydown="if(event.key==='Enter')addTodo('${p.name.replace(/'/g,"\\'")}')">
-          <button class="btn btn-sm btn-primary" onclick="addTodo('${p.name.replace(/'/g,"\\'")}')">＋ 添加</button>
+          <input id="todoInput" placeholder="添加待办，如：补字幕 / 调色 / 等审片..." style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;outline:none" onkeydown="if(event.key==='Enter')addTodo('${jsq(p.name)}')">
+          <button class="btn btn-sm btn-primary" onclick="addTodo('${jsq(p.name)}')">＋ 添加</button>
         </div>
       </div>
       <div class="detail-section">
@@ -134,12 +134,12 @@ async function openProjectDetail(name){
         <div id="timelineBox"><div style="color:var(--text-sec);font-size:13px;padding:8px 0">加载中...</div></div>
       </div>
       <div class="detail-actions">
-        <button onclick="setProjectMonth('${p.name.replace(/'/g,"\\'")}')" class="secondary">📅 设置月份</button>
-        <button onclick="setProjectDeliveredDate('${p.name.replace(/'/g,"\\'")}')" class="secondary">🗓 交付日期</button>
-        ${p.group_path?`<button onclick="openFolder('group','${p.name.replace(/'/g,"\\'")}')" class="secondary">📁 打开组内文件夹</button>`:''}
-        ${p.production_path?`<button onclick="openFolder('production','${p.name.replace(/'/g,"\\'")}')" class="secondary">📁 打开制作文件夹</button>`:''}
-        <button onclick="$('detailModal').classList.remove('active');openFenjiFor('${p.name.replace(/'/g,"\\'")}')" class="secondary">📑 管理分集</button>
-        <button onclick="$('detailModal').classList.remove('active');qaStartFor('${p.name.replace(/'/g,"\\'")}')" class="secondary">🔍 开始质检</button>
+        <button onclick="setProjectMonth('${jsq(p.name)}')" class="secondary">📅 设置月份</button>
+        <button onclick="setProjectDeliveredDate('${jsq(p.name)}')" class="secondary">🗓 交付日期</button>
+        ${p.group_path?`<button onclick="openFolder('group','${jsq(p.name)}')" class="secondary">📁 打开组内文件夹</button>`:''}
+        ${p.production_path?`<button onclick="openFolder('production','${jsq(p.name)}')" class="secondary">📁 打开制作文件夹</button>`:''}
+        <button onclick="$('detailModal').classList.remove('active');openFenjiFor('${jsq(p.name)}')" class="secondary">📑 管理分集</button>
+        <button onclick="$('detailModal').classList.remove('active');qaStartFor('${jsq(p.name)}')" class="secondary">🔍 开始质检</button>
       </div>
     `;
     // 加载待办 + 时间轴
@@ -176,9 +176,9 @@ function renderTodos(name,todos){
   }
   box.innerHTML=todos.map(t=>`
     <div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px dashed var(--border)">
-      <button onclick="toggleTodo('${name.replace(/'/g,"\\'")}',${t.id},${t.done?0:1})" style="background:none;border:none;font-size:18px;cursor:pointer;width:26px;text-align:center;padding:0" title="${t.done?'标记未完成':'标记完成'}">${t.done?'☑️':'⬜'}</button>
+      <button onclick="toggleTodo('${jsq(name)}',${t.id},${t.done?0:1})" style="background:none;border:none;font-size:18px;cursor:pointer;width:26px;text-align:center;padding:0" title="${t.done?'标记未完成':'标记完成'}">${t.done?'☑️':'⬜'}</button>
       <span style="flex:1;font-size:14px;${t.done?'text-decoration:line-through;color:var(--text-sec)':''}">${escHtml(t.text)}</span>
-      <button onclick="delTodo('${name.replace(/'/g,"\\'")}',${t.id})" style="background:none;border:none;color:var(--red,#ff3b30);cursor:pointer;font-size:14px" title="删除">🗑</button>
+      <button onclick="delTodo('${jsq(name)}',${t.id})" style="background:none;border:none;color:var(--red,#ff3b30);cursor:pointer;font-size:14px" title="删除">🗑</button>
     </div>`).join('');
 }
 async function addTodo(name){

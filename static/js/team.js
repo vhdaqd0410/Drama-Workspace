@@ -383,7 +383,7 @@ function teamCardHTML(m, roleMap, roleColor){
     </div>
     <div style="display:flex;flex-direction:column;gap:4px">
       <button class="btn btn-sm" onclick="teamOpenEdit(${m.id})" title="编辑" style="padding:2px 8px;font-size:11px">✏️</button>
-      <button class="btn btn-sm" onclick="teamConfirmDelete(${m.id},'${m.name.replace(/'/g,"\\'")}')" title="删除" style="padding:2px 8px;font-size:11px;color:#c5221f">🗑</button>
+      <button class="btn btn-sm" onclick="teamConfirmDelete(${m.id},'${jsq(m.name)}')" title="删除" style="padding:2px 8px;font-size:11px;color:#c5221f">🗑</button>
     </div>
   </div>`;
 }

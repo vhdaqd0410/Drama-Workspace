@@ -327,8 +327,8 @@ async function _showDeliverDoneModal(projectName){
       ${dstHtml}
     </div>
     <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
-      ${dst ? `<button class="btn btn-sm btn-primary" onclick="openDeliverDst('${dst.replace(/'/g,"\\'")}')">📂 打开回传目录</button>
-      <button class="btn btn-sm" onclick="copyDeliverDst('${dst.replace(/'/g,"\\'")}')">📋 复制路径</button>` : ''}
+      ${dst ? `<button class="btn btn-sm btn-primary" onclick="openDeliverDst('${jsq(dst)}')">📂 打开回传目录</button>
+      <button class="btn btn-sm" onclick="copyDeliverDst('${jsq(dst)}')">📋 复制路径</button>` : ''}
       <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove()">关闭</button>
     </div>
   </div>`;

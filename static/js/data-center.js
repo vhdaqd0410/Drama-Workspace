@@ -83,14 +83,14 @@ async function gtLoad(){
         <div style="border:1px solid var(--border,#e5e5ea);border-radius:10px;margin-bottom:8px;overflow:hidden">
           <div style="background:#fafafa;padding:8px 12px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
             <span>📁 ${escHtml(pname)} <span style="color:var(--text-sec);font-weight:400">${escHtml(items[0].status||'')}</span></span>
-            <button class="btn btn-sm" onclick="openProjectDetail('${pname.replace(/'/g,"\\'")}')">打开项目</button>
+            <button class="btn btn-sm" onclick="openProjectDetail('${jsq(pname)}')">打开项目</button>
           </div>
           ${items.map(t=>`
             <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-top:1px solid #f5f5f5;font-size:13px">
-              <button onclick="gtToggle(${t.id},${t.done?0:1},'${pname.replace(/'/g,"\\'")}')" style="background:none;border:none;font-size:16px;cursor:pointer;padding:0" title="切换完成">${t.done?'☑️':'⬜'}</button>
+              <button onclick="gtToggle(${t.id},${t.done?0:1},'${jsq(pname)}')" style="background:none;border:none;font-size:16px;cursor:pointer;padding:0" title="切换完成">${t.done?'☑️':'⬜'}</button>
               <span style="flex:1;${t.done?'text-decoration:line-through;color:var(--text-sec)':''}">${escHtml(t.text)}</span>
               <span style="font-size:11px;color:var(--text-sec)">${escHtml((t.created_at||'').slice(0,10))}</span>
-              <button onclick="gtDel(${t.id},'${pname.replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px" title="删除">🗑</button>
+              <button onclick="gtDel(${t.id},'${jsq(pname)}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px" title="删除">🗑</button>
             </div>`).join('')}
         </div>`;
     }).join('');

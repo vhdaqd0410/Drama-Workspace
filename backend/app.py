@@ -11,7 +11,6 @@ import subprocess
 import subprocess as _sp
 import signal
 import json
-import json as _json
 import shlex as _shlex
 import glob as _glob
 import tempfile as _tf
@@ -139,26 +138,11 @@ def no_cache(response):
 
 @app.route("/")
 def index():
-    # 预加载初始数据嵌入 HTML，避免前端首次 fetch 1MB 数据卡住
-    try:
-        enriched = sync_engine.get_projects_enriched()
-        production = enriched.get('production', [])
-        group_all = enriched.get('group_all', [])
-        group_completed = enriched.get('group_completed', [])
-        sections_data = []
-        active_group = [p for p in group_all if not p.get('is_completed')]
-        sections_data.append({'key':'group_active','name':'🟢 组内NAS（进行中）','type':'group','collapsed':False,'projects':active_group})
-        dept_order = [('AI漫剧二部','🏢 AI漫剧二部中转','erbu'),('AI漫剧一部海外','🏢 AI漫剧一部海外','yibu_hw'),('AI漫剧九部海外','🏢 AI漫剧九部海外','jiubu_hw'),('AI漫剧六部','🏢 AI漫剧六部中转','liubu')]
-        for match_key, label, dept_key in dept_order:
-            projs = [p for p in production if match_key in (p.get('department') or '')]
-            if projs:
-                sections_data.append({'key':dept_key,'name':label,'type':'production','collapsed':True,'projects':projs})
-        sections_data.append({'key':'completed','name':'✅ 已完成项目','type':'completed','collapsed':True,'projects':group_completed})
-        boot_data = _json.dumps({'sections':sections_data,'production':production,'group_all':group_all,'group_completed':group_completed}, ensure_ascii=False)
-    except Exception as e:
-        app.logger.error('boot_data failed: %s', e)
-        boot_data = 'null'
-    return render_template('index.html', boot_data=boot_data, api_key=_API_SECRET, is_desktop=_os.environ.get('DRAMA_DESKTOP') == '1')
+    # 前端通过 /api/projects 异步加载数据（project.js loadProjects），
+    # 这里不再做昂贵的 NAS 预扫描（boot_data 死代码，index.html 未引用）。
+    return render_template('index.html',
+                           api_key=_API_SECRET,
+                           is_desktop=_os.environ.get('DRAMA_DESKTOP') == '1')
 
 
 
@@ -1116,7 +1100,8 @@ def _scan_qa_status(project_name):
     try:
         with open(latest, "r", encoding="utf-8") as f:
             qa = json.load(f)
-    except:
+    except Exception as _e:
+        app.logger.warning("读取 QA 状态文件失败: %s", _e)
         with _QA_STATUS_LOCK:
             _qa_status_cache[project_name] = {"mtime": _time.time(), "data": None}
         return None

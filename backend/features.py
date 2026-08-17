@@ -23,7 +23,8 @@ def _yaml_cfg():
         import yaml
         with open(os.path.join(_BASE, "backend", "config.yaml"), "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
-    except Exception:
+    except Exception as e:
+        logger.warning("读取 config.yaml 失败: %s", e)
         return {}
 
 
@@ -161,35 +162,61 @@ def sync_workload_from_episode_plan(db=None):
             "total_episodes": total, "skipped": []}
 
 
+def compute_insights_summary(db, month=None):
+    """计算数据洞察 KPI 汇总（统一口径，与 compute_overview_stats 一致）：
+    - 本月项目：project_month==month 且有制作痕迹
+    - 本月已完成：本月项目里 custom_status=='已完成'
+    - 制作中：本月项目里处于进行中状态
+    纯函数，供 /api/insights/summary 调用，便于单测。
+    """
+    import json as _json
+    from datetime import datetime
+    if not month:
+        month = datetime.now().strftime("%Y-%m")
+    try:
+        from scan import _is_active_project, _is_producing
+    except Exception:
+        _is_active_project = lambda p: bool((p.get("custom_status") or "").strip()
+                                            or (p.get("total_episodes") or 0) > 0
+                                            or (p.get("delivery_status") or "") not in ("", "pending"))
+        _is_producing = lambda p: str(p.get("custom_status") or "").strip() not in ("", "已完成")
+    projs = db.get_all_projects() or []
+    active_projs = [p for p in projs if _is_active_project(p)]
+    month_projs = [p for p in active_projs if (p.get("project_month") or "") == month]
+    month_completed = [p for p in month_projs
+                       if str(p.get("custom_status") or "").strip() == "已完成"]
+    in_progress = [p for p in month_projs if _is_producing(p)]
+    status_map = {}
+    for p in month_projs:
+        st = (p.get("custom_status") or p.get("delivery_status") or "未设置").strip() or "未设置"
+        status_map[st] = status_map.get(st, 0) + 1
+    editor_eps = {}
+    for ed in aggregate_editor_workload(db, month=month):
+        editor_eps[ed["name"]] = ed["assigned"]
+    members = 0
+    try:
+        members = len(db.list_members() or []) if hasattr(db, "list_members") else 0
+    except Exception:
+        pass
+    return {
+        "month": month,
+        "projectCount": len(active_projs),
+        "monthProjectCount": len(month_projs),
+        "monthCompleted": len(month_completed),
+        "inProgress": len(in_progress),
+        "memberCount": members,
+        "statusMap": status_map,
+        "editorEpisodes": editor_eps,
+    }
+
+
 def _parse_assign_range_str(plan, line):
-    """解析一行 '剪辑师：1-3，44-45' 加入 plan 字典（{集号str: 剪辑师}）。"""
-    line = (line or "").strip()
-    if '：' in line:
-        parts = line.split('：', 1)
-    elif ':' in line:
-        parts = line.split(':', 1)
-    else:
-        return
-    if len(parts) < 2:
-        return
-    editor = parts[0].strip()
-    ranges = parts[1].strip()
-    if not editor or not ranges:
-        return
-    import re as _re
-    for r in _re.split(r'[,，、;；+\s]+', ranges):
-        r = r.strip()
-        if not r:
-            continue
-        m = _re.match(r'^(\d+)\s*[-—~]\s*(\d+)$', r)
-        if m:
-            s, e = int(m.group(1)), int(m.group(2))
-            for ep in range(min(s, e), max(s, e) + 1):
-                plan[str(ep)] = editor
-        else:
-            m2 = _re.match(r'^(\d+)$', r)
-            if m2:
-                plan[m2.group(1)] = editor
+    """解析一行 '剪辑师：1-3，44-45' 加入 plan 字典（{集号str: 剪辑师}）。
+
+    统一委托给 fenji_parser.parse_assign_line（唯一实现，避免多份漂移）。
+    """
+    from fenji_parser import parse_assign_line
+    parse_assign_line(plan, line)
 
 
 def sync_episode_plan_from_target(target_path, db=None, clear_stale=True):
@@ -234,17 +261,8 @@ def sync_episode_plan_from_target(target_path, db=None, clear_stale=True):
             if len(parts) == 2:
                 editor = parts[0].strip()
                 if editor:
-                    _eps = set()
-                    for r in _re.split(r'[,，、;；+\s]+', parts[1].strip()):
-                        r = r.strip()
-                        if not r:
-                            continue
-                        m = _re.match(r'^(\d+)\s*[-—~]\s*(\d+)$', r)
-                        if m:
-                            s, e = int(m.group(1)), int(m.group(2))
-                            _eps.update(range(min(s, e), max(s, e) + 1))
-                        elif _re.match(r'^\d+$', r):
-                            _eps.add(int(r))
+                    from fenji_parser import expand_ranges
+                    _eps = expand_ranges(parts[1])
                     if _eps:
                         raw_workloads[cur_name][editor] = raw_workloads[cur_name].get(editor, 0) + len(_eps)
     # 空项目块剔除
@@ -499,76 +517,16 @@ def register_routes(app, db):
             return jsonify({"ok": False, "message": str(e)}), 500
 
     # ==================== 数据洞察（可选增强：大屏 / 日历 / 导出）====================
-    def _parse_ym(s):
-        """从 'YYYY-MM-DD HH:MM:SS' 或 'YYYY-MM' 提取月份 'YYYY-MM'。"""
-        if not s:
-            return ""
-        s = str(s).strip()
-        return s[:7] if len(s) >= 7 and s[4] == "-" else ""
-
     @app.route("/api/insights/summary")
     def features_insights_summary():
-        """KPI 汇总（以当月为基准）：
-        项目数 / 当月项目数 / 当月已完成 / 进行中项目 / 成员
-        当月项目状态分布 + 各剪辑当月集数（环形图用）。
-        """
+        """KPI 汇总（以当月为基准），口径与 compute_overview_stats 一致。"""
         try:
             from datetime import datetime
-            now = datetime.now()
-            month = now.strftime("%Y-%m")
-            projs = db.get_all_projects() or []
-            # 当月项目：以 project_month 为准（与月度报告口径一致）
-            month_projs = [p for p in projs if (p.get("project_month") or "") == month]
-            # 当月已完成：delivered_date 落在本月
-            month_completed = [p for p in projs if _parse_ym(p.get("delivered_date")) == month]
-            # 进行中：状态非"已完成"且非空
-            in_progress = [p for p in projs if (p.get("custom_status") or "").strip() not in ("", "已完成")]
-            # 当月项目状态分布
-            status_map = {}
-            for p in month_projs:
-                st = (p.get("custom_status") or p.get("delivery_status") or "未设置").strip() or "未设置"
-                status_map[st] = status_map.get(st, 0) + 1
-            # 各剪辑当月集数：统一口径，从当月项目 episode_plan 聚合
-            editor_eps = {}
-            try:
-                from features import aggregate_editor_workload
-                for ed in aggregate_editor_workload(db, month=month):
-                    editor_eps[ed["name"]] = ed["assigned"]
-            except Exception:
-                for p in month_projs:
-                    plan = p.get("episode_plan")
-                    if isinstance(plan, str):
-                        try:
-                            plan = json.loads(plan)
-                        except Exception:
-                            plan = {}
-                    if isinstance(plan, dict):
-                        for ep, editor in plan.items():
-                            if not editor:
-                                continue
-                            try:
-                                n = int(ep)
-                            except Exception:
-                                continue
-                            editor_eps[str(editor)] = editor_eps.get(str(editor), 0) + 1
-            # 成员数
-            members = 0
-            try:
-                members = len(db.list_members() or []) if hasattr(db, "list_members") else 0
-            except Exception:
-                pass
-            return jsonify({
-                "ok": True,
-                "month": month,
-                "projectCount": len(projs),
-                "monthProjectCount": len(month_projs),
-                "monthCompleted": len(month_completed),
-                "inProgress": len(in_progress),
-                "memberCount": members,
-                "statusMap": status_map,
-                "editorEpisodes": editor_eps,
-            })
+            month = datetime.now().strftime("%Y-%m")
+            data = compute_insights_summary(db, month=month)
+            return jsonify({"ok": True, **data})
         except Exception as e:
+            import traceback; traceback.print_exc()
             return jsonify({"ok": False, "message": str(e)}), 500
 
     @app.route("/api/insights/calendar")

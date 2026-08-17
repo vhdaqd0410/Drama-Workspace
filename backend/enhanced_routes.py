@@ -106,33 +106,9 @@ def _episode_summary_scan_tasks():
     return tasks
 
 def _parse_assign_line(plan, line):
-    """解析一行 '剪辑师：1-3，44-45' 加入 plan（模块级辅助函数）。"""
-    line = (line or "").strip()
-    if '：' in line:
-        parts = line.split('：', 1)
-    elif ':' in line:
-        parts = line.split(':', 1)
-    else:
-        return
-    if len(parts) < 2:
-        return
-    editor = parts[0].strip()
-    ranges = parts[1].strip()
-    if not editor or not ranges:
-        return
-    for r in _re.split(r'[,，、;\s]+', ranges):
-        r = r.strip()
-        if not r:
-            continue
-        m = _re.match(r'^(\d+)\s*[-—~]\s*(\d+)$', r)
-        if m:
-            s, e = int(m.group(1)), int(m.group(2))
-            for ep in range(min(s, e), max(s, e) + 1):
-                plan[str(ep)] = editor
-        else:
-            m2 = _re.match(r'^(\d+)$', r)
-            if m2:
-                plan[m2.group(1)] = editor
+    """解析一行 '剪辑师：1-3，44-45' 加入 plan（统一委托 fenji_parser，避免多份漂移）。"""
+    from fenji_parser import parse_assign_line
+    parse_assign_line(plan, line)
 
 def _auto_sync_delivery_dates(target_path):
     """分集导出写入目标文件后，自动从表格读取胶片日期更新项目交付日期。"""
@@ -1165,6 +1141,28 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         # 1. 获取基准 bytes
         target_path = (body.get('target_path') or '').strip()
         use_target = bool(target_path)
+        # 安全加固：target_path 只允许 Excel 文件，且必须落在 fenji_targets 或已配置的目标目录内，
+        # 防止被用于任意写盘（任意路径写文件风险）。
+        if use_target:
+            _ext = _os.path.splitext(target_path)[1].lower()
+            if _ext not in ('.xlsx', '.xlsm', '.xls'):
+                return jsonify(ok=False, msg='目标文件必须为 Excel (.xlsx/.xlsm/.xls)'), 400
+            _abs_tgt = _os.path.abspath(target_path)
+            _allowed_dirs = []
+            try:
+                _s = db.get_all_settings() or {}
+                _fj_tp = (_s.get('fj_target_path') or '').strip()
+                _fj_mp = (_s.get('fj_master_path') or '').strip()
+                if _fj_tp: _allowed_dirs.append(_os.path.abspath(_os.path.dirname(_fj_tp)))
+                if _fj_mp: _allowed_dirs.append(_os.path.abspath(_os.path.dirname(_fj_mp)))
+            except Exception:
+                pass
+            _allowed_dirs.append(_os.path.abspath(_TARGET_DIR))
+            _in_allowed = any(_abs_tgt.startswith(d + _os.sep) or _abs_tgt == d
+                              for d in _allowed_dirs if d)
+            if not _in_allowed:
+                # 不在白名单目录内：拒绝，避免任意路径写盘
+                return jsonify(ok=False, msg='目标文件需位于分集目标目录内'), 400
         tpl_bytes = None
         original_name = (body.get('originalTemplateName')
                          or body.get('template_name')
@@ -1295,6 +1293,17 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return jsonify(ok=False, msg='无文件内容'), 400
         if not _os.path.isdir(folder):
             return jsonify(ok=False, msg=f'文件夹不存在: {folder}'), 400
+
+        # 安全加固：仅允许写入 Excel 文件，且禁止直接写入系统/软件关键目录
+        safe_fname = _os.path.basename(fname or '')
+        if _os.path.splitext(safe_fname)[1].lower() not in ('.xlsx', '.xlsm', '.xls'):
+            return jsonify(ok=False, msg='仅允许保存 Excel (.xlsx/.xlsm/.xls)'), 400
+        _abs_dir = _os.path.normpath(_os.path.abspath(folder))
+        _app_root = _os.path.normpath(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        _forbidden = {_os.path.normpath(_os.path.abspath(_os.environ.get('SystemRoot', r'C:\Windows'))),
+                      _app_root}
+        if _abs_dir in _forbidden:
+            return jsonify(ok=False, msg='不允许直接保存到系统或软件根目录'), 400
 
         try:
             file_bytes = _b64.b64decode(file_b64)

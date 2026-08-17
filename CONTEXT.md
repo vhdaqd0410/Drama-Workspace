@@ -42,7 +42,7 @@
 | **本月已完成 / 当月已完成** | 上述本月项目里 `custom_status == '已完成'` | `compute_overview_stats().this_month_done` |
 | **制作中 / 进行中** | 上述本月项目里 `custom_status` 非空且非 '已完成' | `compute_overview_stats().producing` |
 | **恒等式** | `本月项目 = 本月已完成 + 制作中`（必成立） | `compute_overview_stats` 内部校验 |
-| **各剪辑集数（剪辑师工作量）** | 遍历**所有项目**的 `episode_plan`，逐集计数到对应剪辑师 | `/api/stats/dashboard` 的 `editors` |
+| **各剪辑集数（剪辑师工作量）** | 从项目 `episode_plan`（分集数据，最终口径）逐集计数到对应剪辑师，按 `project_month` 过滤当月 | `features.aggregate_editor_workload()`（三端点同源） |
 | **当月状态分布** | 前端 `projects` 数组按 `project_month == 当前月` 过滤后统计 `custom_status` | 首页 `renderOverviewCharts` |
 | **交付日期** | `projects.delivered_date`（YYYY-MM-DD），非空即计入交付日历该日 | `/api/insights/calendar` |
 | **月度报告项目清单** | DB `projects` 按 `project_month == 所选月份` | `/api/report/monthly` |
@@ -51,7 +51,9 @@
 ### 关键约定
 - **"当月"一律指 `project_month`，不是 `created_at`**。`created_at` 是记录创建时间，不能当业务月份用。
 - **前端统一用 `window._overviewStats`（来自 `/api/projects` 的 `overview_stats`）** 显示首页/洞察的 KPI，避免各端口径漂移。
-- **各剪辑集数统一用 `/api/stats/dashboard` 的 `editors`**（数据洞察环形图、月度报告工作量看板同源）。
+- **各剪辑集数统一用 `features.aggregate_editor_workload(db, month=...)`**（数据洞察 `/api/insights/summary`、数据看板 `/api/stats/dashboard`、月度报告同源）。统计口径始终以分集数据(`episode_plan`)为最终数据源；`editor_workload` 列仅向下兼容、不被统计读取。
+- **数据洞察 KPI 用 `features.compute_insights_summary(db, month)`**：本月项目=有制作痕迹且 `project_month==当月`；本月已完成=其中 `custom_status=='已完成'`（**不是 `delivered_date`**）；制作中=其中状态非空非已完成。
+- **分集解析统一用 `fenji_parser.parse_assign_line()`**（features / enhanced_routes / fenji 三处共用，避免正则漂移）。
 
 ---
 

@@ -64,7 +64,7 @@ function notifGroup(title, color, items, renderItem){
   return '<div style="margin-bottom:16px"><div style="font-size:12px;font-weight:600;color:'+color+';margin-bottom:6px">'+title+' ('+items.length+')</div>'+rows+'</div>';
 }
 function notifRow(inner, name, actions){
-  const go = name ? 'onclick="jumpToProject(\'' + name.replace(/'/g,"") + '\')"' : '';
+  const go = name ? 'onclick="jumpToProject(\'' + jsq(name) + '\')"' : '';
   const acts = actions ? '<div style="display:flex;gap:6px;margin-top:6px">'+actions+'</div>' : '';
   return '<div style="padding:9px 12px;background:#fafafa;border:1px solid var(--border,#e5e5ea);border-radius:9px;margin-bottom:6px;font-size:13px;cursor:'+(name?'pointer':'default')+'" '+go+'>'+inner+acts+'</div>';
 }
@@ -73,17 +73,17 @@ function renderNotifBody(body){
   let html = '';
   html += notifGroup('⚠️ 逾期交付 ('+ (d.today||'') +')', '#c5221f', d.overdue, function(p){
     return notifRow('<b>'+escHtml(p.name)+'</b> <span style="color:#c5221f;font-size:11px;margin-left:6px">逾期 '+escHtml(p.date)+'</span>'+(p.department?'<div style="font-size:11px;color:#86868b">'+escHtml(p.department)+'</div>':''), p.name,
-      '<button class="btn btn-sm" onclick="notifReschedule(\''+(p.name||'').replace(/'/g,"")+'\',\''+escHtml(p.date)+'\')">🗓 改期</button>'
-      +'<button class="btn btn-sm" onclick="notifDismiss(\'overdue:'+(p.name||'').replace(/'/g,"")+'\')">🙈 忽略</button>');
+      '<button class="btn btn-sm" onclick="notifReschedule(\''+jsq(p.name||'')+'\',\''+jsq(p.date)+'\')">🗓 改期</button>'
+      +'<button class="btn btn-sm" onclick="notifDismiss(\'overdue:'+jsq(p.name||'')+'\')">🙈 忽略</button>');
   });
   html += notifGroup('✅ 今日交付', '#137333', d.today_deliver, function(p){
     return notifRow('<b>'+escHtml(p.name)+'</b>'+(p.department?'<div style="font-size:11px;color:#86868b">'+escHtml(p.department)+'</div>':''), p.name,
-      '<button class="btn btn-sm" onclick="notifDismiss(\'today_deliver:'+(p.name||'').replace(/'/g,"")+'\')">🙈 忽略</button>');
+      '<button class="btn btn-sm" onclick="notifDismiss(\'today_deliver:'+jsq(p.name||'')+'\')">🙈 忽略</button>');
   });
   html += notifGroup('⏳ 即将交付 (3天内)', '#ff9f0a', d.upcoming, function(p){
     return notifRow('<b>'+escHtml(p.name)+'</b> <span style="font-size:11px;color:#ff9f0a;margin-left:6px">'+escHtml(p.date)+'</span>'+(p.department?'<div style="font-size:11px;color:#86868b">'+escHtml(p.department)+'</div>':''), p.name,
-      '<button class="btn btn-sm" onclick="notifReschedule(\''+(p.name||'').replace(/'/g,"")+'\',\''+escHtml(p.date)+'\')">🗓 改期</button>'
-      +'<button class="btn btn-sm" onclick="notifDismiss(\'upcoming:'+(p.name||'').replace(/'/g,"")+'\')">🙈 忽略</button>');
+      '<button class="btn btn-sm" onclick="notifReschedule(\''+jsq(p.name||'')+'\',\''+jsq(p.date)+'\')">🗓 改期</button>'
+      +'<button class="btn btn-sm" onclick="notifDismiss(\'upcoming:'+jsq(p.name||'')+'\')">🙈 忽略</button>');
   });
   html += notifGroup('📌 待办提醒', '#0071e3', d.todos, function(t){
     const proj = (t.project||'').replace(/'/g,"");
