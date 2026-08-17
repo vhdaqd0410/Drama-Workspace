@@ -122,3 +122,56 @@ def compute_commission_breakdown(editor_workload, month=None, cfg_path=None):
         "total_episodes": sum(r["episodes"] for r in rows),
     }
     return rows, summary
+
+
+def compute_person_cards(db, year=None, cfg_path=None):
+    """个人工作量卡片（功能2）：每人年度逐月集数 + 角色 + 汇总。
+
+    db: 项目数据库
+    year: 如 '2026'；默认当前年。
+    返回 [{'name','role','annual_total','month_count','best_month','best_eps',
+            'monthly': {'2026-01': n, ...}}]
+    """
+    from datetime import datetime
+    from collections import defaultdict
+    if not year:
+        year = str(datetime.now().year)
+    roles, _rules = load_config(cfg_path)
+    # 逐月集数
+    monthly = defaultdict(lambda: defaultdict(int))  # name -> month -> eps
+    try:
+        projs = db.get_all_projects() or []
+    except Exception:
+        projs = []
+    for p in projs:
+        pm = (p.get("project_month") or "").strip()
+        if not pm.startswith(year):
+            continue
+        plan = p.get("episode_plan") or ""
+        if not plan or plan == "{}":
+            continue
+        try:
+            plan = json.loads(plan) if isinstance(plan, str) else plan
+        except Exception:
+            continue
+        if not isinstance(plan, dict):
+            continue
+        for _ep, ed in plan.items():
+            if ed and str(ed).strip():
+                monthly[str(ed).strip()][pm] += 1
+    # 汇总
+    cards = []
+    for name, by_month in monthly.items():
+        total = sum(by_month.values())
+        best_month = max(by_month, key=lambda m: by_month[m]) if by_month else None
+        cards.append({
+            "name": name,
+            "role": _normalize_role(roles.get(name, "剪辑助理")),
+            "annual_total": total,
+            "month_count": len(by_month),
+            "best_month": best_month,
+            "best_eps": by_month.get(best_month, 0) if best_month else 0,
+            "monthly": dict(by_month),
+        })
+    cards.sort(key=lambda c: -c["annual_total"])
+    return {"year": year, "cards": cards}

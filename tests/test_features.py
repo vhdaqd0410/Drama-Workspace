@@ -413,3 +413,33 @@ class TestCommissionBreakdown:
         assert summary["unmet_quota"] == 1
 
 
+# ============================================================
+# 11. 个人工作量卡片（compute_person_cards）—— 年度逐月趋势
+# ============================================================
+
+class TestPersonCards:
+    def test_annual_trend(self, tmp_db):
+        tmp_db.upsert_project("P1", "", "")
+        tmp_db.upsert_project("P2", "", "")
+        tmp_db.update_project_status("P1", project_month="2026-07")
+        tmp_db.update_project_status("P2", project_month="2026-08")
+        tmp_db.set_episode_plan("P1", {"1": "张三", "2": "张三"})
+        tmp_db.set_episode_plan("P2", {"1": "张三", "3": "李四"})
+        from commission_service import compute_person_cards
+        data = compute_person_cards(tmp_db, year="2026")
+        by = {c["name"]: c for c in data["cards"]}
+        assert by["张三"]["annual_total"] == 3  # 7月2集 + 8月1集
+        assert by["张三"]["month_count"] == 2
+        assert by["张三"]["best_month"] == "2026-07"
+        assert by["李四"]["annual_total"] == 1
+        assert data["year"] == "2026"
+
+    def test_filters_by_year(self, tmp_db):
+        tmp_db.upsert_project("P1", "", "")
+        tmp_db.update_project_status("P1", project_month="2025-12")
+        tmp_db.set_episode_plan("P1", {"1": "张三"})
+        from commission_service import compute_person_cards
+        data = compute_person_cards(tmp_db, year="2026")
+        assert data["cards"] == []  # 2025年的不算进2026
+
+

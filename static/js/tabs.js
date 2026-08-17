@@ -123,15 +123,59 @@ async function loadReportTab(){
     </select>
     <button class="btn btn-sm btn-primary" onclick="_loadReportData()">🔍 查看报告</button>
     <button class="btn btn-sm" onclick="_loadCommissionReport()" style="background:#af52de;color:#fff" title="从分集数据计算本月每人绩效与提成">💰 提成/绩效</button>
+    <button class="btn btn-sm" onclick="_loadPersonCards()" style="background:#0071e3;color:#fff" title="年度每人工作量卡片与趋势">👥 个人卡片</button>
     <button class="btn btn-sm" onclick="_downloadExcel()" style="background:#34c759;color:#fff">📥 下载 Excel</button>
   </div>
   <div id="reportWorkloadBoard" style="margin-bottom:20px"></div>
   <div id="commissionBoard" style="margin-bottom:20px"></div>
+  <div id="personCardsBoard" style="margin-bottom:20px"></div>
   <div id="reportBody">正在加载...</div>`;
   el.innerHTML = html;
   // 渲染工作量/数据看板
   try{ if(typeof renderWorkloadBoard==='function') await renderWorkloadBoard('reportWorkloadBoard'); }catch(_){}
   _loadReportData();
+}
+
+// 个人工作量卡片（功能2）：年度逐月集数 + 角色 + 汇总 + 趋势
+async function _loadPersonCards(){
+  const el = document.getElementById('personCardsBoard');
+  if(!el) return;
+  el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-sec)">👥 正在加载个人卡片...</div>';
+  try{
+    const d = await api('GET','/api/commission/person_cards');
+    if(!d || !d.ok){ el.innerHTML = '<div style="color:var(--red);padding:12px">'+escHtml(d?.message||'加载失败')+'</div>'; return; }
+    const cards = d.cards || [];
+    if(!cards.length){ el.innerHTML = '<div style="color:var(--text-sec);padding:20px;text-align:center">'+escHtml(d.year)+' 年暂无分集数据</div>'; return; }
+    // 全年月份序列
+    const months = ['01','02','03','04','05','06','07','08','09','10','11','12'].map(m=>d.year+'-'+m);
+    const maxTotal = Math.max(...cards.map(c=>c.annual_total), 1);
+    let html = '<div style="background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:14px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+      + '<h4 style="margin:0;font-size:14px">👥 个人工作量卡片（'+escHtml(d.year)+' 年 · '+cards.length+' 人）</h4>'
+      + '</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
+    cards.forEach(c => {
+      const barW = Math.round(c.annual_total/maxTotal*100);
+      const monthCells = months.map(m => {
+        const v = c.monthly[m] || 0;
+        return '<div style="flex:1;text-align:center"><div style="font-size:10px;color:var(--text-sec)">'+m.slice(5)+'</div>'
+          + '<div style="font-size:11px;font-weight:600">'+(v||'·')+'</div></div>';
+      }).join('');
+      html += '<div style="border:1px solid var(--border,#e5e5ea);border-radius:10px;padding:10px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        + '<span style="font-weight:700;font-size:14px">'+escHtml(c.name)+'</span>'
+        + '<span style="font-size:11px;color:var(--text-sec)">'+escHtml(c.role)+'</span></div>'
+        + '<div style="font-size:11px;color:var(--text-sec);margin:6px 0">年度 <b style="color:#0071e3">'+c.annual_total+'</b> 集 · 参与 '+c.month_count+' 个月 · 峰值 <b>'+c.best_eps+'</b> 集('+escHtml(c.best_month||'—')+')</div>'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+        + '<div style="flex:1;height:8px;background:#f0f2f5;border-radius:4px;overflow:hidden"><div style="width:'+barW+'%;height:100%;background:linear-gradient(90deg,#5ac8fa,#0071e3);border-radius:4px"></div></div>'
+        + '</div>'
+        + '<div style="display:flex;gap:2px;margin-top:6px">'+monthCells+'</div>'
+        + '</div>';
+    });
+    html += '</div></div>';
+    el.innerHTML = html;
+  }catch(e){
+    el.innerHTML = '<div style="color:var(--red);padding:12px">加载失败: '+escHtml(e.message)+'</div>';
+  }
 }
 
 // 提成/绩效全链路报表（功能1）：从分集数据计算每人绩效+提成
