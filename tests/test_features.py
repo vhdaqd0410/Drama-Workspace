@@ -197,24 +197,22 @@ class TestAggregateEditorWorkload:
         assert by_name.get("张三") == 1
         assert "李四" not in by_name
 
-    def test_workload_overlap_uses_independent_count(self, tmp_db):
-        # 权威文件里某项目张靖杰=4-7,21-25，而张淯升=16-28 重叠了21-25。
-        # episode_plan 是{集号:剪辑师}，重叠被后写覆盖成张靖杰只4集；
-        # 但 editor_workload 独立计数应为张靖杰=9。统计必须以独立计数为准。
+    def test_aggregate_uses_episode_plan_as_final(self, tmp_db):
+        # 分集详情(episode_plan)是最终数据源：即使存在 editor_workload，也以 episode_plan 为准
+        # （用户在分集管理手动校准过，episode_plan 即最终口径）
         tmp_db.upsert_project("P5", "", "")
-        # 模拟同步后：episode_plan 因重叠丢失21-25，但 editor_workload 保留9
         tmp_db.set_episode_plan("P5", {"4": "张靖杰", "5": "张靖杰", "6": "张靖杰",
                                         "7": "张靖杰", "21": "张淯升", "22": "张淯升"})
+        # editor_workload 是旧目标文件推导的旧值，应被忽略
         tmp_db.set_editor_workload("P5", {"张靖杰": 9, "张淯升": 13})
         from features import aggregate_editor_workload
         wl = aggregate_editor_workload(tmp_db)
         by_name = {e["name"]: e["assigned"] for e in wl}
-        # 必须用独立计数 editor_workload，而不是被覆盖的 episode_plan
-        assert by_name["张靖杰"] == 9
-        assert by_name["张淯升"] == 13
+        # 以当前 episode_plan 为准：张靖杰=4（重叠已由用户在UI校准解决）
+        assert by_name["张靖杰"] == 4
+        assert by_name["张淯升"] == 2
 
-    def test_workload_fallback_to_episode_plan(self, tmp_db):
-        # 无 editor_workload 时回退到 episode_plan
+    def test_aggregate_from_episode_plan(self, tmp_db):
         tmp_db.upsert_project("P6", "", "")
         tmp_db.set_episode_plan("P6", {"1": "张三", "2": "张三"})
         from features import aggregate_editor_workload

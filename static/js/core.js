@@ -320,6 +320,8 @@ function jumpToProject(name){
     if($('filterStatus'))$('filterStatus').value='';
     if($('filterMonth'))$('filterMonth').value='';
   }catch(_){}
+  // 强制全量渲染（绕过懒加载分批，保证目标卡片存在DOM里，避免"未找到项目卡片"）
+  window._forceFullRender = true;
   // 重新渲染确保卡片存在
   try{ renderDashboard(); }catch(_){}
 
@@ -334,8 +336,10 @@ function jumpToProject(name){
         break;
       }
     }
+    // 释放强制全量标志
+    window._forceFullRender = false;
     if(!target){
-      toast('未找到项目卡片（可能需展开分组）', 'info');
+      toast('未找到项目卡片（可能已不在当前数据中）', 'info');
       return;
     }
     // 滚动到卡片
@@ -1014,7 +1018,7 @@ function renderDashboard(){
 
   // ===== 懒加载：默认只渲染组内NAS进行中的完整卡片，其他分页 =====
   const _LAZY_BATCH = 20;      // 非活跃 section 每批渲染的卡片数
-  const _forceFull = !!(q || fd || fs || fm);  // 筛选激活时全渲染
+  const _forceFull = !!(q || fd || fs || fm) || window._forceFullRender;  // 筛选激活或跳转定位时全渲染
   let totalShown=0;
   const sectionHTML=allSections.map(sec=>{
     let projs=(sec.projects||[]).filter(matchProject);
