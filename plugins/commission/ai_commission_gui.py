@@ -5,6 +5,14 @@ from tkinter import ttk, messagebox, filedialog
 import subprocess, threading, os, sys, json, re, tempfile
 from datetime import datetime
 
+# 强制 stdout/stderr 使用 UTF-8，避免 Windows GBK 无法编码 ⚠/emoji 等字符导致报错
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if _stream is not None and hasattr(_stream, 'reconfigure'):
+            _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(SCRIPT_DIR, 'src')
 sys.path.insert(0, SRC_DIR)  # 让 Python 找到 src/ 下的模块

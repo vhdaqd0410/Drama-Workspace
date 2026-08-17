@@ -20,12 +20,37 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from copy import copy
 
-# 强制 stdout 使用 UTF-8，避免 Windows GBK 编码报错（仅在直接运行时）
-if __name__ == '__main__' or (len(sys.argv) >= 2 and sys.stdout.encoding != 'utf-8'):
+# 强制 stdout/stderr 使用 UTF-8，避免 Windows GBK 编码报错（无论作为主程序运行还是被 GUI 导入）
+for _stream in (sys.stdout, sys.stderr):
     try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        if _stream is not None and hasattr(_stream, 'reconfigure'):
+            _stream.reconfigure(encoding='utf-8', errors='replace')
     except Exception:
         pass
+
+
+def _force_utf8_stdio():
+    """确保 stdout/stderr 为 UTF-8；若无法重配置(如 pythonw 下为 None/DEVNULL 哑流)则换用安全编码，
+    避免 print('⚠'...) 触发 GBK UnicodeEncodeError。"""
+    for _name in ('stdout', 'stderr'):
+        _s = getattr(sys, _name)
+        if _s is None:
+            # pythonw 无控制台：换成一个丢弃所有输出的 UTF-8 哑流，避免 print 抛错
+            try:
+                import io
+                setattr(sys, _name, io.StringIO())
+            except Exception:
+                pass
+            continue
+        try:
+            if hasattr(_s, 'reconfigure'):
+                _s.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            try:
+                import io
+                setattr(sys, _name, io.StringIO())
+            except Exception:
+                pass
 
 # ===================== 路径 =====================
 try:
@@ -309,6 +334,7 @@ def load_overtime_map(overtime_file):
 
 def parse_projects(df, default_year=None, overtime_map=None):
     """解析项目表；项目标题不完整时跳过其分配行并输出明确警告。"""
+    _force_utf8_stdio()  # 确保 print 特殊字符不触发 GBK 报错
     records = []
     proj_name, proj_id, end_date = '', '', None
     project_catalog = {}
