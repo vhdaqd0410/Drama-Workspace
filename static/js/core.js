@@ -612,45 +612,44 @@ async function renderWorkloadBoard(containerId){
 
     let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:20px">';
 
-    // === 剪辑师工作量看板 ===
+    // === 剪辑师工作量看板（紧凑卡片网格，无需滚动看全部） ===
     const maxAssigned = editors.length ? editors[0].assigned : 1;
-    const editorRows = editors.map(function(e){
+    const editorCards = editors.map(function(e){
       const assigned = e.assigned || 0;
-      const pct = maxAssigned>0 ? Math.round(assigned/maxAssigned*100) : 0;
       const quota = e.quota || 0;
-      const quotaPct = quota && maxAssigned>0 ? Math.min(100, Math.round(quota/maxAssigned*100)) : 0;
       const reached = quota>0 && assigned>=quota;
-      const gap = quota>0 ? (quota-assigned) : 0;
-      // 状态徽标：未达 / 已达标 / 组长无基准
-      let badge;
-      if(quota<=0) badge = '<span style="font-size:10px;color:#86868b;border:1px solid #d0d0d5;border-radius:4px;padding:0 4px">组长</span>';
-      else if(reached) badge = `<span style="font-size:10px;color:#fff;background:#34c759;border-radius:4px;padding:0 5px;font-weight:700">已达标 ✓</span>`;
-      else badge = `<span style="font-size:10px;color:#fff;background:#ff3b30;border-radius:4px;padding:0 5px;font-weight:700">未达 差${gap}集</span>`;
-      // 进度条：未达部分红色，达标部分绿色；卡点橙色竖线+数字
-      const barColor = reached ? 'linear-gradient(90deg,#34c759,#30d158)' : 'linear-gradient(90deg,#ff3b30,#ff9500)';
-      const quotaMark = quota>0
-        ? `<div style="position:absolute;top:-4px;bottom:-4px;left:${quotaPct}%;width:3px;background:#ff9500;z-index:3;box-shadow:0 0 4px rgba(255,149,0,.6)"></div>
-           <div style="position:absolute;top:0;right:0;left:0;text-align:center;line-height:22px;font-size:0;z-index:2"></div>`
-        : '';
-      const quotaLabel = quota>0
-        ? `<div style="position:absolute;top:-16px;left:${quotaPct}%;transform:translateX(-50%);font-size:10px;color:#fff;background:#ff9500;border-radius:3px;padding:0 4px;font-weight:700;white-space:nowrap;z-index:3">${quota}提</div>`
-        : '';
-      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <div style="width:76px;font-size:12px;color:#4a4a4a;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${htm(e.name)}">${htm(e.name)}</div>
-        <div style="flex:1;height:22px;background:#f0f2f5;border-radius:4px;overflow:hidden;position:relative;margin-top:16px">${quotaMark}${quotaLabel}<div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width .5s"></div></div>
-        <div style="width:64px;text-align:left">
-          <div style="font-size:13px;font-weight:700;color:${reached?'#34c759':'#e67e22'}">${assigned}集</div>
+      const gap = quota>0 ? Math.max(0, quota-assigned) : 0;
+      // 相对卡点的进度（未达时红色，达标绿色）
+      const qpct = quota>0 ? Math.min(100, Math.round(assigned/quota*100)) : (maxAssigned>0?Math.round(assigned/maxAssigned*100):0);
+      const barColor = reached ? '#34c759' : '#ff3b30';
+      // 达标/未达图标
+      let state;
+      if(quota<=0) state = '<span style="font-size:11px;color:#86868b">组长</span>';
+      else if(reached) state = '<span style="color:#34c759;font-weight:700">✓ 达标</span>';
+      else state = `<span style="color:#ff3b30;font-weight:700">✗ 差${gap}集</span>`;
+      return `<div style="border:1px solid ${reached?'#c8f0d6':'#ffd7d7'};background:${reached?'#f6fff8':'#fff7f7'};border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;font-size:13px" title="${htm(e.name)}">${htm(e.name)}</span>
+          <span style="font-size:11px;color:#86868b">${e.projects}部</span>
         </div>
-        <div style="width:78px">${badge}</div>
+        <div style="display:flex;align-items:baseline;gap:4px">
+          <span style="font-size:20px;font-weight:800;color:${reached?'#1a8a3a':'#c5221f'}">${assigned}</span>
+          <span style="font-size:11px;color:#86868b">集${quota>0?' / '+quota+'提':''}</span>
+        </div>
+        <div style="height:7px;background:#f0f2f5;border-radius:4px;overflow:hidden;position:relative">
+          <div style="width:${qpct}%;height:100%;background:${barColor};border-radius:4px"></div>
+          ${quota>0?`<div style="position:absolute;top:-1px;bottom:-1px;left:100%;width:2px;background:#ff9500" title="卡点${quota}"></div>`:''}
+        </div>
+        <div style="font-size:11px">${state}</div>
       </div>`;
     }).join('');
 
     html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:6px">
         <div style="font-weight:700;font-size:14px">👥 剪辑师工作量（本月）</div>
-        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff9500;font-weight:600">橙线=提成卡点</span> · <span style="color:#ff3b30">红=未达</span> · <span style="color:#34c759">绿=已达标</span></span>
+        <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff3b30">红=未达卡点</span> · <span style="color:#34c759">绿=已达标</span> · <span style="color:#ff9500">橙线=卡点</span></span>
       </div>
-      <div style="max-height:340px;overflow-y:auto">${editorRows || '<div style="color:#86868b;padding:20px;text-align:center">暂无分集数据</div>'}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${editorCards || '<div style="color:#86868b;padding:20px;text-align:center">暂无分集数据</div>'}</div>
     </div>`;
 
     // === 部门统计 ===
