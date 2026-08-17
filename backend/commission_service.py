@@ -132,11 +132,12 @@ def compute_commission_breakdown(editor_workload, month=None, cfg_path=None,
 
 
 def compute_group_completed(db, month=None, cfg_path=None):
-    """功能3：统计每个组长所在组的当月完成部数。
+    """功能3：统计每个组长所在组的当月部数（组长组奖基准）。
 
-    组内某部"完成" = 该项目 custom_status=='已完成' 且 project_month==当月。
-    项目归属某组：该组任一成员出现在该项目 episode_plan 中即计入。
-    返回 {组长姓名: 完成部数}。
+    口径与项目看板「本月项目」一致：统计 project_month==当月 的所有项目
+    （不限定状态），凡该组任一成员出现在该项目 episode_plan 中即计入该组。
+    数据来源 = 本月项目（项目看板本月项目里是多少就是多少）。
+    返回 {组长姓名: 部数}。
     """
     import json as _json
     from datetime import datetime
@@ -157,8 +158,6 @@ def compute_group_completed(db, month=None, cfg_path=None):
     result = {leader: 0 for leader in leader_members}
     for p in projs:
         if (p.get("project_month") or "") != month:
-            continue
-        if str(p.get("custom_status") or "").strip() != "已完成":
             continue
         plan = p.get("episode_plan") or "{}"
         try:
