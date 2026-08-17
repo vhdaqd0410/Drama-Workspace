@@ -12,6 +12,7 @@ import logging
 import threading
 from datetime import datetime
 from scan import _natural_key, _quick_find_file
+from utils import decode_output
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ def _shell_copy_file(src_path, dst_dir):
             ["cmd", "/c", "copy", "/y", src_path, dst],
             capture_output=True, timeout=300)
         if result.returncode != 0:
-            err = (result.stderr or result.stdout or b"").decode("gbk", errors="replace").strip()
+            err = decode_output(result.stderr or result.stdout or b"").strip()
             raise OSError("cmd copy 失败: " + err)
         return True
 
@@ -624,7 +625,7 @@ class DeliverMixin:
                 capture_output=True, timeout=300)
             if result.returncode != 0 or not os.path.isdir(target_path):
                 err = (result.stderr or result.stdout or b"Unknown")
-                err_text = err.decode("gbk", errors="replace").strip()
+                err_text = decode_output(err).strip()
                 return False, "移动失败: " + err_text
 
         # 更新 DB 中的 group_path
@@ -1315,7 +1316,7 @@ class DeliverMixin:
                         message="成片已推送到: " + dst + "，robocopy rc=" + str(rc))
                     self._notify_desktop("✅ 初版交付完成", project_name + " 已推送到制作部，状态→审核中")
                 else:
-                    err = stderr.decode("gbk", errors="replace")[:500] \
+                    err = decode_output(stderr)[:500] \
                         if stderr else "robocopy rc=%d" % rc
                     with self._lock:
                         task["status"] = "error"

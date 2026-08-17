@@ -114,13 +114,49 @@ async function loadInsights(){
           </div>
         </div>
         <div id="insightsCalBox"><div style="color:var(--text-sec);font-size:12px">加载中...</div></div>
+        <div id="deliveryStatsStrip" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border,#e5e5ea);display:flex;gap:12px;flex-wrap:wrap;align-items:center"></div>
       </div>`;
     insightsCalMonth = new Date().toISOString().slice(0,7);
     populateCalDept();
     await loadInsightsCalendar();
+    loadDeliveryStats();
   }catch(e){
     body.innerHTML = '<div style="color:var(--red);text-align:center;padding:30px">加载失败: '+escHtml(e.message)+'</div>';
   }
+}
+
+// 交付日历增强统计（功能8）：按时交付率 + 延迟预警
+async function loadDeliveryStats(){
+  const el = document.getElementById('deliveryStatsStrip');
+  if(!el) return;
+  try{
+    const d = await api('GET','/api/insights/delivery_stats?month=' + insightsCalMonth);
+    if(!d || !d.ok) { el.innerHTML=''; return; }
+    const rate = d.on_time_rate !== null && d.on_time_rate !== undefined
+      ? d.on_time_rate + '%' : '—';
+    const pill = function(label, val, color){
+      return '<span style="font-size:12px;background:#f5f5f7;border:1px solid var(--border,#e5e5ea);border-radius:8px;padding:4px 10px">'
+        + label + ' <b style="color:' + color + '">' + val + '</b></span>';
+    };
+    let html = pill('✅ 按时交付率', rate, '#34c759');
+    html += pill('📦 已交付', d.delivered_count || 0, '#0071e3');
+    html += pill('⏳ 未交付', d.undelivered_count || 0, '#86868b');
+    html += pill('🔴 迟交', d.late_count || 0, '#ff3b30');
+    if(d.overdue_count){
+      html += '<span style="font-size:12px;color:#c5221f;font-weight:600">⚠️ ' + d.overdue_count + ' 个逾期预警</span>';
+    }
+    el.innerHTML = html;
+    // 若有过期预警，可点击展开
+    if(d.overdue_count){
+      el.innerHTML += ' <button class="btn btn-sm" onclick="showOverdueList(' + JSON.stringify(d.overdue || []).replace(/"/g,'&quot;') + ')">查看逾期项目</button>';
+    }
+  }catch(e){
+    el.innerHTML='';
+  }
+}
+function showOverdueList(list){
+  if(!list || !list.length) return;
+  alert('⚠️ 逾期未交付项目（共 '+list.length+' 个）：\n\n' + list.map(x=>'• '+x.name+'（应于 '+x.due_date+' 交付）').join('\n'));
 }
 
 // 环形图（SVG donut），返回 {html, total}

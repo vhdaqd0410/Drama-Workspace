@@ -231,6 +231,11 @@ class Database:
                 c.execute("ALTER TABLE projects ADD COLUMN editor_workload TEXT DEFAULT '{}'")
             except Exception:
                 pass
+            # due_date：项目预计交付/截止日期（YYYY-MM-DD），交付日历延迟预警用
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN due_date TEXT DEFAULT ''")
+            except Exception:
+                pass
 
     # ---------- migration from legacy DB ----------
 

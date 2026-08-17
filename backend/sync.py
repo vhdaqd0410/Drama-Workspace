@@ -12,6 +12,7 @@ import time
 import fnmatch
 from datetime import datetime
 from scan import find_dir_recursive
+from utils import decode_output
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def _exec(cmd, timeout, label="", unc_alt=None):
         rc = result.returncode
         if rc < 8 and rc != -9:
             return True, "ok", rc
-        err = result.stderr.decode("gbk", errors="replace")[:500] \
+        err = decode_output(result.stderr)[:500] \
             if result.stderr else "rc=%d" % rc
         return False, err, rc
     except subprocess.TimeoutExpired:
@@ -50,7 +51,7 @@ def _exec(cmd, timeout, label="", unc_alt=None):
                 rc = result.returncode
                 if rc < 8:
                     return True, "ok (unc)", rc
-                err = result.stderr.decode("gbk", errors="replace")[:500] \
+                err = decode_output(result.stderr)[:500] \
                     if result.stderr else "rc=%d" % rc
                 return False, "UNC 备选失败: " + err, rc
             except Exception as e:

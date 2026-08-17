@@ -332,3 +332,35 @@ class TestFenjiParser:
         assert p1 == p2 == p3
 
 
+# ============================================================
+# 9. 交付日历增强（compute_delivery_stats）—— 延迟预警 + 按时交付率
+# ============================================================
+
+class TestDeliveryStats:
+    def _mk(self, tmp_db, name, month, status, delivered="", due=""):
+        tmp_db.upsert_project(name, "", "")
+        kw = {"project_month": month, "custom_status": status}
+        if delivered: kw["delivered_date"] = delivered
+        if due: kw["due_date"] = due
+        tmp_db.update_project_status(name, **kw)
+
+    def test_ontime_rate_and_late(self, tmp_db):
+        self._mk(tmp_db, "A", "2026-08", "已完成", delivered="2026-08-10", due="2026-08-15")  # 按时
+        self._mk(tmp_db, "B", "2026-08", "已完成", delivered="2026-08-20", due="2026-08-15")  # 迟交
+        from features import compute_delivery_stats
+        s = compute_delivery_stats(tmp_db, month="2026-08")
+        assert s["delivered_count"] == 2
+        assert s["ontime_count"] == 1
+        assert s["late_count"] == 1
+        assert s["on_time_rate"] == 50.0
+
+    def test_overdue_undelivered(self, tmp_db):
+        # due_date 已过（相对今天）但未交付 → 预警
+        self._mk(tmp_db, "C", "2026-08", "剪辑中", delivered="", due="2020-01-01")
+        from features import compute_delivery_stats
+        s = compute_delivery_stats(tmp_db, month="2026-08")
+        assert s["undelivered_count"] == 1
+        assert s["overdue_count"] == 1
+        assert s["overdue"][0]["name"] == "C"
+
+

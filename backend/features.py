@@ -344,6 +344,8 @@ def sync_delivery_dates_from_target(target_path, db=None):
                 parsed = _parse_time_text(cur_date)
                 if parsed:
                     db.update_project_status(cur_name, delivered_date=parsed)
+                    # 功能8：目标文件里的胶片日期即"预计交付日期"，同步为 due_date
+                    db.update_project_status(cur_name, due_date=parsed)
                     updated.append({"project": cur_name, "date": parsed})
             cur_name = str(name).strip()
             cur_date = row[3].value if len(row) > 3 else None
@@ -353,6 +355,7 @@ def sync_delivery_dates_from_target(target_path, db=None):
         parsed = _parse_time_text(cur_date)
         if parsed:
             db.update_project_status(cur_name, delivered_date=parsed)
+            db.update_project_status(cur_name, due_date=parsed)
             updated.append({"project": cur_name, "date": parsed})
     return updated
 
@@ -559,6 +562,105 @@ def register_routes(app, db):
         for k in days:
             days[k] = sorted(days[k], key=lambda x: x.get("name") or "")
         return jsonify({"ok": True, "month": month, "dept": dept, "days": days})
+
+
+def compute_delivery_stats(db, month=None):
+    """交付日历增强统计（功能8）：
+    - 当月项目交付情况：已交付/未交付
+    - 按时交付率：有 due_date 且 delivered_date <= due_date 视为按时
+    - 延迟预警：due_date 已过但未交付，或 delivered_date > due_date
+    纯函数，供 /api/insights/delivery_stats 调用，便于单测。
+    """
+    from datetime import datetime
+    if not month:
+        month = datetime.now().strftime("%Y-%m")
+    try:
+        projs = db.get_all_projects() or []
+    except Exception:
+        projs = []
+    # 筛选当月项目（project_month 或 delivered_date 落在本月）
+    month_projs = [p for p in projs
+                   if (p.get("project_month") or "").startswith(month)
+                   or (p.get("delivered_date") or "").startswith(month)]
+    delivered = []
+    undelivered = []
+    overdue = []       # due_date 已过且未交付
+    late = []          # 已交付但 delivered_date > due_date
+    ontime = 0
+    today = datetime.now().date()
+
+    def _d(s):
+        s = (s or "").strip()
+        if len(s) >= 10 and s[4] == "-":
+            try:
+                return datetime.strptime(s[:10], "%Y-%m-%d").date()
+            except Exception:
+                return None
+        return None
+
+    for p in month_projs:
+        name = p.get("name") or ""
+        dd = _d(p.get("delivered_date"))
+        due = _d(p.get("due_date"))
+        status = (p.get("custom_status") or "").strip()
+        rec = {
+            "name": name, "department": p.get("department") or "",
+            "delivered_date": (p.get("delivered_date") or "").strip()[:10],
+            "due_date": (p.get("due_date") or "").strip()[:10],
+            "status": status,
+        }
+        if dd is not None:
+            delivered.append(rec)
+            if due is not None and dd <= due:
+                ontime += 1
+            elif due is not None and dd > due:
+                rec["late"] = True
+                late.append(rec)
+        else:
+            undelivered.append(rec)
+            if due is not None and due < today:
+                rec["overdue"] = True
+                overdue.append(rec)
+    total_delivered = len(delivered)
+    with_due = [r for r in delivered if _d(r.get("due_date"))]
+    on_time_rate = (ontime / len(with_due) * 100) if with_due else None
+    return {
+        "month": month,
+        "delivered_count": total_delivered,
+        "undelivered_count": len(undelivered),
+        "on_time_rate": round(on_time_rate, 1) if on_time_rate is not None else None,
+        "ontime_count": ontime,
+        "late_count": len(late),
+        "overdue_count": len(overdue),
+        "delivered": sorted(delivered, key=lambda x: x["delivered_date"]),
+        "undelivered": undelivered,
+        "overdue": sorted(overdue, key=lambda x: x["due_date"]),
+    }
+
+    @app.route("/api/insights/delivery_stats")
+    def features_insights_delivery_stats():
+        """交付日历增强统计：按时交付率 + 延迟预警。?month=YYYY-MM"""
+        try:
+            from datetime import datetime
+            month = request.args.get("month", "") or datetime.now().strftime("%Y-%m")
+            data = compute_delivery_stats(db, month=month)
+            return jsonify({"ok": True, **data})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return jsonify({"ok": False, "message": str(e)}), 500
+
+    @app.route("/api/project/<name>/due_date", methods=["POST"])
+    def features_set_due_date(name):
+        """设置项目预计交付日期（due_date）。body: {date:'YYYY-MM-DD' 或 ''清空}"""
+        data = request.get_json(silent=True) or {}
+        date = (data.get("date") or "").strip()
+        if date and len(date) == 10 and date[4] == "-" and date[7] == "-":
+            db.update_project_status(name, due_date=date)
+            _log_audit(db, name, "设置预计交付日期", date)
+            return jsonify({"ok": True, "date": date})
+        db.update_project_status(name, due_date="")
+        _log_audit(db, name, "清除预计交付日期")
+        return jsonify({"ok": True, "date": ""})
 
     @app.route("/api/insights/calendar/export")
     def features_insights_calendar_export():

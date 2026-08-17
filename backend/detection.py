@@ -13,6 +13,7 @@ import subprocess
 import threading
 import tempfile
 import traceback as _traceback
+from utils import decode_output
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -94,7 +95,7 @@ def get_video_info(video_path):
         )
         if result.returncode != 0 or not result.stdout:
             return None
-        data = json.loads(result.stdout.decode('utf-8', errors='replace'))
+        data = json.loads(decode_output(result.stdout))
         streams = [s for s in data.get('streams', []) if s.get('codec_type') == 'video']
         if not streams:
             return None
@@ -127,7 +128,7 @@ def get_video_duration(video_path):
             capture_output=True, timeout=15, creationflags=SUBPROCESS_FLAGS
         )
         if result.returncode == 0 and result.stdout:
-            return float(result.stdout.decode('utf-8', errors='replace').strip())
+            return float(decode_output(result.stdout).strip())
     except Exception:
         pass
     return 0.0
@@ -142,7 +143,7 @@ def detect_ending_black_frames(video_path, duration, check_seconds=END_CHECK_SEC
              '-an', '-f', 'null', '-'],
             capture_output=True, timeout=30, creationflags=SUBPROCESS_FLAGS
         )
-        output = result.stderr.decode('utf-8', errors='replace')
+        output = decode_output(result.stderr)
         frames = []
         for line in output.split('\n'):
             if 'black_start' in line:
@@ -238,7 +239,7 @@ def get_video_fps(video_path):
             capture_output=True, timeout=15, creationflags=SUBPROCESS_FLAGS
         )
         if result.returncode == 0 and result.stdout:
-            fps_str = result.stdout.decode('utf-8', errors='replace').strip()
+            fps_str = decode_output(result.stdout).strip()
             num, den = fps_str.split('/')
             if float(den) != 0:
                 return round(float(num) / float(den), 2)

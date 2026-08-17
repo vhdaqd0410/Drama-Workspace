@@ -224,3 +224,24 @@ class TestBackfillMonths:
             res = backfill_months(datetime(2026, m, 10), 6)
             assert len(res) == 6
             assert res[-1] == "2026-%02d" % m
+
+
+# ============================================================
+# 统一编码（utils.decode_output）—— GBK/UTF-8 输出稳健解码
+# ============================================================
+
+class TestDecodeOutput:
+    def test_utf8_bytes(self):
+        from utils import decode_output
+        assert decode_output("中文测试".encode("utf-8")) == "中文测试"
+
+    def test_gbk_bytes_fallback(self):
+        # cmd/robocopy 输出常为 GBK，应能正确解码（utf-8 失败后回退 gbk）
+        from utils import decode_output
+        b = "中文测试".encode("gbk")
+        assert decode_output(b) == "中文测试"
+
+    def test_none_and_str(self):
+        from utils import decode_output
+        assert decode_output(None) == ""
+        assert decode_output("already str") == "already str"
