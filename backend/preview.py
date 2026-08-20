@@ -331,3 +331,54 @@ class PreviewMixin:
                 if r: return r
 
         return None
+
+    def resolve_preview_folder(self, project_name, mode="delivery", subpath="", folder=""):
+        """把预览界面里某个文件夹的相对路径解析成绝对路径。
+        - editing: 01上映单集版 根目录（无子文件夹导航，返回 None）
+        - revising: 01上映单集版/{subpath} 目录下，folder 为相对名
+        - delivery: 000交付/{subpath} 目录下，folder 为相对名
+        返回绝对路径（目录或文件）；解析不到返回 None。
+        """
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return None
+        group_path = proj.get("group_path", "") or ""
+        if not group_path:
+            # 回退：用 production_path 推导成片目录
+            if mode == "delivery":
+                return None
+            root, _ = self.get_source_dir(project_name)
+            return root
+        folder = (folder or "").strip("\\/")
+        if mode == "revising":
+            # 修改目录 = group_path 下的 MMDD修改
+            rev_folder_name = subpath.replace("/", "\\").strip("\\")
+            rev_abs = None
+            for f in self.list_all_revision_folders(project_name):
+                if f["name"] == rev_folder_name:
+                    rev_abs = f["path"]
+                    break
+            if rev_abs and folder:
+                return os.path.join(rev_abs, folder)
+            return rev_abs
+        if mode == "delivery":
+            folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
+            base = os.path.join(group_path, folder_name)
+            safe_sub = subpath.replace("/", "\\").strip("\\")
+            parts = safe_sub.split("\\")
+            if parts and parts[0] == folder_name:
+                safe_sub = "\\".join(parts[1:])
+            target = base
+            if safe_sub:
+                target = os.path.normpath(os.path.join(base, safe_sub))
+                if not target.startswith(os.path.normpath(base)):
+                    target = base
+            if folder:
+                return os.path.normpath(os.path.join(target, folder))
+            return target
+        # editing 等其他模式：folder 是文件名，直接拼到成片根
+        root, _ = self.get_source_dir(project_name)
+        if root and folder:
+            return os.path.join(root, folder)
+        return root
+

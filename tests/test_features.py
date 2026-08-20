@@ -546,3 +546,37 @@ class TestGroupCompleted:
             os.unlink(tmp.name)
 
 
+# ============================================================
+# 15. 预览界面文件夹路径解析（resolve_preview_folder）
+# ============================================================
+
+class TestResolvePreviewFolder:
+    def _mk_project(self, engine, name, group_path, production_path=""):
+        engine.db.upsert_project(name, "", "")
+        engine.db.update_project_status(name, group_path=group_path, production_path=production_path)
+
+    def test_delivery_base(self, engine, tmp_path):
+        # 构造 000交付 目录结构
+        base = tmp_path / "000交付"
+        sub = base / "00成片"
+        sub.mkdir(parents=True, exist_ok=True)
+        self._mk_project(engine, "项目A", str(tmp_path))
+        # 根目录（subpath=""）→ base
+        assert engine.resolve_preview_folder("项目A", "delivery", "", "") == str(base)
+        # 进入 000交付 后列出的子文件夹
+        got = engine.resolve_preview_folder("项目A", "delivery", "000交付", "00成片")
+        assert got == str(sub)
+
+    def test_delivery_nested(self, engine, tmp_path):
+        base = tmp_path / "000交付"
+        nested = base / "子" / "更深"
+        nested.mkdir(parents=True, exist_ok=True)
+        self._mk_project(engine, "项目B", str(tmp_path))
+        got = engine.resolve_preview_folder("项目B", "delivery", "000交付/子", "更深")
+        assert got == str(nested)
+
+    def test_unknown_project_returns_none(self, engine, tmp_path):
+        assert engine.resolve_preview_folder("不存在", "delivery", "", "") is None
+
+
+

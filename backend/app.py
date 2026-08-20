@@ -579,6 +579,57 @@ def api_project_open_folder(project_name):
         return jsonify({"ok": False, "message": str(e)}), 500
 
 
+@app.route("/api/project/<path:project_name>/preview_folder", methods=["POST"])
+def api_project_preview_folder(project_name):
+    """预览界面文件夹操作。
+    body: { mode, subpath, folder, action: reveal|copy|mkdir, name? }
+    - reveal: 在资源管理器中打开该文件夹
+    - copy: 返回该文件夹的绝对路径
+    - mkdir: 在目标目录下新建文件夹（name 必填），返回新文件夹绝对路径
+    """
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode") or "delivery"
+    subpath = data.get("subpath") or ""
+    folder = data.get("folder") or ""
+    action = (data.get("action") or "copy").strip()
+    try:
+        abs_path = sync_engine.resolve_preview_folder(
+            project_name, mode=mode, subpath=subpath, folder=folder
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "message": "解析路径失败: " + str(e)}), 500
+    if not abs_path:
+        return jsonify({"ok": False, "message": "无法解析该文件夹路径"}), 404
+
+    if action == "reveal":
+        if not os.path.isdir(abs_path):
+            return jsonify({"ok": False, "message": "文件夹不存在: " + abs_path}), 404
+        try:
+            subprocess.Popen(["explorer", abs_path])
+            return jsonify({"ok": True, "message": "已打开 " + abs_path, "path": abs_path})
+        except Exception as e:
+            return jsonify({"ok": False, "message": str(e)}), 500
+
+    if action == "mkdir":
+        new_name = (data.get("name") or "").strip()
+        import re as _re
+        new_name = _re.sub(r'[\\/:*?"<>|]', '_', new_name)
+        if not new_name or new_name in (".", ".."):
+            return jsonify({"ok": False, "message": "文件夹名称不合法"}), 400
+        new_path = os.path.join(abs_path, new_name)
+        try:
+            os.makedirs(new_path, exist_ok=True)
+            return jsonify({"ok": True, "message": "已创建 " + new_path, "path": new_path})
+        except Exception as e:
+            return jsonify({"ok": False, "message": "创建失败: " + str(e)}), 500
+
+    # copy（默认）：返回绝对路径
+    if not os.path.exists(abs_path):
+        return jsonify({"ok": False, "message": "路径不存在: " + abs_path}), 404
+    return jsonify({"ok": True, "path": abs_path})
+
+
+
 @app.route("/api/project/<path:project_name>/custom_status", methods=["POST"])
 def api_project_custom_status(project_name):
     data = request.get_json(silent=True) or {}

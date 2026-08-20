@@ -293,11 +293,15 @@ function renderDeliverablesModal(){
             return '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f0f0f0;cursor:pointer;' + selBg + '" onclick="navDelivFolder(\'' + jsq(f.path) + '\')">'
               + cbHtml
               + '<span style="font-size:24px">📁</span>'
-              + '<div style="flex:1">'
+              + '<div style="flex:1;min-width:0">'
                 + '<div style="font-weight:600;font-size:14px">' + htm(f.name) + '</div>'
                 + '<div style="font-size:11px;color:#86868b">' + (folderSelectable ? (_m === 'delivery' ? '点击进入 · 勾选回传到制作部' : '点击进入 · 勾选整文件夹回传') : '点击进入查看') + '</div>'
               + '</div>'
-              + '<span style="color:#86868b">▶</span>'
+              + '<span style="display:flex;align-items:center;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">'
+                + '<button class="btn btn-sm" title="在资源管理器中打开" onclick="event.stopPropagation();delivFolderAction(\'reveal\',\'' + jsq(f.path) + '\',\'' + jsq(f.name) + '\')" style="padding:2px 7px;font-size:11px">📂 打开</button>'
+                + '<button class="btn btn-sm" title="复制文件夹路径" onclick="event.stopPropagation();delivFolderAction(\'copy\',\'' + jsq(f.path) + '\',\'' + jsq(f.name) + '\')" style="padding:2px 7px;font-size:11px">📋 复制路径</button>'
+                + '<span style="color:#86868b">▶</span>'
+              + '</span>'
             + '</div>';
           }).join('');
           var selFolderCount = Object.values(selFolders).filter(Boolean).length;
@@ -307,6 +311,7 @@ function renderDeliverablesModal(){
                 + '<b>' + (_m === 'delivery' ? '全选交付文件夹' : '全选修改文件夹') + '</b>'
                 + '<span style="color:#86868b">已选文件夹 ' + selFolderCount + ' / ' + _deliverablesState.folders.length + '</span>'
                 + '<span style="flex:1"></span>'
+                + '<button class="btn btn-sm" onclick="delivNewFolder()" style="padding:2px 10px;font-size:11px" title="在当前位置新建文件夹">📁 新建文件夹</button>'
                 + '<button class="btn btn-sm btn-primary" onclick="deliverFolders()" style="padding:2px 10px;font-size:11px"' + (selFolderCount===0?' disabled':'') + '>⚡ ' + (_m === 'delivery' ? '回传到制作部' : '回传选中文件夹') + '</button>'
               + '</div>'
             : '';
@@ -429,5 +434,74 @@ async function delivMarkQA(name){
     refreshDeliverablesList();
   }catch(e){
     toast('❌ 更新失败: ' + e.message, 'error');
+  }
+}
+
+// ===== 预览界面文件夹操作：在资源管理器打开 / 复制路径 =====
+async function delivFolderAction(action, folderPath, folderName){
+  var name = _deliverablesState.projectName;
+  var mode = _deliverablesState.mode;
+  var subpath = _deliverablesState.subpath || '';
+  if(!name){ toast('缺少项目', 'warning'); return; }
+  try{
+    var r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/preview_folder', {
+      mode: mode, subpath: subpath, folder: folderPath, action: action
+    });
+    if(!r || !r.ok){
+      toast(r && r.message || '操作失败', 'error');
+      return;
+    }
+    if(action === 'reveal'){
+      toast('📂 已在资源管理器中打开', 'success');
+    } else if(action === 'copy'){
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(r.path).then(function(){
+          toast('📋 已复制路径: ' + r.path, 'success');
+        }).catch(function(){ _delivCopyFallback(r.path); });
+      } else {
+        _delivCopyFallback(r.path);
+      }
+    }
+  }catch(e){
+    toast('❌ 操作失败: ' + e.message, 'error');
+  }
+}
+
+function _delivCopyFallback(text){
+  try{
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('📋 已复制路径: ' + text, 'success');
+  }catch(e){
+    toast('❌ 复制失败: ' + e.message, 'error');
+  }
+}
+
+// ===== 预览界面：新建文件夹 =====
+async function delivNewFolder(){
+  var name = _deliverablesState.projectName;
+  var mode = _deliverablesState.mode;
+  var subpath = _deliverablesState.subpath || '';
+  if(!name){ toast('缺少项目', 'warning'); return; }
+  var newName = window.prompt('请输入新文件夹名称');
+  if(!newName || !newName.trim()) return;
+  try{
+    var r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/preview_folder', {
+      mode: mode, subpath: subpath, folder: '', action: 'mkdir', name: newName.trim()
+    });
+    if(!r || !r.ok){
+      toast(r && r.message || '创建失败', 'error');
+      return;
+    }
+    toast('✅ 已创建文件夹: ' + r.path, 'success');
+    refreshDeliverablesList();
+  }catch(e){
+    toast('❌ 创建失败: ' + e.message, 'error');
   }
 }
