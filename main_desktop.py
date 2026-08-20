@@ -112,7 +112,6 @@ _window_ref = [None]
 _flask_app = [None]
 _tray_ref = [None]
 _window_visible = [True]
-_toggle_menu_item_ref = [None]  # 需要动态改文案的那个菜单项
 
 
 # ============================================================
@@ -299,15 +298,19 @@ def _do_quit():
 
 # ============================================================
 # 托盘菜单
-# 说明：pystray 的 MenuItem.text 是只读属性，不能直接改文案（旧实现会报
-# "can't set attribute 'text'"）。正确做法是整体重建菜单并赋回 tray.menu，
-# 由后端触发重绘，从而动态切换"隐藏/显示"文案。
+# 说明：pystray 的 MenuItem 支持 callable 属性（text/visible/enabled），
+# 会在菜单显示时动态求值。因此「隐藏/显示」文案用 callable 动态生成，
+# 菜单只需构建一次，无需在每次点击时重建，避免反复 update_menu 导致
+# 托盘线程与 Win32 句柄竞争而卡死/无响应。
 # ============================================================
 def _build_menu(visible=True):
     import pystray
-    toggle_text = "隐藏窗口到托盘" if visible else "显示主窗口"
-    toggle_item = pystray.MenuItem(toggle_text, _toggle_window, default=True)
-    _toggle_menu_item_ref[0] = toggle_item
+    # text 用 callable 动态求值，避免手动重建菜单
+    toggle_item = pystray.MenuItem(
+        lambda item: "隐藏窗口到托盘" if _window_visible[0] else "显示主窗口",
+        _toggle_window,
+        default=True,
+    )
     return pystray.Menu(
         pystray.MenuItem(
             APP_TITLE,
@@ -335,13 +338,17 @@ def _build_menu(visible=True):
 
 
 def _update_tray_label():
-    """根据窗口可见性重建托盘菜单并刷新文案（替换旧的只读 text 赋值方式）。"""
+    """窗口可见性状态变化时更新托盘菜单文案。
+    采用 callable 动态 text 后，菜单本身无需重建；当文案依赖的状态
+    (_window_visible) 变化时，只需通知 pystray 重绘即可。
+    """
     tray = _tray_ref[0]
     if tray is None:
         return
     try:
-        tray.menu = _build_menu(_window_visible[0])
-        # 通知后端重绘托盘菜单（部分后端需要，win32 下无害）
+        # 动态 text 已绑定 _window_visible，这里仅触发重绘。
+        # 注意：pystray 的 tray.menu= 赋值会自动调用 update_menu()，
+        # 无需（也切忌）再次显式调用，否则菜单被重复重建导致卡死。
         if hasattr(tray, "update_menu"):
             tray.update_menu()
         print(f"[tray] 菜单文案已更新 → {'隐藏窗口到托盘' if _window_visible[0] else '显示主窗口'}")
@@ -387,7 +394,7 @@ def _tray_go_insights(icon=None, item=None):
 
 
 def _tray_go_todos(icon=None, item=None):
-    _trigger_js("try{openGlobalTodos()}catch(e){}")
+    _trigger_js("try{openTaskBoard()}catch(e){}")
 
 
 def _tray_go_notifications(icon=None, item=None):
