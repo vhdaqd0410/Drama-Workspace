@@ -566,16 +566,21 @@ def atomic_write_json(path, data):
 class VideoInfoCache:
     """预扫描缓存：一次 ffprobe 取出全部信息（duration/fps/resolution/codec），
     后续所有检测函数从缓存读取，避免重复 fork ffprobe 子进程。
+
+    线程安全：检测常以 ThreadPoolExecutor 并行执行，多个工作线程会并发调用
+    get()。内部用锁保护读-改-写，避免同一文件被多个线程重复 ffprobe 浪费。
     """
     def __init__(self):
         self._cache = {}
+        self._lock = threading.Lock()
 
     def get(self, video_path):
         key = str(video_path)
-        if key not in self._cache:
-            info = get_video_info(key)
-            self._cache[key] = info  # 可能为 None
-        return self._cache[key]
+        with self._lock:
+            if key not in self._cache:
+                info = get_video_info(key)
+                self._cache[key] = info  # 可能为 None
+            return self._cache[key]
 
     def get_duration(self, video_path):
         info = self.get(video_path)
@@ -586,7 +591,8 @@ class VideoInfoCache:
         return info.get('fps', 0.0) if info else 0.0
 
     def clear(self):
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
 
 
 class CancelToken:

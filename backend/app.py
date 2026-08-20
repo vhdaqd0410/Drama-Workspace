@@ -43,7 +43,9 @@ def reload_sync_engine():
     sync_engine.nas = config["nas"]
     sync_engine._dept_labels = config["nas"].get("production_labels", {})
     sync_engine._unc_map = config["nas"].get("unc_map", {})
-    sync_engine._output_dir_cache.clear()
+    # 清空目录缓存需持有同一把锁，避免与 _find_output_dirs 的读改写并发
+    with sync_engine._lock:
+        sync_engine._output_dir_cache.clear()
 
 _log_cfg = config.get("logging", {})
 _log_file = _log_cfg.get("file", "nas_bridge.log")

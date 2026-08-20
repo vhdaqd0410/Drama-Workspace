@@ -38,7 +38,8 @@ class Database:
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._local = threading.local()
-        self._lock = threading.Lock()
+        # 并发说明：每线程独立连接(threading.local) + WAL + busy_timeout(5s)，
+        # 写操作由 SQLite 文件锁天然串行化，无需 Python 层 _lock（保留它反而误导）。
         self.init_db()
 
     # ---------- per-thread connection ----------
@@ -337,7 +338,6 @@ class Database:
 
     # ==================== Project CRUD (legacy-compatible) ====================
 
-    @staticmethod
     @staticmethod
     def extract_department(source_root):
         """从 source_root 路径中提取部门名。
