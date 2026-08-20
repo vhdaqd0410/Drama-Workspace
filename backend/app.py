@@ -571,7 +571,14 @@ def api_project_open_folder(project_name):
     else:
         path, err = sync_engine.get_source_dir(project_name)
     if not path or not os.path.isdir(path):
-        return jsonify({"ok": False, "message": "目录不存在: " + str(path)}), 404
+        # 目录不存在：返回 200 + ok:false + 友好中文提示（避免前端把 404 显示成「404 NOT FOUND」）
+        if which == "revising":
+            msg = "该项目还没有修改文件夹（找不到修改目录）"
+        elif which == "delivery":
+            msg = "该项目还没有交付/成片目录"
+        else:
+            msg = "目录不存在: " + str(path or "")
+        return jsonify({"ok": False, "message": msg}), 200
     try:
         subprocess.Popen(["explorer", path])
         return jsonify({"ok": True, "message": "已打开 " + path})
