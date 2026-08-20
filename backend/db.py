@@ -202,6 +202,15 @@ class Database:
                 c.execute("ALTER TABLE project_todos ADD COLUMN remind_at TEXT DEFAULT ''")
             except Exception:
                 pass
+            # 待办重构：截止日期 + 负责人 + 支持独立待办（project_name 可为空）
+            try:
+                c.execute("ALTER TABLE project_todos ADD COLUMN due_date TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                c.execute("ALTER TABLE project_todos ADD COLUMN assignee TEXT DEFAULT ''")
+            except Exception:
+                pass
             c.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_name TEXT,
@@ -802,7 +811,8 @@ class Database:
             return []
 
     def get_all_todos(self, include_done=False, keyword=""):
-        """跨项目查询所有待办（全局待办视图用）。按未完成优先、项目分组排序。"""
+        """跨项目查询所有待办（全局待办视图用）。按未完成优先、项目分组排序。
+        project_name 为空表示独立待办。"""
         try:
             with self.get_conn() as conn:
                 sql = ("SELECT t.*, p.custom_status AS status "
@@ -823,14 +833,15 @@ class Database:
         except Exception:
             return []
 
-    def add_project_todo(self, project_name, text, priority=0, status='todo', remind_at=''):
+    def add_project_todo(self, project_name, text, priority=0, status='todo', remind_at='', due_date='', assignee=''):
         with self.get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO project_todos(project_name, text, priority, status, remind_at) VALUES(?,?,?,?,?)",
-                (project_name, text, int(priority or 0), str(status), str(remind_at or '')))
+                "INSERT INTO project_todos(project_name, text, priority, status, remind_at, due_date, assignee) VALUES(?,?,?,?,?,?,?)",
+                (project_name, text, int(priority or 0), str(status), str(remind_at or ''),
+                 str(due_date or ''), str(assignee or '')))
             return cur.lastrowid
 
-    def update_project_todo(self, todo_id, done=None, text=None, priority=None, status=None, remind_at=None):
+    def update_project_todo(self, todo_id, done=None, text=None, priority=None, status=None, remind_at=None, due_date=None, assignee=None):
         with self.get_conn() as conn:
             if done is not None:
                 conn.execute("UPDATE project_todos SET done=? WHERE id=?",
@@ -847,6 +858,12 @@ class Database:
             if remind_at is not None:
                 conn.execute("UPDATE project_todos SET remind_at=? WHERE id=?",
                              (str(remind_at).strip(), todo_id))
+            if due_date is not None:
+                conn.execute("UPDATE project_todos SET due_date=? WHERE id=?",
+                             (str(due_date).strip(), todo_id))
+            if assignee is not None:
+                conn.execute("UPDATE project_todos SET assignee=? WHERE id=?",
+                             (str(assignee).strip(), todo_id))
 
     def delete_project_todo(self, todo_id):
         with self.get_conn() as conn:

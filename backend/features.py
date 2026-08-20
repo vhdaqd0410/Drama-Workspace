@@ -498,7 +498,9 @@ def register_routes(app, db):
         todo_id = db.add_project_todo(
             name, text, data.get("priority", 0),
             status=data.get("status") or "todo",
-            remind_at=data.get("remind_at") or "")
+            remind_at=data.get("remind_at") or "",
+            due_date=data.get("due_date") or "",
+            assignee=data.get("assignee") or "")
         _log_audit(db, name, "添加待办", text)
         return jsonify({"ok": True, "id": todo_id})
 
@@ -516,6 +518,10 @@ def register_routes(app, db):
             db.update_project_todo(todo_id, status=data.get("status"))
         if "remind_at" in data:
             db.update_project_todo(todo_id, remind_at=data.get("remind_at"))
+        if "due_date" in data:
+            db.update_project_todo(todo_id, due_date=data.get("due_date"))
+        if "assignee" in data:
+            db.update_project_todo(todo_id, assignee=data.get("assignee"))
         return jsonify({"ok": True})
 
     @app.route("/api/project/<name>/todos/<int:todo_id>", methods=["DELETE"])
@@ -524,20 +530,87 @@ def register_routes(app, db):
         _log_audit(db, name, "删除待办")
         return jsonify({"ok": True})
 
+    @app.route("/api/todos", methods=["POST"])
+    def features_todos_add_global():
+        """新建待办（支持独立待办，project_name 可为空）。
+        body: { text, priority, status, due_date, assignee, project_name? }"""
+        data = request.get_json(silent=True) or {}
+        text = (data.get("text") or "").strip()
+        if not text:
+            return jsonify({"ok": False, "message": "请输入待办内容"}), 400
+        pname = (data.get("project_name") or "").strip()
+        todo_id = db.add_project_todo(
+            pname, text, data.get("priority", 0),
+            status=data.get("status") or "todo",
+            remind_at=data.get("remind_at") or "",
+            due_date=data.get("due_date") or "",
+            assignee=data.get("assignee") or "")
+        if pname:
+            _log_audit(db, pname, "添加待办", text)
+        return jsonify({"ok": True, "id": todo_id})
+
+    @app.route("/api/todos/<int:todo_id>", methods=["PUT"])
+    def features_todos_update_global(todo_id):
+        """按 id 更新待办（不依赖项目名）。body: {字段} 与项目待办更新一致。"""
+        data = request.get_json(silent=True) or {}
+        for key in ("done", "text", "priority", "status", "remind_at", "due_date", "assignee"):
+            if key in data:
+                db.update_project_todo(todo_id, **{key: data.get(key)})
+        return jsonify({"ok": True})
+
+    @app.route("/api/todos/<int:todo_id>", methods=["DELETE"])
+    def features_todos_delete_global(todo_id):
+        """按 id 删除待办（不依赖项目名）。"""
+        db.delete_project_todo(todo_id)
+        return jsonify({"ok": True})
+
     @app.route("/api/todos/board", methods=["GET"])
     def features_todos_board():
-        """任务看板（功能6）：全部待办按 status 分组（todo/in_progress/done）。
-        返回 {columns: {'todo':[..], 'in_progress':[..], 'done':[..]}}
+        """任务看板：全部待办按 status 或 priority 分组。
+        参数：
+          ?group=status|priority   分组方式（默认 status）
+          ?done=0|1               是否含已完成（默认 1 含全部）
+          ?q=关键词                按内容/项目过滤
+          ?assignee=xx             按负责人过滤
+          ?overdue=1|0             仅看逾期/全部
+        status 分组列：todo/in_progress/done
+        priority 分组列：high/medium/low
         """
+        group = (request.args.get("group") or "status")
+        include_done = (request.args.get("done") or "1") != "0"
+        kw = (request.args.get("q") or "").strip()
+        assignee = (request.args.get("assignee") or "").strip()
+        overdue_only = (request.args.get("overdue") or "") == "1"
         try:
-            rows = db.get_all_todos(include_done=True) or []
-            columns = {"todo": [], "in_progress": [], "done": []}
-            for r in rows:
-                st = (r.get("status") or "todo")
-                if st not in columns:
-                    st = "todo"
-                columns[st].append(r)
-            return jsonify({"ok": True, "columns": columns})
+            rows = db.get_all_todos(include_done=include_done) or []
+            # 关键词过滤
+            if kw:
+                kwl = kw.lower()
+                rows = [r for r in rows if kwl in (r.get("text") or "").lower()
+                        or kwl in (r.get("project_name") or "").lower()]
+            # 负责人过滤
+            if assignee:
+                rows = [r for r in rows if (r.get("assignee") or "") == assignee]
+            # 逾期过滤（有截止日、未完成、截止日<今天）
+            today = _now()[:10]
+            if overdue_only:
+                rows = [r for r in rows if not r.get("done")
+                        and r.get("due_date") and str(r.get("due_date"))[:10] < today]
+
+            if group == "priority":
+                columns = {"high": [], "medium": [], "low": []}
+                _pmap = {2: "high", 1: "medium", 0: "low"}
+                for r in rows:
+                    key = _pmap.get(int(r.get("priority") or 0), "low")
+                    columns[key].append(r)
+            else:
+                columns = {"todo": [], "in_progress": [], "done": []}
+                for r in rows:
+                    st = (r.get("status") or "todo")
+                    if st not in columns:
+                        st = "todo"
+                    columns[st].append(r)
+            return jsonify({"ok": True, "columns": columns, "total": len(rows)})
         except Exception as e:
             import traceback; traceback.print_exc()
             return jsonify({"ok": False, "message": str(e)}), 500
