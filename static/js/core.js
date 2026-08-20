@@ -855,122 +855,163 @@ function projectCardHTML(p){
       <div class="status-row"><span class="sr-label">成片交付</span>${d}</div>
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
-    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}', this, event)">📌 待办 <span class="ctodo-count"></span></div>
-    <div class="card-todo-popup" id="ctodo-popup-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>
+    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}')">📌 待办 <span class="ctodo-count"></span></div>
     <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
   </div>`;
 }
 
-// ===== 项目卡片待办（首页快捷添加 + 悬停查看）=====
-function _ctSanitize(name){ return name.replace(/[^a-zA-Z0-9_]/g,'_'); }
-function _ctPopup(name){ return document.getElementById('ctodo-popup-' + _ctSanitize(name)); }
-function _ctTrigger(name){ return document.getElementById('ctodo-trigger-' + _ctSanitize(name)); }
-// 关闭弹窗（带淡出动画）
-function _ctHide(pop){
-  if(!pop || !pop.classList.contains('show')) return;
-  pop.classList.add('hiding');
-  setTimeout(function(){
-    pop.classList.remove('show');
-    pop.classList.remove('hiding');
-    delete pop.dataset.pinned;
-  }, 175);
+// ===== 项目卡片待办（居中模态框：查看/添加/编辑/删除）=====
+var _ctModal = null;  // 当前打开的待办模态框 DOM
+
+// 优先级配置
+var TODO_PRIORITY = {
+  '2': {label:'高', cls:'priority-h'},
+  '1': {label:'中', cls:'priority-m'},
+  '0': {label:'低', cls:'priority-l'}
+};
+
+// 关闭所有已打开的待办模态框
+function _ctCloseAll(){
+  if(_ctModal){ _ctModal.remove(); _ctModal = null; }
 }
-// 把弹窗定位到鼠标点击处附近，做视口边界钳制
-function _ctPosition(pop, anchor, mx, my){
-  const pad = 12;
-  const w = pop.offsetWidth || 290;
-  const h = pop.offsetHeight || 240;
-  // 优先用鼠标点击坐标，否则回退到按钮下方
-  let x = (typeof mx === 'number' && !isNaN(mx)) ? mx + pad : (anchor ? anchor.getBoundingClientRect().left : pad);
-  let y = (typeof my === 'number' && !isNaN(my)) ? my + pad : (anchor ? anchor.getBoundingClientRect().bottom + 8 : pad);
-  // 视口边界钳制
-  if(x + w > window.innerWidth - 8) x = Math.max(8, (typeof mx === 'number' && !isNaN(mx)) ? mx - w - pad : window.innerWidth - w - 8);
-  if(y + h > window.innerHeight - 8) y = Math.max(8, (typeof my === 'number' && !isNaN(my)) ? my - h - pad : window.innerHeight - h - 8);
-  pop.style.left = x + 'px';
-  pop.style.top = y + 'px';
-}
-// 关闭所有打开的弹窗（跳过固定的）
-function _ctCloseOthers(){
-  document.querySelectorAll('.card-todo-popup.show').forEach(p=>{
-    if(!p.dataset.pinned) _ctHide(p);
+
+// 打开项目待办居中模态框
+function cardToggleTodo(name){
+  if(_ctModal){ _ctModal.remove(); _ctModal = null; }
+  const ov = document.createElement('div');
+  ov.className = 'todo-modal-overlay';
+  ov.id = 'todo-modal-overlay';
+  ov.innerHTML = `
+    <div class="todo-modal">
+      <div class="todo-modal-head">
+        <h3>📌 项目待办</h3>
+        <span class="todo-modal-close" title="关闭" onclick="closeTodoModal()">✕</span>
+      </div>
+      <div class="todo-modal-body" id="todoModalBody">
+        <div style="text-align:center;padding:32px 0;color:var(--text-sec)">⏳ 加载中...</div>
+      </div>
+      <div class="todo-form">
+        <div class="todo-form-row">
+          <input type="text" id="todoAddText" placeholder="添加待办..." onkeydown="if(event.key==='Enter')todoAdd('${jsq(name)}')">
+        </div>
+        <div class="todo-form-row">
+          <select id="todoAddPriority" title="优先级">
+            <option value="0">低优先级</option>
+            <option value="1" selected>中优先级</option>
+            <option value="2">高优先级</option>
+          </select>
+          <input type="date" id="todoAddDue" title="截止日期">
+          <input type="text" id="todoAddAssignee" placeholder="负责人（可选）" style="min-width:110px;flex:1">
+          <button class="btn-add" onclick="todoAdd('${jsq(name)}')">＋ 添加</button>
+        </div>
+      </div>
+    </div>`;
+  ov.addEventListener('mousedown', function(e){ if(e.target === ov) closeTodoModal(); });
+  document.addEventListener('keydown', function _esc(e){
+    if(e.key === 'Escape') closeTodoModal();
+    document.removeEventListener('keydown', _esc);
   });
+  document.body.appendChild(ov);
+  _ctModal = ov;
+  todoLoad(name);
+  // 更新触发按钮计数（如果卡片已渲染）
+  const trig = document.getElementById('ctodo-trigger-' + name.replace(/[^a-zA-Z0-9_]/g,'_'));
+  if(trig){ const cnt = trig.querySelector('.ctodo-count'); if(cnt) cnt.textContent = '…'; }
 }
 
-// 打开/关闭待办弹层（点击，固定；弹窗跟随鼠标点击位置弹出）
-function cardToggleTodo(name, el, ev){
-  const pop = _ctPopup(name);
-  if(!pop) return;
-  const isShow = pop.classList.contains('show');
-  // 关闭所有已开的（含固定，淡出）
-  document.querySelectorAll('.card-todo-popup.show').forEach(p=>{ _ctHide(p); });
-  if(!isShow){
-    const mx = ev && typeof ev.clientX === 'number' ? ev.clientX : null;
-    const my = ev && typeof ev.clientY === 'number' ? ev.clientY : null;
-    _ctPosition(pop, el, mx, my);
-    pop.classList.add('show');
-    pop.dataset.pinned = '1';
-    cardLoadTodos(name, true);
+function closeTodoModal(){
+  _ctCloseAll();
+}
+
+// 渲染单条待办 → HTML
+function _todoItemHTML(name, t){
+  const pr = TODO_PRIORITY[t.priority] || null;
+  const prHtml = pr ? `<span class="todo-tag ${pr.cls}">${pr.label}优先</span>` : '';
+  let dueHtml = '';
+  if(t.due_date){
+    const dd = String(t.due_date).slice(0,10);
+    const today = new Date().toISOString().slice(0,10);
+    const overdue = !t.done && dd < today;
+    const soon = !t.done && !overdue && dd <= new Date(Date.now()+3*864e5).toISOString().slice(0,10);
+    dueHtml = `<span class="todo-tag ${overdue?'due-overdue':(soon?'due-soon':'')}">📅 ${dd}${overdue?' ⚠️':''}</span>`;
   }
+  const assigneeHtml = t.assignee ? `<span class="todo-tag assignee">👤 ${htm(t.assignee)}</span>` : '';
+  const statusHtml = t.status && t.status !== 'todo' ? `<span class="todo-tag status">${htm(t.status)}</span>` : '';
+  return `
+    <div class="todo-item ${t.done?'done':''}" data-id="${t.id}">
+      <div class="todo-check" title="切换完成" onclick="todoToggle('${jsq(name)}',${t.id},${t.done?0:1})">${t.done?'✓':''}</div>
+      <div class="todo-main">
+        <div class="todo-text">${htm(t.text)}</div>
+        <div class="todo-meta">${prHtml}${dueHtml}${assigneeHtml}${statusHtml}</div>
+      </div>
+      <button class="todo-del" title="删除" onclick="todoDel('${jsq(name)}',${t.id})">🗑</button>
+    </div>`;
 }
 
-async function cardLoadTodos(name, isClick){
-  const pop = _ctPopup(name);
-  if(!pop) return;
+// 加载并渲染待办列表
+async function todoLoad(name){
+  const body = document.getElementById('todoModalBody');
+  if(!body) return;
   try{
     const d = await api('GET', `/api/project/${encodeURIComponent(name)}/todos`);
     const todos = (d && d.todos) || [];
-    // 更新触发按钮计数
-    const trig = _ctTrigger(name);
-    const cnt = trig ? trig.querySelector('.ctodo-count') : null;
-    if(cnt) cnt.textContent = todos.length ? `(${todos.filter(t=>t.done).length}/${todos.length})` : '';
     const doneCnt = todos.filter(t=>t.done).length;
+    const total = todos.length;
+    // 更新卡片触发按钮计数
+    const trig = document.getElementById('ctodo-trigger-' + name.replace(/[^a-zA-Z0-9_]/g,'_'));
+    if(trig){ const cnt = trig.querySelector('.ctodo-count'); if(cnt) cnt.textContent = total ? `(${doneCnt}/${total})` : ''; }
+    const pct = total ? Math.round(doneCnt/total*100) : 0;
     const listHtml = todos.length
-      ? todos.map(t=>`
-          <div style="display:flex;align-items:center;gap:6px;padding:5px 0;font-size:12px;border-bottom:1px dashed var(--border)">
-            <button onclick="cardToggleTodoItem('${jsq(name)}',${t.id},${t.done?0:1})" style="background:none;border:none;font-size:15px;cursor:pointer;padding:0" title="切换完成">${t.done?'☑️':'⬜'}</button>
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text-sec)':''}" title="${htm(t.text)}">${htm(t.text)}</span>
-            <button onclick="cardDelTodo('${jsq(name)}',${t.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:13px" title="删除">🗑</button>
-          </div>`).join('')
-      : '<div style="color:var(--text-sec);font-size:12px;padding:6px 0">暂无待办</div>';
-    pop.innerHTML = `
-      <div class="ctp-head"><span>📌 ${htm(name)}</span><span style="color:var(--text-sec);font-weight:400">${doneCnt}/${todos.length} 完成</span></div>
-      <div class="ctp-list">${listHtml}</div>
-      <div class="ctp-add">
-        <input id="ctodo-input-${_ctSanitize(name)}" type="text" placeholder="添加待办..." onkeydown="if(event.key==='Enter')cardAddTodo('${jsq(name)}')">
-        <button onclick="cardAddTodo('${jsq(name)}')">添加</button>
-      </div>`;
-    const inp = document.getElementById('ctodo-input-' + _ctSanitize(name));
-    if(inp && isClick) setTimeout(function(){ inp.focus(); }, 30);
-    // 内容渲染后按实际尺寸重新定位（跟随鼠标，钳制视口）
-    if(pop.classList.contains('show')) setTimeout(function(){ _ctPosition(pop); }, 20);
+      ? todos.map(t=>_todoItemHTML(name,t)).join('')
+      : `<div class="todo-empty"><div class="e-ico">🗒️</div>暂无待办<br><span style="font-size:12px;color:var(--text-sec)">在下方输入框添加第一条待办</span></div>`;
+    body.innerHTML = `
+      <div class="todo-modal-summary">
+        <div class="todo-sum-item"><div class="v">${total}</div><div class="l">全部</div></div>
+        <div class="todo-sum-item"><div class="v" style="color:var(--green)">${doneCnt}</div><div class="l">已完成</div></div>
+        <div class="todo-sum-item"><div class="v" style="color:var(--orange)">${total-doneCnt}</div><div class="l">进行中</div></div>
+        <div class="todo-sum-item"><div class="v" style="color:var(--blue)">${pct}%</div><div class="l">完成率</div></div>
+      </div>
+      <div id="todoList">${listHtml}</div>`;
   }catch(e){
-    pop.innerHTML = '<div class="ctp-head">📌 待办</div><div style="color:var(--red);font-size:12px;padding:10px">加载失败</div>';
-    if(pop.classList.contains('show')) setTimeout(function(){ _ctPosition(pop); }, 20);
+    body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--red)">加载失败: '+htm(e.message)+'</div>';
   }
 }
 
-async function cardAddTodo(name){
-  const inp = document.getElementById('ctodo-input-' + _ctSanitize(name));
+// 添加待办（支持优先级/截止日/负责人）
+async function todoAdd(name){
+  const inp = document.getElementById('todoAddText');
   const text = inp ? inp.value.trim() : '';
   if(!text){ toast('请输入待办内容','warning'); return; }
+  const priority = parseInt(document.getElementById('todoAddPriority')?.value || '0', 10);
+  const due_date = document.getElementById('todoAddDue')?.value || '';
+  const assignee = (document.getElementById('todoAddAssignee')?.value || '').trim();
   try{
-    const d = await api('POST', `/api/project/${encodeURIComponent(name)}/todos`, { text: text });
-    if(d && d.ok){ if(inp) inp.value=''; cardLoadTodos(name, false); toast('已添加待办','success'); }
-    else toast((d&&d.message)||'添加失败','error');
+    const d = await api('POST', `/api/project/${encodeURIComponent(name)}/todos`, {
+      text: text, priority: priority, due_date: due_date, assignee: assignee
+    });
+    if(d && d.ok){
+      if(inp) inp.value='';
+      if(document.getElementById('todoAddDue')) document.getElementById('todoAddDue').value='';
+      if(document.getElementById('todoAddAssignee')) document.getElementById('todoAddAssignee').value='';
+      todoLoad(name);
+      toast('已添加待办','success');
+    } else toast((d&&d.message)||'添加失败','error');
   }catch(e){ toast('添加失败: '+e.message,'error'); }
 }
 
-async function cardToggleTodoItem(name, id, done){
+// 切换完成状态
+async function todoToggle(name, id, done){
   try{
     await api('PUT', `/api/project/${encodeURIComponent(name)}/todos/${id}`, { done: !!done });
-    cardLoadTodos(name, false);
+    todoLoad(name);
   }catch(e){ toast('更新失败: '+e.message,'error'); }
 }
-async function cardDelTodo(name, id){
+// 删除待办
+async function todoDel(name, id){
   try{
     await api('DELETE', `/api/project/${encodeURIComponent(name)}/todos/${id}`);
-    cardLoadTodos(name, false);
+    todoLoad(name);
   }catch(e){ toast('删除失败: '+e.message,'error'); }
 }
 

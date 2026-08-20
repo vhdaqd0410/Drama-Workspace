@@ -93,7 +93,7 @@ function renderNotifBody(body){
     return notifRow('<b>'+escHtml(t.project)+'</b> <span style="font-size:11px;color:#86868b">('+t.count+' 条待办)</span>'+items);
   });
   if(!html) html = '<div style="color:#86868b;text-align:center;padding:40px 0">🎉 暂无提醒</div>';
-  else html += '<div style="margin-top:16px"><button class="btn" style="width:100%" onclick="openGlobalTodos()">📌 查看全部待办</button></div>';
+  else html += '<div style="margin-top:16px"><button class="btn" style="width:100%" onclick="openTaskBoard()">🗂️ 打开任务中心</button></div>';
   // 审核流超时预警（功能5）
   html += '<div id="auditAlertSlot"></div>';
   body.innerHTML = html;
@@ -114,7 +114,7 @@ async function loadAuditAlerts(){
         + '</div>';
     }).join('');
     slot.innerHTML = '<div style="margin-top:16px;font-size:13px;font-weight:700">⚠️ 审核流超时预警 ('+d.alerts.length+')</div>' + rows
-      + '<div style="margin-top:6px"><button class="btn btn-sm" onclick="openGlobalTodos()">📌 处理待办</button></div>';
+      + '<div style="margin-top:6px"><button class="btn btn-sm" onclick="openTaskBoard()">🗂️ 处理待办</button></div>';
   }catch(e){}
 }
 

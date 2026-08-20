@@ -78,16 +78,51 @@ a{color:var(--blue);text-decoration:none}
 .assign-summary{font-size:12px;color:var(--text-sec);background:#fafafa;padding:8px 10px;border-radius:8px;margin:10px 0;line-height:1.6}
 .card-todo{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#856404;background:#fff8e1;border:1px solid #ffe08a;border-radius:8px;padding:4px 9px;margin:0 0 8px;cursor:pointer;transition:background .15s}
 .card-todo:hover{background:#fff3cd}
-.card-todo-popup{position:fixed;left:0;top:0;width:290px;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.2);z-index:5200;overflow:hidden;display:none;opacity:0;transform:translateY(-4px) scale(.97);transform-origin:top left}
-.card-todo-popup.show{display:block;animation:cardTodoPop .18s ease-out forwards}
-@keyframes cardTodoPop{0%{opacity:0;transform:translateY(-6px) scale(.95)}60%{opacity:1;transform:translateY(2px) scale(1.01)}100%{opacity:1;transform:translateY(0) scale(1)}}
-.card-todo-popup.hiding{animation:cardTodoHide .18s ease-in forwards}
-@keyframes cardTodoHide{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-6px) scale(.95)}}
-.card-todo-popup .ctp-head{padding:10px 12px;background:#fafafa;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
-.card-todo-popup .ctp-list{max-height:200px;overflow-y:auto;padding:4px 10px}
-.card-todo-popup .ctp-add{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--border)}
-.card-todo-popup .ctp-add input{flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none}
-.card-todo-popup .ctp-add button{padding:6px 10px;border:none;border-radius:6px;background:var(--blue,#0071e3);color:#fff;font-size:12px;cursor:pointer}
+/* ===== 待办模态框（居中）===== */
+.todo-modal-overlay{position:fixed;inset:0;background:rgba(15,15,20,.5);display:flex;align-items:center;justify-content:center;z-index:var(--z-modal);backdrop-filter:blur(2px);animation:overlayFade .2s var(--ease)}
+.todo-modal{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:520px;max-width:94vw;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;animation:modalPop .22s var(--ease)}
+.todo-modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#fff,#f8f9fc)}
+.todo-modal-head h3{font-size:16px;display:flex;align-items:center;gap:8px}
+.todo-modal-close{color:var(--text-sec);font-size:20px;cursor:pointer;padding:4px;border-radius:6px;transition:background .15s}
+.todo-modal-close:hover{background:#f0f0f2}
+.todo-modal-body{padding:16px 20px;flex:1;overflow-y:auto}
+.todo-modal-summary{display:flex;gap:10px;margin-bottom:14px}
+.todo-sum-item{flex:1;background:#f8f9fc;border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center}
+.todo-sum-item .v{font-size:20px;font-weight:700;line-height:1.2}
+.todo-sum-item .l{font-size:11px;color:var(--text-sec);margin-top:2px}
+/* 待办列表 */
+.todo-item{display:flex;align-items:flex-start;gap:10px;padding:10px 8px;border-radius:10px;border:1px solid transparent;transition:background .12s}
+.todo-item:hover{background:#f7f8fa}
+.todo-item+.todo-item{border-top-color:var(--border)}
+.todo-item.done .todo-text{text-decoration:line-through;color:var(--text-sec)}
+.todo-check{width:20px;height:20px;border-radius:50%;border:2px solid #d1d1d6;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;font-size:12px;color:#fff;background:#fff}
+.todo-check:hover{border-color:var(--blue)}
+.todo-item.done .todo-check{background:var(--green);border-color:var(--green)}
+.todo-main{flex:1;min-width:0}
+.todo-text{font-size:13px;font-weight:500;word-break:break-word}
+.todo-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:5px}
+.todo-tag{display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:2px 7px;border-radius:6px;background:#f0f0f2;color:var(--text-sec)}
+.todo-tag.priority-h{background:#ffebee;color:#c62828;font-weight:600}
+.todo-tag.priority-m{background:#fff8e1;color:#f57f17;font-weight:600}
+.todo-tag.priority-l{background:#e8f5e9;color:#2e7d32}
+.todo-tag.due-overdue{background:#ffebee;color:#c62828;font-weight:600}
+.todo-tag.due-soon{background:#fff8e1;color:#f57f17}
+.todo-tag.assignee{background:#e3f2fd;color:#1565c0}
+.todo-tag.status{background:#ede7f6;color:#5e35b1}
+.todo-del{flex-shrink:0;background:none;border:none;color:var(--text-sec);cursor:pointer;font-size:15px;padding:4px;border-radius:6px;opacity:0;transition:all .15s}
+.todo-item:hover .todo-del{opacity:1}
+.todo-del:hover{color:var(--red);background:#ffebee}
+.todo-empty{text-align:center;padding:40px 0;color:var(--text-sec)}
+.todo-empty .e-ico{font-size:36px;margin-bottom:8px}
+/* 新增表单 */
+.todo-form{border-top:1px solid var(--border);padding:14px 20px;background:#fafbfc;display:flex;flex-direction:column;gap:10px}
+.todo-form-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.todo-form input[type=text],.todo-form input[type=date],.todo-form select,.todo-form textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}
+.todo-form input[type=text]:focus,.todo-form input[type=date]:focus,.todo-form select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,113,227,.12)}
+.todo-form input#todoAddText{flex:1;min-width:180px}
+.todo-form select{min-width:0;cursor:pointer;background:#fff}
+.todo-form .btn-add{background:var(--blue);color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;margin-left:auto}
+.todo-form .btn-add:hover{background:var(--blue-hover)}
 .card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.card-actions .btn{padding:5px 10px;font-size:12px}
 .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -254,6 +289,8 @@ a{color:var(--blue);text-decoration:none}
 .deliv-td-size{font-variant-numeric:tabular-nums;color:#4a4a4a}
 .deliv-td-time{color:#86868b;font-variant-numeric:tabular-nums}
 .deliv-td-actions{white-space:nowrap}
+.deliv-td-editor{white-space:nowrap}
+.deliv-editor-badge{display:inline-block;background:#eef4ff;color:#1d4ed8;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500}
 .deliv-ep-badge{display:inline-block;background:#e8ebf0;color:#4a4a4a;border-radius:4px;padding:1px 7px;font-size:11px;font-variant-numeric:tabular-nums}
 .section-body{padding:16px 20px}
 .section-collapsed .section-body{display:none}
