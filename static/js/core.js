@@ -143,6 +143,7 @@ async function checkEditCompleteProjects(){
 }
 function showEditCompleteDialog(name, total, current){
   var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:440px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.2)">
     <div style="padding:16px 18px;background:linear-gradient(135deg,#e3f2fd,#bbdefb);font-weight:700;font-size:15px">✂️ 项目已剪完</div>
@@ -151,19 +152,32 @@ function showEditCompleteDialog(name, total, current){
       <div style="font-size:12px;color:#666">已产出 <b>${current}</b> / ${total} 集，是否进入审核？</div>
     </div>
     <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove()">稍后</button>
+      <button class="btn btn-sm" onclick="closeEditCompleteDialog(this)">稍后</button>
       <button class="btn btn-sm btn-primary" onclick="confirmEditComplete('${jsq(name)}', this)">✅ 进入审核</button>
     </div>
   </div>`;
+  // 点击遮罩空白处也关闭
+  overlay.addEventListener('click', function(ev){ if(ev.target === overlay) closeEditCompleteDialog(null, overlay); });
   document.body.appendChild(overlay);
 }
+// 关闭“项目已剪完”弹窗（兼容旧调用：有的按钮传 this，有的只传遮罩）
+function closeEditCompleteDialog(btn, overlayEl){
+  var node = overlayEl || (btn && btn.closest && btn.closest('.modal-overlay'));
+  if(!node && btn){ node = btn.parentElement && btn.parentElement.parentElement && btn.parentElement.parentElement.parentElement; }
+  while(node && node.classList && !node.classList.contains('modal-overlay')) node = node.parentElement;
+  if(node && node.remove) node.remove();
+}
 async function confirmEditComplete(name, btn){
+  var overlayEl = btn && btn.closest ? btn.closest('.modal-overlay') : null;
   try{
     await api('POST', '/api/project/' + encodeURIComponent(name) + '/custom_status', { custom_status: '审核中' });
     toast('✅ ' + name + ' 已进入审核', 'success');
-    btn.closest('.modal-overlay').remove();
+  }catch(e){
+    toast('操作失败: '+e.message, 'error');
+  }finally{
+    closeEditCompleteDialog(null, overlayEl || btn);
     if(typeof loadProjects === 'function') loadProjects();
-  }catch(e){ toast('操作失败: '+e.message, 'error'); }
+  }
 }
 // 解析快捷键配置字符串，判断当前按键是否匹配
 function _matchShortcut(e, shortcutStr){
@@ -821,13 +835,16 @@ function projectCardHTML(p){
     ? `<input type="checkbox" class="bulk-card-chk" data-pname="${p.name.replace(/"/g,'&quot;')}" onchange="updateBulkBar()" title="选择此项目">`
     : '';
   return`<div class="card">
-    <div class="card-head">${bulkChk}<div class="card-title"><span class="card-title-name" title="${p.name}" data-project-name="${p.name.replace(/"/g,'&quot;')}">${p.name}</span>${dept}${month}</div>${(() => {
+    <div class="card-head">
+      <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${p.name}" data-project-name="${p.name.replace(/"/g,'&quot;')}">${p.name}</span></div>
+      <div class="card-meta-line">${dept}${month}${(() => {
   const cur = p.custom_status || '';
   const optsHtml = WF_STATUS_OPTIONS.map(o =>
     `<option value="${o.v}" ${o.v===cur?'selected':''}>${o.label}</option>`
   ).join('');
   return `<select class="badge editable-badge ${badge.cls}" onchange="onStatusChange('${p.name.replace(/'/g,"\\'")}', this)" title="点击修改项目状态">${optsHtml}</select>`;
 })()}</div>
+    </div>
     ${workflowHTML(p.custom_status)}
     ${syncProgressHTML}
     ${progressHTML}
