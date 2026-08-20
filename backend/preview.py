@@ -351,6 +351,10 @@ class PreviewMixin:
             return root
         folder = (folder or "").strip("\\/")
         if mode == "revising":
+            # 前端在修改列表根目录点“打开/复制路径”时传的是文件夹绝对路径(f.path)，
+            # 此时 subpath 为空，无法按名称匹配，故先直接用绝对路径（校验存在性）。
+            if folder and os.path.isabs(folder):
+                return folder if os.path.exists(folder) else None
             # 修改目录 = group_path 下的 MMDD修改
             rev_folder_name = subpath.replace("/", "\\").strip("\\")
             rev_abs = None

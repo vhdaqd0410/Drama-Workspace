@@ -578,5 +578,16 @@ class TestResolvePreviewFolder:
     def test_unknown_project_returns_none(self, engine, tmp_path):
         assert engine.resolve_preview_folder("不存在", "delivery", "", "") is None
 
+    def test_revising_absolute_folder(self, engine, tmp_path):
+        """修改列表根目录点“打开/复制路径”时传入绝对路径，应直接返回（修复 404）。"""
+        rev_dir = tmp_path / "0816修改"
+        rev_dir.mkdir(parents=True, exist_ok=True)
+        self._mk_project(engine, "项目C", str(tmp_path))
+        # subpath 为空 + folder 为绝对路径 → 直接返回该绝对路径
+        got = engine.resolve_preview_folder("项目C", "revising", "", str(rev_dir))
+        assert got == str(rev_dir)
+        # 绝对路径不存在 → None（避免复制不存在的目录）
+        assert engine.resolve_preview_folder("项目C", "revising", "", str(tmp_path / "不存在")) is None
+
 
 
