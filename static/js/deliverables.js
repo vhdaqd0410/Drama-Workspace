@@ -170,6 +170,11 @@ function renderDeliverablesModal(){
     var epHtml = (ep !== null)
       ? '<span class="deliv-ep-badge">第' + String(ep).padStart(2,'0') + '集</span>'
       : '<span style="color:#c5221f;font-size:11px">未识别</span>';
+    // 该集剪辑师（来自后端 list_output_files 附带的 editor 字段）
+    var editor = (f.editor || '').trim();
+    var editorHtml = editor
+      ? '<span class="deliv-editor-badge" title="该集剪辑师">👤 ' + htm(editor) + '</span>'
+      : '<span style="color:#c0c0c5;font-size:11px">—</span>';
     var checked = _deliverablesState.selected[f.name] ? 'checked' : '';
     var rowId = 'deliv-row-' + realIdx;
     var ext = (f.ext||'').toLowerCase();
@@ -195,6 +200,7 @@ function renderDeliverablesModal(){
     return '<tr id="' + rowId + '" style="' + rowBg + '">'
       + '<td class="deliv-td-ck"><input type="checkbox" ' + checked + ' data-deliv-ck="' + htm(f.name) + '" onchange="toggleDelivRow(\'' + htm(f.name).replace(/'/g,"\'") + '\')"></td>'
       + '<td class="deliv-td-ep">' + epHtml + '</td>'
+      + '<td class="deliv-td-editor">' + editorHtml + '</td>'
       + '<td class="deliv-td-name" title="' + htm(f.path) + '" data-thumb="' + (isVideo ? htm(f.path) : '') + '">' + icon + ' ' + htm(f.name) + '</td>'
       + '<td class="deliv-td-size">' + _fmtSize(f.size||0) + '</td>'
       + '<td style="font-size:12px">' + statusBadge + '</td>'
@@ -298,8 +304,8 @@ function renderDeliverablesModal(){
                 + '<div style="font-size:11px;color:#86868b">' + (folderSelectable ? (_m === 'delivery' ? '点击进入 · 勾选回传到制作部' : '点击进入 · 勾选整文件夹回传') : '点击进入查看') + '</div>'
               + '</div>'
               + '<span style="display:flex;align-items:center;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">'
-                + '<button class="btn btn-sm" title="在资源管理器中打开" onclick="event.stopPropagation();delivFolderAction(\'reveal\',\'' + jsq(f.path) + '\',\'' + jsq(f.name) + '\')" style="padding:2px 7px;font-size:11px">📂 打开</button>'
-                + '<button class="btn btn-sm" title="复制文件夹路径" onclick="event.stopPropagation();delivFolderAction(\'copy\',\'' + jsq(f.path) + '\',\'' + jsq(f.name) + '\')" style="padding:2px 7px;font-size:11px">📋 复制路径</button>'
+                + '<button class="btn btn-sm" title="在资源管理器中打开" onclick="event.stopPropagation();delivFolderAction(\'reveal\',\'' + jsq(f.abs_path || f.path) + '\',\'' + jsq(f.name) + '\')" style="padding:2px 7px;font-size:11px">📂 打开</button>'
+                + '<button class="btn btn-sm" title="复制文件夹路径" onclick="event.stopPropagation();delivFolderAction(\'copy\',\'' + jsq(f.abs_path || f.path) + '\',\'' + jsq(f.name) + '\')" style="padding:2px 7px;font-size:11px">📋 复制路径</button>'
                 + '<span style="color:#86868b">▶</span>'
               + '</span>'
             + '</div>';
@@ -364,8 +370,10 @@ function renderDeliverablesModal(){
           + '<thead><tr>'
             + '<th style="width:36px"></th>'
             + '<th style="width:80px">集号</th>'
+            + '<th style="width:90px">剪辑师</th>'
             + '<th>文件名</th>'
             + '<th style="width:90px">大小</th>'
+            + '<th style="width:110px">状态</th>'
             + '<th style="width:130px">修改时间</th>'
             + '<th style="width:170px">操作</th>'
           + '</tr></thead>'

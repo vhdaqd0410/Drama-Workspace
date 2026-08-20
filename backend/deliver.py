@@ -10,6 +10,7 @@ import subprocess
 import subprocess as _sp
 import logging
 import threading
+import json
 from datetime import datetime
 from scan import _natural_key, _quick_find_file
 from utils import decode_output
@@ -413,10 +414,29 @@ class DeliverMixin:
 
     def list_output_files(self, project_name):
         """列出项目所有 01上映单集版 目录中的文件（group → production fallback）。
-        每个文件带 delivered 字段: True 表示制作部已有同名文件, False 表示未回传。"""
+        每个文件带 delivered 字段: True 表示制作部已有同名文件, False 表示未回传。
+        若项目配置了 episode_plan（{集号:剪辑师}），则给每个能识别出集号的文件
+        附加 editor 字段（该集剪辑师），供成片详情前端按集显示剪辑师。"""
         proj = self.db.get_project(project_name)
         if not proj:
             return []
+
+        # 解析项目分集计划（{集号: 剪辑师}），用于给每集文件标注剪辑师
+        editor_map = {}
+        try:
+            _raw_plan = proj.get("episode_plan") or "{}"
+            if isinstance(_raw_plan, str):
+                _plan = json.loads(_raw_plan)
+            elif isinstance(_raw_plan, dict):
+                _plan = _raw_plan
+            else:
+                _plan = {}
+            for _epn, _ed in _plan.items():
+                _ed = str(_ed or "").strip()
+                if _ed:
+                    editor_map[str(_epn).strip()] = _ed
+        except Exception:
+            editor_map = {}
 
         group_path = proj.get("group_path", "")
         production_path = proj.get("production_path", "")
@@ -478,6 +498,7 @@ class DeliverMixin:
                             "delivered": delivered,
                             "delivery_status": status,  # delivered / pending / size_mismatch
                             "dest_size": dest_size,
+                            "editor": self._editor_for_filename(name, editor_map),
                         })
             except OSError:
                 continue
@@ -1561,6 +1582,16 @@ class DeliverMixin:
         hits.sort(key=lambda x: x[0])
         return hits[0][1]
 
+    def _editor_for_filename(self, filename, editor_map):
+        """根据文件名提取集号，并从 {集号:剪辑师} 映射中返回该集剪辑师。
+        集号匹配失败或无映射时返回 ''。editor_map 为空时跳过，避免无谓计算。"""
+        if not editor_map:
+            return ""
+        n = self._extract_episode_number(filename)
+        if n is None:
+            return ""
+        return editor_map.get(str(n), "")
+
     def _collect_video_filenames(self, project_name, which="group"):
         """收集项目视频文件名列表。which: group=组内成片, dest=制作部成片"""
         proj = self.db.get_project(project_name)
@@ -2004,6 +2035,11 @@ class DeliverMixin:
             self.db.update_project_status(
                 project_name, delivery_status="delivered",
                 last_delivered_at=now)
+            # 记录目标修改文件夹路径，供完成弹窗的“打开/复制路径”指向正确的修改文件夹
+            with self._lock:
+                t = self._deliver_tasks.get(project_name, {})
+                t["dst"] = dst_dir
+                self._deliver_tasks[project_name] = t
             return True, "文件夹修改回传成功: " + dst_dir + " (" + str(file_count) + " 个文件)"
         except Exception as e:
             self.db.add_delivery_log(
@@ -2054,6 +2090,7 @@ class DeliverMixin:
             sync_progress="已发起 Shell 批量复制 ({} 个文件夹) — 看系统进度对话框".format(len(valid_pairs)))
 
         errors = []
+        last_dst = None
         for src, rev_name in valid_pairs:
             dst_dir = _get_dst_dir(rev_name)
             try:
@@ -2062,11 +2099,18 @@ class DeliverMixin:
                 pass
             try:
                 _shell_copy_folder(src, os.path.dirname(dst_dir.rstrip("\\/")))
+                last_dst = dst_dir
             except Exception as e:
                 logger.error('Shell 修改文件夹批量复制失败 %s → %s: %s', src, dst_dir, e)
                 errors.append(str(e))
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 记录目标修改文件夹路径，供完成弹窗的“打开/复制路径”指向正确的修改文件夹
+        if last_dst:
+            with self._lock:
+                t = self._deliver_tasks.get(project_name, {})
+                t["dst"] = last_dst
+                self._deliver_tasks[project_name] = t
         if errors:
             self.db.update_project_status(
                 project_name, delivery_status="error",

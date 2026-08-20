@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 class PreviewMixin:
-    def _list_dir_contents(self, root_path):
+    def _list_dir_contents(self, root_path, editor_map=None):
         """通用：列出目录下所有文件，返回 [dict, ...]
         每个 dict: name, path, size, size_mb, ext, mtime
+        若传入 editor_map（{集号:剪辑师}），则给能识别出集号的文件附加 editor 字段。
         """
         files = []
         if not root_path or not os.path.isdir(root_path):
@@ -23,7 +24,7 @@ class PreviewMixin:
                 if os.path.isfile(full):
                     ext = os.path.splitext(name)[1].lower()
                     size = os.path.getsize(full)
-                    files.append({
+                    item = {
                         "name": name,
                         "path": full,
                         "size": size,
@@ -32,11 +33,33 @@ class PreviewMixin:
                         "mtime": datetime.fromtimestamp(
                             os.path.getmtime(full)).strftime(
                             "%Y-%m-%d %H:%M"),
-                    })
+                    }
+                    # 附加该集剪辑师（若配置了 episode_plan）
+                    if editor_map:
+                        n = self._extract_episode_number(name)
+                        if n is not None:
+                            item["editor"] = editor_map.get(str(n), "")
+                    files.append(item)
         except OSError:
             pass
         files.sort(key=lambda x: _natural_key(x["name"]))
         return files
+
+    @staticmethod
+    def _build_editor_map(proj):
+        """从项目 episode_plan（{集号:剪辑师}）构建 {集号:剪辑师} 映射。失败返回 {}。"""
+        try:
+            import json as _json
+            raw = (proj or {}).get("episode_plan") or "{}"
+            plan = _json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, dict) else {})
+            out = {}
+            for ep, ed in plan.items():
+                ed = str(ed or "").strip()
+                if ed:
+                    out[str(ep).strip()] = ed
+            return out
+        except Exception:
+            return {}
 
     def list_files_by_mode(self, project_name, mode="editing", subpath=""):
         """按模式列出文件。
@@ -59,6 +82,9 @@ class PreviewMixin:
                 if candidate and os.path.isdir(candidate):
                     group_path = candidate
                     break
+
+        # 项目分集计划（{集号:剪辑师}），供各模式文件列表按集标注剪辑师
+        editor_map = self._build_editor_map(proj)
 
         # editing 模式：优先 production_path（成片实际在这里）
         if mode == "editing":
@@ -99,7 +125,13 @@ class PreviewMixin:
             if not subpath:
                 folders = self.list_all_revision_folders(project_name)
                 for f in folders:
-                    result["folders"].append({"name": f["name"], "path": f["name"]})
+                    # path 保留相对名（用于点击进入导航），abs_path 为绝对路径
+                    # （供前端的“打开/复制路径/新建文件夹”按钮解析）
+                    result["folders"].append({
+                        "name": f["name"],
+                        "path": f["name"],
+                        "abs_path": f["path"],
+                    })
                 return result
 
             # subpath = "MMDD修改" → 列出该文件夹内的文件
@@ -115,7 +147,7 @@ class PreviewMixin:
 
             if rev_path and os.path.isdir(rev_path):
                 result["breadcrumbs"].append({"name": rev_name, "path": rev_name})
-                files = self._list_dir_contents(rev_path)
+                files = self._list_dir_contents(rev_path, editor_map=editor_map)
                 for f in files:
                     f["parent_dir"] = rev_name
                 result["files"] = files
@@ -190,7 +222,7 @@ class PreviewMixin:
             except OSError:
                 pass
 
-            files = self._list_dir_contents(target)
+            files = self._list_dir_contents(target, editor_map=editor_map)
             for f in files:
                 rel = os.path.relpath(f["path"], base)
                 f["rel_path"] = rel.replace("/", "\\")
@@ -357,11 +389,17 @@ class PreviewMixin:
                 return folder if os.path.exists(folder) else None
             # 修改目录 = group_path 下的 MMDD修改
             rev_folder_name = subpath.replace("/", "\\").strip("\\")
+            rev_folders = self.list_all_revision_folders(project_name)
             rev_abs = None
-            for f in self.list_all_revision_folders(project_name):
-                if f["name"] == rev_folder_name:
-                    rev_abs = f["path"]
-                    break
+            if rev_folder_name:
+                for f in rev_folders:
+                    if f["name"] == rev_folder_name:
+                        rev_abs = f["path"]
+                        break
+            else:
+                # subpath 为空（修改根目录）：新建文件夹时默认建到最新修改文件夹下
+                if rev_folders:
+                    rev_abs = rev_folders[0]["path"]
             if rev_abs and folder:
                 return os.path.join(rev_abs, folder)
             return rev_abs
