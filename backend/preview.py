@@ -177,6 +177,7 @@ class PreviewMixin:
                     result["folders"].append({
                         "name": folder_name,
                         "path": folder_name,
+                        "abs_path": base,
                         "file_count": 0,
                     })
                 result["breadcrumbs"] = []
@@ -416,6 +417,9 @@ class PreviewMixin:
                 if not target.startswith(os.path.normpath(base)):
                     target = base
             if folder:
+                # 根目录的虚拟文件夹（000交付）直接指向 base，避免重复拼接
+                if safe_sub == "" and folder == folder_name:
+                    return base
                 return os.path.normpath(os.path.join(target, folder))
             return target
         # editing 等其他模式：folder 是文件名，直接拼到成片根
