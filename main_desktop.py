@@ -142,6 +142,13 @@ _window_ref = [None]
 _flask_app = [None]
 _tray_ref = [None]
 _window_visible = [True]
+# 托盘操作串行化锁：pystray 的 update_menu/notify/stop 内部会操作 Win32 菜单/托盘句柄
+# （DestroyMenu/CreateMenu/Shell_NotifyIcon），且 pystray 无内部锁。若从热键线程、
+# WebView 回调、通知线程等多个线程同时调用，会导致句柄竞争、菜单反复销毁重建，
+# 长时间运行后托盘消息循环损坏 → 点击托盘图标无响应（卡死，重启恢复）。
+# 用此锁把所有 pystray 方法调用串行化，避免跨线程数据竞争。
+# 用 RLock（可重入）防止托盘回调自身重入时死锁。
+_tray_lock = threading.RLock()
 
 
 # ============================================================
@@ -296,10 +303,11 @@ def _open_config(icon=None, item=None):
 
 def _do_quit_tray(icon=None, item=None):
     print("[tray] 用户请求退出...")
-    # 先停止托盘（避免回调卡死）
+    # 先停止托盘（避免回调卡死）；用 _tray_lock 串行化 stop
     try:
         if _tray_ref[0] is not None:
-            _tray_ref[0].stop()
+            with _tray_lock:
+                _tray_ref[0].stop()
     except Exception:
         pass
     _tray_ref[0] = None
@@ -331,7 +339,8 @@ def _do_restart_tray(icon=None, item=None):
     print("[tray] 用户请求重启软件...")
     try:
         if _tray_ref[0] is not None:
-            _tray_ref[0].stop()
+            with _tray_lock:
+                _tray_ref[0].stop()
     except Exception:
         pass
     _tray_ref[0] = None
@@ -424,13 +433,19 @@ def _build_menu(visible=True):
 # 导致的菜单重复重建与 Win32 句柄竞争、卡死/无响应。
 # ============================================================
 def _update_tray_label():
-    """请求托盘刷新菜单文案（动态 text 已绑定可见性，仅触发重绘）。"""
+    """请求托盘刷新菜单文案（动态 text 已绑定可见性，仅触发重绘）。
+
+    注意：update_menu() 内部会 DestroyMenu + CreateMenu 重建 Win32 菜单句柄，
+    pystray 无内部锁。必须用 _tray_lock 串行化，避免与热键线程 / 托盘回调
+    并发操作句柄导致托盘卡死（点击无响应）。
+    """
     tray = _tray_ref[0]
     if tray is None:
         return
     try:
-        if hasattr(tray, "update_menu"):
-            tray.update_menu()
+        with _tray_lock:
+            if hasattr(tray, "update_menu"):
+                tray.update_menu()
     except Exception as e:
         print(f"[tray] 更新菜单文案失败: {e}")
 
@@ -776,21 +791,23 @@ def _run_tray_notifier():
             today = len(d.get("today_deliver") or [])
             tday = d.get("today") or ""
             tray = _tray_ref[0]
-            # 逾期数上升 → 弹提醒
+            # 逾期数上升 → 弹提醒（用 _tray_lock 串行化，避免跨线程操作托盘句柄）
             if tray is not None and last_overdue >= 0 and overdue > last_overdue:
                 new_n = overdue - last_overdue
                 names = "、".join(x.get("name","") for x in (d.get("overdue") or [])[:3])
                 try:
-                    tray.notify(f"新增 {new_n} 个逾期交付：{names}",
-                                APP_TITLE + " · 交付提醒")
+                    with _tray_lock:
+                        tray.notify(f"新增 {new_n} 个逾期交付：{names}",
+                                    APP_TITLE + " · 交付提醒")
                 except Exception:
                     pass
             # 今日有交付，且当天还没提醒过 → 弹一次
             if tray is not None and today > 0 and tday != notified_day:
                 names = "、".join(x.get("name","") for x in (d.get("today_deliver") or [])[:3])
                 try:
-                    tray.notify(f"今日有 {today} 部交付：{names}",
-                                APP_TITLE + " · 交付提醒")
+                    with _tray_lock:
+                        tray.notify(f"今日有 {today} 部交付：{names}",
+                                    APP_TITLE + " · 交付提醒")
                 except Exception:
                     pass
                 notified_day = tday
