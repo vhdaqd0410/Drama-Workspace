@@ -149,6 +149,11 @@ _window_visible = [True]
 # 用此锁把所有 pystray 方法调用串行化，避免跨线程数据竞争。
 # 用 RLock（可重入）防止托盘回调自身重入时死锁。
 _tray_lock = threading.RLock()
+# 菜单刷新节流状态：update_menu() 每次都会 DestroyMenu+CreateMenu 重建 Win32 菜单句柄，
+# 频繁调用（开/关窗口、按热键连续触发）是托盘卡死根源之一。用一次性定时器把短时间内的
+# 多次请求合并为一次 update_menu，显著降低菜单重建频率。
+_tray_update_timer = None
+_tray_update_pending = False
 
 
 # ============================================================
@@ -232,6 +237,7 @@ def _show_window():
     w = _window_ref[0]
     if w is None:
         return
+    changed = not _window_visible[0]
     try:
         w.restore()
         w.show()
@@ -247,6 +253,9 @@ def _show_window():
         print("[tray] 窗口已显示")
     except Exception as e:
         print(f"[tray] show_window 异常: {e}")
+    # 可见性真正变化时才刷新菜单文案（节流合并，避免频繁重建菜单句柄）
+    if changed:
+        _update_tray_label()
 
 
 def _hide_window():
@@ -254,12 +263,15 @@ def _hide_window():
     w = _window_ref[0]
     if w is None:
         return
+    changed = _window_visible[0]
     try:
         w.hide()
         _window_visible[0] = False
         print("[tray] 窗口已隐藏（仍在托盘运行）")
     except Exception as e:
         print(f"[tray] hide_window 异常: {e}")
+    if changed:
+        _update_tray_label()
 
 
 def _toggle_window(icon=None, item=None):
@@ -267,7 +279,9 @@ def _toggle_window(icon=None, item=None):
         _hide_window()
     else:
         _show_window()
-    _update_tray_label()
+    # 注意：这里是托盘菜单回调（托盘线程内），不要在回调里立刻重建菜单，
+    # 否则可能销毁正在显示的菜单。文案刷新交给节流版 _update_tray_label
+    #（由 _show_window/_hide_window 的调用方在其他线程触发，1 秒延迟合并）。
 
 
 def _open_data_dir(icon=None, item=None):
@@ -433,21 +447,41 @@ def _build_menu(visible=True):
 # 导致的菜单重复重建与 Win32 句柄竞争、卡死/无响应。
 # ============================================================
 def _update_tray_label():
-    """请求托盘刷新菜单文案（动态 text 已绑定可见性，仅触发重绘）。
+    """请求托盘刷新菜单文案（节流合并版）。
 
-    注意：update_menu() 内部会 DestroyMenu + CreateMenu 重建 Win32 菜单句柄，
-    pystray 无内部锁。必须用 _tray_lock 串行化，避免与热键线程 / 托盘回调
-    并发操作句柄导致托盘卡死（点击无响应）。
+    update_menu() 内部会 DestroyMenu + CreateMenu 重建整个 Win32 菜单句柄，
+    从非托盘线程调用（热键线程/WebView回调）会与托盘消息循环竞争，频繁调用
+    是托盘卡死（点击无响应）的根本原因之一。
+
+    这里用一次性定时器做节流：1 秒内的多次请求合并为一次 update_menu，
+    大幅降低菜单重建频率。文案（动态 text）短暂滞后不影响功能，仅影响
+    「隐藏/显示」的文字显示。
     """
-    tray = _tray_ref[0]
-    if tray is None:
-        return
+    global _tray_update_timer, _tray_update_pending
+    if _tray_update_pending:
+        return  # 已有待执行的刷新，合并本次请求
+    _tray_update_pending = True
+
+    def _do_update():
+        global _tray_update_pending
+        _tray_update_pending = False
+        tray = _tray_ref[0]
+        if tray is None:
+            return
+        try:
+            with _tray_lock:
+                if hasattr(tray, "update_menu"):
+                    tray.update_menu()
+        except Exception as e:
+            print(f"[tray] 更新菜单文案失败: {e}")
+
     try:
-        with _tray_lock:
-            if hasattr(tray, "update_menu"):
-                tray.update_menu()
+        _tray_update_timer = threading.Timer(1.0, _do_update)
+        _tray_update_timer.daemon = True
+        _tray_update_timer.start()
     except Exception as e:
-        print(f"[tray] 更新菜单文案失败: {e}")
+        print(f"[tray] 菜单刷新调度失败: {e}")
+        _tray_update_pending = False
 
 
 def _trigger_api(action):
@@ -473,8 +507,7 @@ def _trigger_api(action):
 def _trigger_js(js_code):
     """显示窗口（若隐藏）并在前端执行 JS，用于托盘菜单跳转功能。"""
     if not _window_visible[0]:
-        _show_window()
-        _update_tray_label()
+        _show_window()  # 内部按可见性变化触发节流菜单刷新
     try:
         w = _window_ref[0]
         if w is not None and hasattr(w, "evaluate_js"):
@@ -559,8 +592,7 @@ def _apply_startup_settings():
     if min_tray:
         def _min():
             time.sleep(2)
-            _hide_window()
-            _update_tray_label()
+            _hide_window()  # 内部按可见性变化触发节流菜单刷新
             print("[startup] 已按设置最小化到托盘")
         threading.Thread(target=_min, daemon=True).start()
 
@@ -703,8 +735,7 @@ def _run_global_hotkey():
                 if wparam == HOTKEY_ID_WAKE and wake:
                     print(f"[hotkey] {wake[0]} 按下，唤回窗口")
                     try:
-                        _show_window()
-                        _update_tray_label()
+                        _show_window()  # 内部按可见性变化触发节流菜单刷新
                     except Exception:
                         pass
                 elif wparam == HOTKEY_ID_SEARCH and search:
@@ -722,10 +753,9 @@ def _run_global_hotkey():
 def _trigger_global_search():
     """按下全局搜索热键：确保窗口显示，并通知前端打开搜索框。"""
     try:
-        # 先确保窗口显示（后台/托盘时唤回）
+        # 先确保窗口显示（后台/托盘时唤回）；内部按可见性变化触发节流菜单刷新
         try:
             _show_window()
-            _update_tray_label()
         except Exception:
             pass
         # 通过 HTTP 调用后端接口，发布 SSE 事件给前端
@@ -837,10 +867,9 @@ def _register_quit_api(flask_app):
     def _api_global_search():
         try:
             from flask import jsonify
-            # 先确保窗口显示（后台/托盘时唤回）
+            # 先确保窗口显示（后台/托盘时唤回）；内部按可见性变化触发节流菜单刷新
             try:
                 _show_window()
-                _update_tray_label()
             except Exception:
                 pass
             # 发布 SSE 事件，通知前端打开搜索框
@@ -952,8 +981,7 @@ def _main():
     # 关闭按钮 → 隐藏到托盘而非退出
     def _on_closing():
         print("[webview] 用户关闭窗口 → 隐藏到托盘")
-        _hide_window()
-        _update_tray_label()
+        _hide_window()  # 内部按可见性变化触发节流菜单刷新
         return False  # 取消默认关闭行为
 
     try:
