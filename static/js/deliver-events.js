@@ -63,6 +63,11 @@ async function deliverFolders(){
   var subp = _deliverablesState.subpath || '';
   var isDeliveryRoot = (mode === 'delivery' && !subp);
 
+  // 高危操作二次确认：整目录交付会把整个 000交付 复制到制作部
+  if(isDeliveryRoot){
+    if(!confirm('⚠️ 确认执行【整目录交付】？\n\n将把项目「' + name + '」的 000交付 整个文件夹复制到制作部NAS对应项目。\n该操作会替换制作部目标目录内容，且完成后项目自动归档。\n\n确认继续？')) return;
+  }
+
   // 在模态框顶部插入进度条
   var progBarId = 'deliv-folder-prog';
   var existing = document.getElementById(progBarId);
@@ -98,10 +103,10 @@ async function deliverFolders(){
   var pollCount = 0;
   var maxPolls = 300; // 最多等 10 分钟
   var startTs = Date.now();
-  var poll = setInterval(async function(){
+  var poll = _trackDelivPoll('folder', setInterval(async function(){
     pollCount++;
     if(pollCount > maxPolls){
-      clearInterval(poll);
+      _clearDelivPoll('folder');
       var barEl2 = document.getElementById(progBarId);
       if(barEl2){ barEl2.querySelector('.deliv-folder-text').textContent = '⏱ 超时'; }
       return;
@@ -140,7 +145,7 @@ async function deliverFolders(){
       // 判断完成
       var st = target.delivery_status || target.sync_status || '';
       if(sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0){
-        clearInterval(poll);
+        _clearDelivPoll('folder');
         var barEl3 = document.getElementById(progBarId);
         if(barEl3){
           barEl3.style.background = '#e2efda';
@@ -154,7 +159,7 @@ async function deliverFolders(){
           _showDeliverDoneModal(name);
         }, 500);
       } else if(sp.indexOf('失败') >= 0 || sp.indexOf('超时') >= 0 || sp.indexOf('异常') >= 0){
-        clearInterval(poll);
+        _clearDelivPoll('folder');
         var barEl4 = document.getElementById(progBarId);
         if(barEl4){
           barEl4.style.background = '#fde2e2';
@@ -162,7 +167,7 @@ async function deliverFolders(){
         }
       }
     }catch(err){}
-  }, 2000);
+  }, 2000));
 
   renderDeliverablesModal();
 }
@@ -219,6 +224,8 @@ async function deliverBatch(){
   var name = _deliverablesState.projectName;
   var sel = Object.keys(_deliverablesState.selected).filter(function(k){ return _deliverablesState.selected[k]; });
   if(sel.length === 0){ toast('请先选择文件','warning'); return; }
+  // 高危操作二次确认：批量回传会把选中的成片复制到制作部
+  if(!confirm('⚠️ 确认执行【批量回传】？\n\n将回传 ' + sel.length + ' 个文件到制作部NAS对应项目的成片目录。\n\n确认继续？')) return;
   _deliverablesState.running = true;
   renderDeliverablesModal();
   toast('⚡ 批量回传已启动 ' + sel.length + ' 个文件...', 'info');
@@ -247,9 +254,9 @@ async function deliverBatch(){
     // 开始轮询进度（参考 syncMaterial 的 setInterval 写法）
     var pollCount = 0;
     var maxPolls = 180; // 最多等 6 分钟
-    var poll = setInterval(async function(){
+    var poll = _trackDelivPoll('batch', setInterval(async function(){
       pollCount++;
-      if(pollCount > maxPolls){ clearInterval(poll); return; }
+      if(pollCount > maxPolls){ _clearDelivPoll('batch'); return; }
       try{
         var d = await api('GET', '/api/projects');
         var flat = (d.production || []).concat(d.group_all || []);
@@ -282,7 +289,7 @@ async function deliverBatch(){
         var isDone = sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0
           || (st === 'delivered' && sp.indexOf('回传') !== 0);
         if(isDone){
-          clearInterval(poll);
+          _clearDelivPoll('batch');
           var bar2 = document.getElementById(progBarId);
           if(bar2) bar2.style.background = '#e2efda';
           var txt2 = document.querySelector('#' + progBarId + ' .deliv-batch-text');
@@ -294,7 +301,7 @@ async function deliverBatch(){
           }, 500);
         }
       }catch(err){}
-    }, 2000);
+    }, 2000));
   }catch(e){
     toast('❌ 批量回传失败: ' + e.message, 'error');
     var bar = document.getElementById(progBarId);

@@ -267,7 +267,11 @@ a{color:var(--blue);text-decoration:none}
 .section-refresh-btn:disabled{background:#9aa0a6;cursor:not-allowed}
 
 /* === 成片输出详情 modal === */
-.deliv-modal-wrap{padding:0;max-height:80vh;display:flex;flex-direction:column}
+/* 交付预览弹窗：外层 #detailModal 作为 flex 容器承载，滚动交给内层 .deliv-modal-scroll */
+#detailModal.modal{overflow:hidden;padding:0;display:flex;flex-direction:column;max-height:80vh}
+.deliv-modal-wrap{padding:0;height:80vh;max-height:80vh;display:flex;flex-direction:column;overflow:hidden}
+.deliv-modal-scroll{overflow:auto;flex:1;min-height:0;display:flex;flex-direction:column}
+.deliv-modal-scroll > .deliv-table-wrap{flex:1;min-height:0}
 .deliv-header{padding:14px 20px;border-bottom:1px solid #e5e5ea;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#fafbfc,#f0f2f5)}
 .deliv-title{font-size:15px;font-weight:600}
 .deliv-close{cursor:pointer;font-size:22px;color:#86868b;line-height:1;padding:0 4px}
@@ -331,6 +335,9 @@ a{color:var(--blue);text-decoration:none}
 .ep-unnamed-tip { font-size: 11px; color: #86868b; margin-top: 3px; }
 .ep-detail-btn { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid currentColor; background: transparent; cursor: pointer; margin-top: 4px; color: inherit; font-family: inherit; }
 .ep-detail-btn:hover { opacity: 0.8; }
+.ep-fold-btn { float: right; margin-top: 0 !important; padding: 0 6px !important; font-size: 10.5px !important; border-color: transparent !important; background: transparent !important; color: #c5221f !important; opacity: .85; }
+.ep-fold-btn:hover { opacity: 1; }
+.ep-missing-summary.has-missing .ep-fold-btn { color: #c5221f; }
 .ep-detail-grid { display: grid; grid-template-columns: 56px 1fr 72px; gap: 4px 10px; align-items: center; font-size: 12px; }
 .ep-detail-grid .ep-col-head { font-weight: 600; color: #86868b; font-size: 11px; }
 .ep-detail-grid .ep-num { font-variant-numeric: tabular-nums; color: #4a4a4a; }
@@ -580,6 +587,8 @@ a{color:var(--blue);text-decoration:none}
 </style>
 <style>
 .card-title-name{font-size:15px;font-weight:600;flex:1;min-width:0;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.ep-search-btn{flex-shrink:0;align-self:flex-start;font-size:13px;font-weight:600;padding:5px 12px;border-radius:8px;background:#e8f0fe;color:#1d4ed8;border:1px solid #c7dafc;cursor:pointer;transition:background .15s}
+.ep-search-btn:hover{background:#dbe7fd;border-color:#a6c4f9}
 .dept-badge{font-size:10px;padding:2px 8px;border-radius:10px;margin-left:6px;font-weight:600;letter-spacing:.3px;white-space:nowrap;vertical-align:middle;display:inline-block}
 .fm-main + .btn {
   margin-left: -1px !important;
@@ -593,8 +602,175 @@ a{color:var(--blue);text-decoration:none}
 .fm-main + .btn:hover {
   background: #e7e7e7;
 }
+
+/* ============================================================
+   手机端专属界面（响应式双端自动切换）
+   手机访问自动切换到 #mobile-app；桌面保持原有布局不动。
+   ============================================================ */
+/* 桌面端默认隐藏手机容器 */
+#mobile-app { display: none; }
+
+@media (max-width: 768px){
+  /* 手机端：隐藏桌面端，显示手机端 */
+  body.mobile-mode .header,
+  body.mobile-mode .tabs,
+  body.mobile-mode .main { display: none !important; }
+  #mobile-app { display: flex; flex-direction: column; height: 100dvh; }
+
+  /* ---- 手机端顶部栏 ---- */
+  .m-topbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px; background: #fff;
+    border-bottom: 1px solid var(--border, #e5e5ea);
+    flex-shrink: 0;
+  }
+  .m-topbar .m-title { font-size: 17px; font-weight: 700; flex: 1; color: #1d1d1f; }
+  .m-topbar .m-sub { font-size: 12px; color: #86868b; }
+  .m-topbar .m-icon-btn {
+    width: 34px; height: 34px; border: none; background: #f5f5f7;
+    border-radius: 10px; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ---- 手机端内容区 ---- */
+  .m-content { flex: 1; overflow-y: auto; padding: 12px 14px 80px; -webkit-overflow-scrolling: touch; }
+
+  /* ---- 手机端搜索/筛选 ---- */
+  .m-filter { display: flex; gap: 8px; margin-bottom: 12px; }
+  .m-filter input, .m-filter select {
+    flex: 1; padding: 10px 12px; border: 1px solid var(--border, #e5e5ea);
+    border-radius: 12px; font-size: 14px; background: #fff; outline: none;
+    -webkit-appearance: none; appearance: none;
+  }
+  .m-filter select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2386868b' stroke-width='3'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 30px; }
+
+  /* ---- 手机端统计卡 ---- */
+  .m-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 14px; }
+  .m-stat { background: #fff; border-radius: 12px; padding: 10px 8px; text-align: center; box-shadow: var(--shadow, 0 1px 3px rgba(0,0,0,.06)); }
+  .m-stat .m-num { font-size: 20px; font-weight: 700; line-height: 1.1; }
+  .m-stat .m-lab { font-size: 10px; color: #86868b; margin-top: 2px; }
+
+  /* ---- 手机端项目卡片 ---- */
+  .m-card {
+    background: #fff; border-radius: 14px; padding: 14px;
+    box-shadow: var(--shadow, 0 1px 3px rgba(0,0,0,.06));
+    margin-bottom: 12px; cursor: pointer;
+  }
+  .m-card:active { transform: scale(.99); }
+  .m-card-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+  .m-card-name { flex: 1; font-size: 15px; font-weight: 600; line-height: 1.3; min-width: 0; word-break: break-word; }
+  .m-card-badge { font-size: 11px; padding: 3px 8px; border-radius: 8px; white-space: nowrap; flex-shrink: 0; font-weight: 600; }
+  .m-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .m-chip { font-size: 10px; padding: 2px 8px; border-radius: 8px; background: #f2f3f5; color: #4a4a4a; }
+  .m-prog { margin: 6px 0 8px; }
+  .m-prog-bar { height: 6px; background: #e5e5e7; border-radius: 3px; overflow: hidden; }
+  .m-prog-fill { height: 100%; background: linear-gradient(90deg,#34c759,#30d158); border-radius: 3px; transition: width .3s; }
+  .m-prog-fill.warn { background: linear-gradient(90deg,#ff9f0a,#ff9500); }
+  .m-prog-text { font-size: 11px; color: #86868b; margin-top: 3px; display: flex; justify-content: space-between; }
+  .m-card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .m-act {
+    flex: 1; min-width: 72px; padding: 9px 10px; border: none; border-radius: 10px;
+    font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
+  }
+  .m-act.primary { background: #0071e3; color: #fff; }
+  .m-act.success { background: #34c759; color: #fff; }
+  .m-act.warn { background: #fff3cd; color: #856404; border: 1px solid #ffe08a; }
+  .m-act.ghost { background: #f5f5f7; color: #1d1d1f; }
+  .m-act.danger { background: #ff3b30; color: #fff; }
+
+  /* ---- 手机端空状态 ---- */
+  .m-empty { text-align: center; padding: 50px 20px; color: #86868b; font-size: 14px; }
+
+  /* ---- 底部导航 ---- */
+  .m-tabbar {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 62px;
+    background: #fff; border-top: 1px solid var(--border, #e5e5ea);
+    display: flex; z-index: 100; padding-bottom: env(safe-area-inset-bottom);
+  }
+  .m-tabbar .m-tab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; font-size: 10px; color: #86868b; cursor: pointer; border: none; background: none;
+  }
+  .m-tabbar .m-tab .m-ic { font-size: 20px; }
+  .m-tabbar .m-tab.active { color: #0071e3; }
+
+  /* ---- 手机端全屏弹窗详情 ---- */
+  .m-detail {
+    position: fixed; inset: 0; background: #f5f5f7; z-index: 200;
+    display: flex; flex-direction: column; animation: mSlideUp .25s ease;
+  }
+  @keyframes mSlideUp { from{ transform: translateY(30px); opacity: .6; } to{ transform: translateY(0); opacity: 1; } }
+  .m-detail-bar { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #fff; border-bottom: 1px solid var(--border,#e5e5ea); flex-shrink: 0; }
+  .m-detail-bar .m-back { width: 34px; height: 34px; border: none; background: #f5f5f7; border-radius: 10px; font-size: 16px; cursor: pointer; }
+  .m-detail-bar .m-dt { flex: 1; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m-detail-body { flex: 1; overflow-y: auto; padding: 16px 14px 30px; }
+  .m-section { margin-bottom: 18px; }
+  .m-section h4 { font-size: 13px; color: #86868b; margin-bottom: 8px; font-weight: 600; }
+  .m-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+  .m-row:last-child { border-bottom: none; }
+  .m-row .m-k { color: #86868b; }
+  .m-row .m-v { font-weight: 600; }
+  .m-status-select { padding: 9px 12px; border: 1px solid var(--border,#e5e5ea); border-radius: 10px; font-size: 14px; width: 100%; background: #fff; -webkit-appearance: none; }
+
+  /* ---- 数据页专用：汇总卡 ---- */
+  .m-sum-card { background: linear-gradient(135deg,#1d1d1f,#3a3a3c); border-radius: 16px; padding: 16px; color: #fff; margin-bottom: 14px; }
+  .m-sum-main { font-size: 32px; font-weight: 800; line-height: 1.1; margin-top: 4px; }
+  .m-sum-label { font-size: 12px; color: #a1a1a6; }
+  .m-sum-row { display: flex; gap: 8px; margin-top: 12px; }
+  .m-sum-item { flex: 1; background: rgba(255,255,255,.1); border-radius: 10px; padding: 8px; text-align: center; }
+  .m-sum-item .m-num { font-size: 18px; font-weight: 700; }
+  .m-sum-item .m-lab { font-size: 10px; color: #c7c7cc; margin-top: 2px; }
+  /* 剪辑师明细卡 */
+  .m-ed-card { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .m-ed-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .m-ed-avatar { width: 36px; height: 36px; border-radius: 50%; background: #e8f0fe; color: #1d4ed8; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0; }
+  .m-ed-info { flex: 1; min-width: 0; }
+  .m-ed-name { font-size: 15px; font-weight: 700; }
+  .m-ed-role { font-size: 11px; color: #86868b; }
+  .m-ed-comm { text-align: right; }
+  .m-ed-comm-val { font-size: 18px; font-weight: 800; }
+  .m-ed-comm-lab { font-size: 10px; color: #86868b; }
+  .m-ed-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .m-ed-bar-track { flex: 1; height: 8px; background: #e5e5e7; border-radius: 4px; overflow: hidden; }
+  .m-ed-bar-fill { height: 100%; border-radius: 4px; transition: width .4s; }
+  .m-ed-bar-text { font-size: 11px; color: #86868b; white-space: nowrap; }
+  .m-ed-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .m-ed-tag { font-size: 11px; padding: 3px 8px; border-radius: 8px; background: #f2f3f5; color: #4a4a4a; }
+  .m-ed-tag.ok { background: #e8f5e9; color: #1d8f4c; }
+  .m-ed-tag.warn { background: #fde2e2; color: #c62828; }
+  .m-ed-tag.money { background: #e8f0fe; color: #1d4ed8; }
+  .m-ed-tag.money2 { background: #f3e8ff; color: #9333ea; }
+
+  /* 手机端待办 */
+  .m-todo-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+  .m-todo-item .m-td-check { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #d1d1d6; flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .m-todo-item .m-td-check.done { background: #34c759; border-color: #34c759; color: #fff; }
+  .m-todo-item .m-td-text { flex: 1; font-size: 14px; }
+  .m-todo-item .m-td-text.done { text-decoration: line-through; color: #86868b; }
+  .m-todo-add { display: flex; gap: 8px; margin-top: 12px; }
+  .m-todo-add input { flex: 1; padding: 10px 12px; border: 1px solid var(--border,#e5e5ea); border-radius: 10px; font-size: 14px; }
+  .m-todo-add button { padding: 10px 16px; border: none; background: #0071e3; color: #fff; border-radius: 10px; font-size: 14px; font-weight: 600; }
+}
 </style><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/></head>
 <body>
+<!-- ===== 手机端专属界面容器（响应式自动切换，桌面端不显示）===== -->
+<div id="mobile-app">
+  <div class="m-topbar">
+    <div class="m-title">🎬 视频工作台</div>
+    <button class="m-icon-btn" onclick="WB.mobile.openScan()">🔄</button>
+    <button class="m-icon-btn" onclick="WB.mobile.openNotifications()">🔔</button>
+  </div>
+  <div class="m-content" id="m-content"></div>
+  <div class="m-tabbar">
+    <button class="m-tab active" data-mtab="home" onclick="WB.mobile.switchTab('home')"><span class="m-ic">🏠</span>首页</button>
+    <button class="m-tab" data-mtab="fenji" onclick="WB.mobile.switchTab('fenji')"><span class="m-ic">📑</span>分集</button>
+    <button class="m-tab" data-mtab="stats" onclick="WB.mobile.switchTab('stats')"><span class="m-ic">📊</span>数据</button>
+    <button class="m-tab" data-mtab="mine" onclick="WB.mobile.switchTab('mine')"><span class="m-ic">👤</span>我的</button>
+  </div>
+</div>
+<!-- ===== 手机端全屏详情弹窗容器 ===== -->
+<div id="m-detail-root"></div>
+
 <div class="header">
   <div class="header-left"><div class="logo"><span class="logo-icon">🎬</span>视频工作台</div></div>
   <div class="header-right">
@@ -620,6 +796,7 @@ a{color:var(--blue);text-decoration:none}
   <div class="tab" data-tab="qa" onclick="switchTab('qa')">🔍 质检中心</div>
   <div class="tab" data-tab="activity" onclick="switchTab('activity');loadActivityTab()">📜 任务中心</div>
   <div class="tab" data-tab="report" onclick="switchTab('report');loadReportTab()">📊 月度报告</div>
+  <div class="tab" data-tab="editor" onclick="switchTab('editor');if(window.WB&&WB.editor)WB.editor.load()">✂️ 剪辑师</div>
   <div class="tab" data-tab="nameplate" onclick="switchTab('nameplate');loadNameplateTab()">🧰 工具箱</div>
   <div class="tab" data-tab="settings" onclick="switchTab('settings')">⚙️ 设置</div>
 </div>
@@ -682,7 +859,7 @@ a{color:var(--blue);text-decoration:none}
           <select id="fjProject" onchange="fjOnProjectChange()"><option value="">— 选择项目 —</option></select>
         </div>
         <div class="form-group"><label>📊 总集数</label>
-          <input type="number" id="fjTotal" value="80" min="1" oninput="fjSaveSession()">
+          <input type="number" id="fjTotal" value="70" min="1" oninput="fjSaveSession()">
         </div>
       </div>
 
@@ -954,6 +1131,11 @@ a{color:var(--blue);text-decoration:none}
   <div class="tab-panel" id="tab-report">
     <div id="reportContent">加载中...</div>
   </div>
+  <div class="tab-panel" id="tab-editor">
+    <div id="editorContent">
+      <div style="text-align:center;padding:60px;color:#86868b">⏳ 加载剪辑师视图...</div>
+    </div>
+  </div>
   <div class="tab-panel" id="tab-settings">
   <div class="settings-grid">
     <div class="panel settings-section"><h3>🏢 NAS 路径</h3>
@@ -1040,6 +1222,10 @@ a{color:var(--blue);text-decoration:none}
     <div class="panel settings-section" style="grid-column:1/-1"><h3>💾 数据备份</h3>
       <div style="font-size:12px;color:var(--text-sec);margin-bottom:8px">每日自动备份数据库到 data/backups/（保留 7 份），也可手动备份或从历史备份恢复。</div>
       <button class="btn btn-sm btn-primary" onclick="openBackupDialog()">🛡️ 打开备份/恢复</button>
+    </div>
+    <div class="panel settings-section" style="grid-column:1/-1"><h3>📴 离线只读模式</h3>
+      <div style="font-size:12px;color:var(--text-sec);margin-bottom:8px">NAS 盘断开时，可切换到离线模式查看最近一次缓存的项目列表/状态/分集/待办（只读）。</div>
+      <button class="btn btn-sm btn-primary" onclick="if(window.WB)WB.toggleOffline()">📴 切换离线模式</button>
     </div>
     <div class="panel settings-section" style="grid-column:1/-1;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn" onclick="migrateOld()">📦 迁移旧数据</button>
@@ -1238,7 +1424,10 @@ window.__API_KEY__ = "{{ api_key|default('','safe') }}";
 window.onerror = function(msg, url, line, col, err){
 };
 </script>
-<script src="/static/js/core.js?v=20260820e"></script>
+<script src="/static/js/wb-shared.js?v=20260822wb"></script>
+<script src="/static/js/wb-features.js?v=20260822wb"></script>
+<script src="/static/js/wb-mobile.js?v=20260822mob"></script>
+<script src="/static/js/core.js?v=20260822todo"></script>
 <script src="/static/js/project.js?v=20260815r"></script>
 <script src="/static/js/tabs.js?v=20260820a"></script>
 <script src="/static/js/episode.js?v=20260819d"></script>
@@ -1246,7 +1435,7 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/fenji-assign.js?v=20260818a"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
 <script src="/static/js/team.js?v=20260818a"></script>
-<script src="/static/js/deliverables.js?v=20260818a"></script>
+<script src="/static/js/deliverables.js?v=20260820b"></script>
 <script src="/static/js/deliver-events.js?v=20260818a"></script>
 <script src="/static/js/deliver-batch.js?v=20260815m"></script>
 <script src="/static/js/preview.js?v=20260815m"></script>

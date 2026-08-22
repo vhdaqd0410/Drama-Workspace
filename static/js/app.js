@@ -62,6 +62,14 @@ document.addEventListener('DOMContentLoaded',async ()=>{
     // 3.9 通知中心角标（加载交付/待办提醒）
     try{ if(typeof loadNotifications==='function') loadNotifications(); }catch(_){}
 
+    // 3.10 离线缓存后台自动刷新（每5分钟拉一次，供离线模式使用）
+    try{
+      if(window.WB && WB.offline){
+        WB.offline.refresh();
+        setInterval(function(){ try{ WB.offline.refresh(); }catch(_){} }, 5*60*1000);
+      }
+    }catch(_){}
+
     // 4. 自动刷新已禁用 — 由用户手动点 🔄 刷新 按钮触发
     // pollDashboard=setInterval(loadProjects,30000);
   }catch(e){

@@ -167,6 +167,11 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     @app.route("/api/project/<path:project_name>", methods=["DELETE"])
     def api_project_delete(project_name):
         try:
+            # 审计：高危删除项目
+            try:
+                db.add_audit_log(project_name, "删除项目", "删除项目记录")
+            except Exception:
+                pass
             db.delete_project(project_name)
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
@@ -805,6 +810,27 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return jsonify({"ok": False, "message": str(e)}), 500
 
 
+    @app.route("/api/projects/episodes_status_batch", methods=["POST"])
+    def api_episodes_status_batch():
+        """批量返回多个项目的集数进度，避免前端逐个请求（N+1 优化）。
+        body: { names: [项目名, ...] }
+        返回: { ok: true, results: { 项目名: {...episode_status}, ... } }
+        """
+        body = request.get_json(silent=True) or {}
+        names = body.get("names") or []
+        if not names or sync_engine is None:
+            return jsonify({"ok": False, "message": "参数缺失"}), 400
+        results = {}
+        for n in names:
+            try:
+                r = sync_engine.get_episode_status(n)
+                if r and r.get("ok"):
+                    results[n] = r
+            except Exception:
+                results[n] = {"ok": False, "project_name": n}
+        return jsonify({"ok": True, "results": results})
+
+
     @app.route("/api/bulk/import_episodes", methods=["POST"])
     def api_bulk_import_episodes():
         """接收前端分集结果，保存到 DB。"""
@@ -1235,7 +1261,11 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                 _logger.info('✅ 已追加到目标: %s (读取源=%s)', safe_tgt, actually_read_from)
             except Exception as e:
                 _logger.exception('写目标文件失败')
-                return jsonify(ok=False, msg=f'保存目标文件失败: {e}'), 500
+                hint = ''
+                # 常见原因：目标 Excel 正被 Excel/WPS 打开占用（PermissionError）
+                if isinstance(e, PermissionError):
+                    hint = '（可能原因：目标表格正被 Excel 打开，请关闭后重试）'
+                return jsonify(ok=False, msg=f'保存目标文件失败: {e}{hint}'), 500
             # 自动同步：写入目标后，自动从表格读取胶片日期更新项目交付日期（不阻塞响应）
             try:
                 import threading as _th

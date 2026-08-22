@@ -179,7 +179,7 @@ function fjRenderTable(){
   body.innerHTML = names.map((name, i) => {
     const rng = fjRanges[name] || '';
     const len = fjRangeToCount(rng);
-    const escaped = name.replace(/'/g,"\\'");
+    const escaped = jsq(name);
     return `<div class="fj-row">
       <div class="idx">${i+1}</div>
       <div>${name}</div>

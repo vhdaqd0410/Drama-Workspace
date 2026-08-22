@@ -205,7 +205,9 @@ def aggregate_editor_workload(db, month=None):
     """统一剪辑师工作量口径：从项目 episode_plan（分集详情）聚合每人集数。
     以当前 DB 分集详情为最终数据（用户在分集管理手动校准过的 {集号:剪辑师}）。
     month: 若指定 'YYYY-MM'，仅统计 project_month==month 的项目；否则统计全部。
-    返回 [{'name','assigned','projects'}]（按 assigned 降序），剔除空/空白剪辑师。
+    返回 [{'name','assigned','projects','project_detail'}]（按 assigned 降序），
+    剔除空/空白剪辑师。project_detail 为该项目下该剪辑师的集号明细
+    [{'project': 项目名, 'episodes': [集号...], 'count': N}]，供前端按人弹出比对。
     """
     import json as _json
     from collections import Counter as _Counter
@@ -227,21 +229,45 @@ def aggregate_editor_workload(db, month=None):
             continue
         if not isinstance(plan, dict) or not plan:
             continue
-        tmp = _Counter()
+        pname = p.get("name") or ""
+        # 集号统一转 int，便于排序展示（非数字集号保留原文）
+        def _norm(k):
+            try:
+                return int(k)
+            except (TypeError, ValueError):
+                return str(k)
+        tmp = {}
         for _epn, editor in plan.items():
             if editor and str(editor).strip():
-                tmp[str(editor).strip()] += 1
-        for editor, cnt in tmp.items():
+                ed = str(editor).strip()
+                tmp.setdefault(ed, []).append(_norm(_epn))
+        for editor, eps in tmp.items():
             ed = str(editor).strip()
-            if not ed or not cnt:
+            if not ed:
                 continue
-            item = editor_workload.setdefault(ed, {"assigned": 0, "projects": set()})
-            item["assigned"] += cnt
-            item["projects"].add(p.get("name") or "")
-    return [
-        {"name": name, "assigned": item["assigned"], "projects": len(item["projects"])}
-        for name, item in sorted(editor_workload.items(), key=lambda x: -x[1]["assigned"])
-    ]
+            item = editor_workload.setdefault(ed, {"assigned": 0, "projects": set(),
+                                                   "project_detail": {}})
+            item["assigned"] += len(eps)
+            item["projects"].add(pname)
+            item["project_detail"].setdefault(pname, []).extend(eps)
+    # 组装返回：项目集号排序
+    result = []
+    for name, item in sorted(editor_workload.items(), key=lambda x: -x[1]["assigned"]):
+        detail = []
+        for pname, eps in sorted(item["project_detail"].items(), key=lambda x: x[0]):
+            eps_sorted = sorted(set(eps), key=lambda x: (not isinstance(x, int), x))
+            detail.append({
+                "project": pname,
+                "episodes": eps_sorted,
+                "count": len(eps_sorted),
+            })
+        result.append({
+            "name": name,
+            "assigned": item["assigned"],
+            "projects": len(item["projects"]),
+            "project_detail": detail,
+        })
+    return result
 
 
 def sync_workload_from_episode_plan(db=None):

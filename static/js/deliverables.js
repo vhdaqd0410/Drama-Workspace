@@ -9,8 +9,34 @@ var _deliverablesState = {
     breadcrumbs: [],
     selected: {},
     selectedFolders: {},
-    running: false
+    running: false,
+    _polls: {}   // 活跃的进度轮询句柄（modal 关闭时统一清理，防止后台持续请求）
 };
+
+// 登记一个进度轮询，返回包装后的句柄；modal 关闭时会自动 clearInterval
+function _trackDelivPoll(key, intervalId){
+    _deliverablesState._polls = _deliverablesState._polls || {};
+    _deliverablesState._polls[key] = intervalId;
+    return intervalId;
+}
+function _clearDelivPoll(key){
+    var p = _deliverablesState && _deliverablesState._polls && _deliverablesState._polls[key];
+    if(p){ clearInterval(p); delete _deliverablesState._polls[key]; }
+}
+// 关闭成片详情 modal，并清理所有活跃轮询（防止后台每 2s 持续请求 /api/projects）
+function closeDeliverablesModal(){
+    var polls = _deliverablesState && _deliverablesState._polls;
+    if(polls){
+        Object.keys(polls).forEach(function(k){
+            clearInterval(polls[k]);
+        });
+        polls = {};
+        _deliverablesState._polls = polls;
+    }
+    _deliverablesState.running = false;
+    var modal = document.getElementById('detailModal');
+    if(modal){ modal.classList.remove('active'); }
+}
 
 function openDeliverablesModal(projectName, forceMode){
     _deliverablesState.projectName = projectName;
@@ -134,8 +160,9 @@ function renderDeliverablesModal(){
           + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center">'
             + switchBtn
             + openSrcBtn
+            + '<button class="btn btn-sm" onclick="editDelivOutputDir()">📁 修改成片目录</button>'
             + '<button class="btn btn-sm" onclick="openSmart(\'' + htm(name) + '\', \'delivery\')">📦 打开交付目录</button>'
-            + '<button class="btn btn-sm" onclick="$(' + "'" + 'detailModal' + "'" + ').classList.remove(' + "'" + 'active' + "'" + ')">关闭</button>'
+            + '<button class="btn btn-sm" onclick="closeDeliverablesModal()">关闭</button>'
           + '</div>'
         + '</div>'
       + '</div>';
@@ -198,7 +225,7 @@ function renderDeliverablesModal(){
     }
 
     return '<tr id="' + rowId + '" style="' + rowBg + '">'
-      + '<td class="deliv-td-ck"><input type="checkbox" ' + checked + ' data-deliv-ck="' + htm(f.name) + '" onchange="toggleDelivRow(\'' + htm(f.name).replace(/'/g,"\'") + '\')"></td>'
+      + '<td class="deliv-td-ck"><input type="checkbox" ' + checked + ' data-deliv-ck="' + htm(f.name) + '" onchange="toggleDelivRow(\'' + jsq(f.name) + '\')"></td>'
       + '<td class="deliv-td-ep">' + epHtml + '</td>'
       + '<td class="deliv-td-editor">' + editorHtml + '</td>'
       + '<td class="deliv-td-name" title="' + htm(f.path) + '" data-thumb="' + (isVideo ? htm(f.path) : '') + '">' + icon + ' ' + htm(f.name) + '</td>'
@@ -220,7 +247,7 @@ function renderDeliverablesModal(){
       // Header
       + '<div class="deliv-header">'
         + '<div class="deliv-title">🎬 成片输出详情</div>'
-        + '<span class="deliv-close" onclick="$(' + "'" + 'detailModal' + "'" + ').classList.remove(' + "'" + 'active' + "'" + ')">×</span>'
+        + '<span class="deliv-close" onclick="closeDeliverablesModal()">×</span>'
       + '</div>'
 
             // Breadcrumbs (revising 模式)
@@ -230,7 +257,7 @@ function renderDeliverablesModal(){
           var crumbs = _deliverablesState.breadcrumbs.map(function(b, idx){
             var clickable = idx < _deliverablesState.breadcrumbs.length - 1;
             var sp = _deliverablesState.breadcrumbs.slice(0, idx+1).map(function(x){ return x.path; }).filter(Boolean).join('/');
-            var safeSp = sp.replace(/'/g, "\\'");
+            var safeSp = jsq(sp);
             return (clickable
               ? '<a href="javascript:void(0)" onclick="navDelivTo(\'' + safeSp + '\')" style="color:#0071e3;text-decoration:none">' + htm(b.name) + '</a>'
               : '<span style="color:#1d1d1f;font-weight:600">' + htm(b.name) + '</span>');
@@ -249,7 +276,7 @@ function renderDeliverablesModal(){
                 }
                 if(dc.all_ok){
                   var okCount = dc.folders.length;
-                  var safeName = htm(name).replace(/'/g,"\\'");
+                  var safeName = jsq(name);
                   return '<div style="padding:10px 16px;background:#d4edda;color:#155724;border-bottom:1px solid #c3e6cb;font-size:13px;font-weight:600">✅ 交付文件已完成（' + okCount + ' 个文件夹全部齐套）— 请进行下一步质检</div>'
                     + '<div style="padding:8px 16px;background:#f0f8f0;border-bottom:1px solid #c3e6cb;font-size:12px">'
                     + dc.folders.map(function(f){
@@ -259,7 +286,7 @@ function renderDeliverablesModal(){
                     + '<div style="padding:14px 16px;background:#e8f5e9;border-bottom:1px solid #c3e6cb;display:flex;gap:10px;align-items:center">'
                     + '<button onclick="delivGoQA(\'' + safeName + '\')" style="padding:9px 24px;font-size:14px;font-weight:600;background:#2E7D32;color:#fff;border:none;border-radius:6px;cursor:pointer;box-shadow:0 2px 6px rgba(46,125,50,0.3)">🔍 立即质检</button>'
                     + '<button onclick="delivMarkQA(\'' + safeName + '\')" style="padding:9px 16px;font-size:13px;background:#fff;border:1px solid #2E7D32;color:#2E7D32;border-radius:6px;cursor:pointer">⚙️ 标记「待质检」</button>'
-                    + '<button onclick="$(\'detailModal\').classList.remove(\'active\')" style="margin-left:auto;padding:9px 16px;font-size:12px;background:transparent;border:none;color:#6b6b70;cursor:pointer">关闭预览</button>'
+                    + '<button onclick="closeDeliverablesModal()" style="margin-left:auto;padding:9px 16px;font-size:12px;background:transparent;border:none;color:#6b6b70;cursor:pointer">关闭预览</button>'
                     + '</div>';
                 }
                 // 不齐套 — 显示详细缺失情况
@@ -359,6 +386,7 @@ function renderDeliverablesModal(){
         + (_deliverablesState.mode === 'revising'
           ? '<button class="btn btn-sm" onclick="openSmart(\'' + jsq(name) + '\', \'revising\')">📁 修改目录</button>'
           : '<button class="btn btn-sm" onclick="openSmart(\'' + jsq(name) + '\', \'group_output\')">📁 成片目录</button>')
+        + '<button class="btn btn-sm" id="deliv-output-dir-btn" onclick="editDelivOutputDir()" title="个别项目成片不在默认 01上映单集版 目录时，可单独指定存放目录名">📁 修改成片目录</button>'
         + '<button class="btn btn-sm" onclick="openSmart(\'' + jsq(name) + '\', \'delivery\')">📦 交付目录</button>'
         + '<button class="btn btn-sm" onclick="refreshDeliverablesList()">🔄 刷新</button>'
         + '<button class="btn btn-sm btn-primary" onclick="deliverBatch()" ' + (selCount===0||_deliverablesState.running?'disabled':'') + '>⚡ 批量回传 (' + selCount + ')</button>'
@@ -423,7 +451,7 @@ function toggleAllDelivFolders(checked){
 
 
 async function delivGoQA(name){
-  document.getElementById('detailModal').classList.remove('active');
+  closeDeliverablesModal();
   if(typeof qaStartFor === 'function'){
     await qaStartFor(name);
   } else if(typeof switchTab === 'function'){
@@ -511,5 +539,52 @@ async function delivNewFolder(){
     refreshDeliverablesList();
   }catch(e){
     toast('❌ 创建失败: ' + e.message, 'error');
+  }
+}
+
+// ===== 修改成片存放目录 =====
+// 个别项目的成片不在默认的 01上映单集版 目录，可在这里单独指定存放目录名。
+async function editDelivOutputDir(){
+  var name = _deliverablesState.projectName;
+  if(!name){ toast('缺少项目', 'warning'); return; }
+  var btn = document.querySelector('#deliv-output-dir-btn');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 读取中...'; }
+  try{
+    var d = await api('GET', '/api/project/' + encodeURIComponent(name) + '/output_dir');
+    if(!d || !d.ok){ toast((d && d.message) || '读取失败', 'error'); return; }
+    var cur = d.effective_dir_name || '';
+    var stored = d.dir_name || '';
+    var tip = stored
+      ? '该项目当前单独指定成片目录为：' + stored + '\n\n'
+      : '';
+    var entered = window.prompt(
+      '修改该项目「' + name + '」的成片存放目录名\n\n'
+      + '说明：个别项目的成片不在默认「01上映单集版」目录，\n'
+      + '可在这里单独指定成片所在的子目录名（如：02上映多集版）。\n\n'
+      + '当前实际生效目录：' + cur + '\n'
+      + tip
+      + '输入新的目录名（留空 = 恢复默认「01上映单集版」）：',
+      stored || cur || '01上映单集版'
+    );
+    if(entered === null) return; // 取消
+    var newName = (entered || '').trim();
+    if(!newName){ newName = ''; } // 空串 = 恢复默认
+    var r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/output_dir', { dir_name: newName });
+    if(r && r.ok){
+      toast('✅ ' + (r.message || '成片目录已更新'), 'success');
+    } else {
+      toast((r && r.message) || '更新失败', 'error');
+      return;
+    }
+    // 清空已缓存的文件列表，强制重新按新目录名扫描
+    _deliverablesState.files = [];
+    _deliverablesState.folders = [];
+    _deliverablesState.subpath = '';
+    _deliverablesState.breadcrumbs = [];
+    refreshDeliverablesList();
+  }catch(e){
+    toast('❌ 操作失败: ' + e.message, 'error');
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '📁 修改成片目录'; }
   }
 }

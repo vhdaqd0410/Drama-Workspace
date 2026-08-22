@@ -32,16 +32,46 @@ os.environ["DRAMA_DESKTOP_NOTIFY"] = "1"
 os.environ["DRAMA_DESKTOP_RETRY"] = "1"
 
 
-# ============ 文件日志 ============
+# ============ 文件日志（带轮转，防止 desktop.log 无限膨胀）============
 _LOG_PATH = os.path.join(BASE_DIR, "desktop.log")
+_LOG_MAX_BYTES = 5 * 1024 * 1024   # 单个日志 5MB 触发轮转
+_LOG_BACKUPS = 3                    # 保留 3 份历史（desktop.log.1 / .2 / .3）
+
 class _FileLogger:
+    """把 print/stdout 输出写入日志文件，超过阈值时轮转旧文件。"""
     def __init__(self, path):
-        self.f = open(path, "w", encoding="utf-8")
+        self.path = path
+        self.f = open(path, "a", encoding="utf-8")
+        self.bytes = os.path.getsize(path) if os.path.exists(path) else 0
+    def _rotate(self):
+        """当文件超限时，把当前文件依次滚动为 .1/.2/.3，再开新文件。"""
+        try:
+            self.f.close()
+            for i in range(_LOG_BACKUPS, 0, -1):
+                src = f"{self.path}.{i-1}" if i > 1 else self.path
+                dst = f"{self.path}.{i}"
+                if os.path.exists(src):
+                    if os.path.exists(dst):
+                        os.remove(dst)
+                    os.rename(src, dst)
+            self.f = open(self.path, "w", encoding="utf-8")
+            self.bytes = 0
+        except Exception:
+            try:
+                self.f = open(self.path, "a", encoding="utf-8")
+            except Exception:
+                pass
     def write(self, msg):
         ts = time.strftime("%H:%M:%S")
-        self.f.write(f"[{ts}] {msg}\n")
-        try: self.f.flush()
-        except: pass
+        line = f"[{ts}] {msg}\n"
+        self.bytes += len(line.encode("utf-8", errors="replace"))
+        try:
+            self.f.write(line)
+            self.f.flush()
+            if self.bytes >= _LOG_MAX_BYTES:
+                self._rotate()
+        except Exception:
+            pass
     def flush(self):
         try: self.f.flush()
         except: pass
@@ -296,6 +326,53 @@ def _do_quit():
     os._exit(0)
 
 
+def _do_restart_tray(icon=None, item=None):
+    """托盘菜单「重启软件」：先停止托盘与窗口，再重新拉起 main_desktop.py。"""
+    print("[tray] 用户请求重启软件...")
+    try:
+        if _tray_ref[0] is not None:
+            _tray_ref[0].stop()
+    except Exception:
+        pass
+    _tray_ref[0] = None
+    threading.Thread(target=_do_restart, daemon=True).start()
+
+
+def _do_restart():
+    """后台执行：优雅关闭窗口后，用 pythonw 重新拉起 main_desktop.py。"""
+    try:
+        w = _window_ref[0]
+        if w is not None:
+            print("  → window.destroy()")
+            w.destroy()
+    except Exception as e:
+        print(f"  → window.destroy 异常: {e}")
+    # 等待端口释放（让旧进程完全退出）
+    time.sleep(2)
+
+    _spawn = sys.executable
+    # 优先用 pythonw（无黑窗）
+    _pw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if os.path.exists(_pw):
+        _spawn = _pw
+    _script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "main_desktop.py")
+    try:
+        import subprocess as _sub
+        _sub.Popen([_spawn, _script],
+                   cwd=os.path.dirname(_script),
+                   creationflags=getattr(_sub, "CREATE_NO_WINDOW", 0))
+        print("  → 已重新拉起 main_desktop.py")
+    except Exception as e:
+        print(f"  → 重新启动失败: {e}")
+
+    if _mutex:
+        try:
+            ctypes.windll.kernel32.CloseHandle(_mutex)
+        except Exception:
+            pass
+    os._exit(0)
+
+
 # ============================================================
 # 托盘菜单
 # 说明：pystray 的 MenuItem 支持 callable 属性（text/visible/enabled），
@@ -333,25 +410,27 @@ def _build_menu(visible=True):
         pystray.MenuItem("📋 查看日志", _open_log),
         pystray.MenuItem("⚙️ 打开配置文件", _open_config),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem("🔄 重启软件", _do_restart_tray),
         pystray.MenuItem("🚪 退出", _do_quit_tray),
     )
 
 
+# ============================================================
+# 托盘菜单刷新
+# 说明：菜单文案采用 pystray 的 callable 动态 text，绑定 _window_visible，
+# 菜单在显示时自动求值最新文案，因此无需在每次点击时重建整个菜单。
+# 这里仅触发一次 update_menu() 让托盘线程重绘（幂等、不阻塞），彻底
+# 避免旧实现“tray.menu= 自动 update_menu() + 又显式 update_menu()”
+# 导致的菜单重复重建与 Win32 句柄竞争、卡死/无响应。
+# ============================================================
 def _update_tray_label():
-    """窗口可见性状态变化时更新托盘菜单文案。
-    采用 callable 动态 text 后，菜单本身无需重建；当文案依赖的状态
-    (_window_visible) 变化时，只需通知 pystray 重绘即可。
-    """
+    """请求托盘刷新菜单文案（动态 text 已绑定可见性，仅触发重绘）。"""
     tray = _tray_ref[0]
     if tray is None:
         return
     try:
-        # 动态 text 已绑定 _window_visible，这里仅触发重绘。
-        # 注意：pystray 的 tray.menu= 赋值会自动调用 update_menu()，
-        # 无需（也切忌）再次显式调用，否则菜单被重复重建导致卡死。
         if hasattr(tray, "update_menu"):
             tray.update_menu()
-        print(f"[tray] 菜单文案已更新 → {'隐藏窗口到托盘' if _window_visible[0] else '显示主窗口'}")
     except Exception as e:
         print(f"[tray] 更新菜单文案失败: {e}")
 
@@ -773,7 +852,21 @@ def _run_server():
         _flask_app[0] = app
         _register_quit_api(app)
         import waitress
-        waitress.serve(app, host="127.0.0.1", port=_SERVER_PORT, threads=16)
+        # 监听地址：从 config.yaml 读取 web.host（默认 0.0.0.0，便于通过 Tailscale 等内网访问）。
+        # 若仅本机使用可改回 127.0.0.1。
+        _host = "0.0.0.0"
+        try:
+            import yaml as _y
+            _cfg_path = os.path.join(BASE_DIR, "backend", "config.yaml")
+            if os.path.isfile(_cfg_path):
+                with open(_cfg_path, "r", encoding="utf-8") as _f:
+                    _cfg = _y.safe_load(_f) or {}
+                _h = (_cfg.get("web", {}) or {}).get("host") or ""
+                if _h:
+                    _host = _h
+        except Exception:
+            pass
+        waitress.serve(app, host=_host, port=_SERVER_PORT, threads=16)
     except SystemExit:
         pass
     except Exception as e:

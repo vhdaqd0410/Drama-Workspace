@@ -265,6 +265,23 @@ class Database:
                 c.execute("ALTER TABLE projects ADD COLUMN status_changed_at TEXT DEFAULT ''")
             except Exception:
                 pass
+            # 成片存放目录名（覆盖全局 output_dir_name）。空串 = 用全局默认(01上映单集版)。
+            # 个别项目的成片不在 01上映单集版，可在成片详情里单独指定存放目录名。
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN output_dir_name TEXT DEFAULT ''")
+            except Exception:
+                pass
+            # 交付目录名（覆盖全局 delivery_folder，默认 000交付）。空串 = 用全局默认。
+            # 个别项目的交付目录不在全局 000交付，可单独指定。
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN delivery_folder TEXT DEFAULT ''")
+            except Exception:
+                pass
+            # 排期看板用：项目开始日期（YYYY-MM-DD），可手动微调；空 = 用 created_at 推算
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN start_date TEXT DEFAULT ''")
+            except Exception:
+                pass
 
     # ---------- migration from legacy DB ----------
 
@@ -454,6 +471,22 @@ class Database:
             conn.execute(
                 "UPDATE projects SET episode_plan=? WHERE name=?",
                 (json.dumps(plan_dict, ensure_ascii=False), name),
+            )
+
+    def set_output_dir_name(self, name, dir_name):
+        """设置项目单独的成片存放目录名（空串 = 使用全局默认）。"""
+        with self.get_conn() as conn:
+            conn.execute(
+                "UPDATE projects SET output_dir_name=? WHERE name=?",
+                (str(dir_name or "").strip(), name),
+            )
+
+    def set_delivery_folder(self, name, folder_name):
+        """设置项目单独的交付目录名（空串 = 使用全局默认）。"""
+        with self.get_conn() as conn:
+            conn.execute(
+                "UPDATE projects SET delivery_folder=? WHERE name=?",
+                (str(folder_name or "").strip(), name),
             )
 
     def get_episode_plan(self, name):

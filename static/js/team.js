@@ -25,7 +25,7 @@ async function loadNasPaths(){
       } else {
         list.innerHTML = roots.map(function(path){
           const label = labels[path] || '';
-          const safe = String(path).replace(/"/g,'&quot;').replace(/'/g,"&#39;");
+          const safe = jsq(path);
           return `<div style="display:flex;align-items:center;gap:6px;background:#f8fafc;border:1px solid #e5e8ee;border-radius:6px;padding:6px 8px">
             <span style="flex:1;font-size:12px;font-family:monospace;word-break:break-all">${htm(path)}</span>
             ${label ? `<span style="font-size:11px;color:#666;background:#eef2ff;padding:1px 6px;border-radius:4px">${htm(label)}</span>` : ''}

@@ -314,7 +314,7 @@ function buildCalDragList(){
   return `<div style="margin-top:8px;padding:8px 10px;background:#fafafa;border:1px solid var(--border,#e5e5ea);border-radius:8px">
     <div style="font-size:11px;color:var(--text-sec);margin-bottom:6px">🖱️ 拖拽项目到日历某天以改期：</div>
     <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:96px;overflow-y:auto">
-      ${items.map(it=>`<span draggable="true" ondragstart="calDragStart(event,'${it.date}','${(it.name||'').replace(/'/g,"")}')" style="padding:3px 9px;background:#fff;border:1px solid #d1d5db;border-radius:14px;font-size:11px;cursor:grab;user-select:none" title="${escHtml(it.name)} · ${it.date}">${escHtml(it.name)}</span>`).join('')}
+      ${items.map(it=>`<span draggable="true" ondragstart="calDragStart(event,'${it.date}','${jsq(it.name)}')" style="padding:3px 9px;background:#fff;border:1px solid #d1d5db;border-radius:14px;font-size:11px;cursor:grab;user-select:none" title="${escHtml(it.name)} · ${it.date}">${escHtml(it.name)}</span>`).join('')}
     </div>
   </div>`;
 }
@@ -442,8 +442,8 @@ function renderDdList(){
           <div style="font-size:11px;color:var(--text-sec)">${escHtml(p.custom_status||p.delivery_status||'')}${isOn?' · 已设置该日':''}</div>
         </div>
         ${isOn
-          ? `<button class="btn btn-sm danger" onclick="ddSetDate('${htm(p.name)}','')" title="从该日移除">🗑 移除</button>`
-          : `<button class="btn btn-sm btn-primary" onclick="ddSetDate('${htm(p.name)}','${dateKey}')">📌 选定</button>`}
+          ? `<button class="btn btn-sm danger" onclick="ddSetDate('${jsq(p.name)}','')" title="从该日移除">🗑 移除</button>`
+          : `<button class="btn btn-sm btn-primary" onclick="ddSetDate('${jsq(p.name)}','${dateKey}')">📌 选定</button>`}
       </div>`;
   }).join('');
 }

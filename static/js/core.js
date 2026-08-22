@@ -65,6 +65,16 @@ function initDesktopSSE(){
             toast('📤 '+payload.project+' 开始回传','info');
           } else if(payload.status==='done'){
             toast('✅ '+payload.project+' 回传完成','success');
+            // 000交付整目录回传（deliver_to_production）：完成时项目会被自动归档
+            // 到 00已完成，前端轮询 /api/projects 会找不到 target 而无法弹窗，
+            // 因此这里由 SSE 事件直接触发回传完成弹窗（指向制作部 000交付 目录）。
+            if(payload.mode === 'delivery'){
+              setTimeout(function(){
+                if(typeof _showDeliverDoneModal === 'function'){
+                  _showDeliverDoneModal(payload.project, { mode:'delivery', subpath:'', folder:'' });
+                }
+              }, 300);
+            }
           } else if(payload.status==='error'){
             toast('❌ '+payload.project+' 回传失败','error');
           }
@@ -74,6 +84,9 @@ function initDesktopSSE(){
           if(typeof openSearchModal === 'function'){
             setTimeout(function(){ openSearchModal(); }, 120);
           }
+        } else if(payload.type==='nas'){
+          // NAS 可达性变化 → 显示/隐藏离线横幅
+          _handleNasStatus(payload.ok, payload.roots);
         }
       }catch(_){}
     };
@@ -92,6 +105,31 @@ function _scheduleSseRefresh(delay){
     _sseRefreshTimer = null;
     try{ loadProjects(); }catch(_){}
   }, delay);
+}
+
+// ===== NAS 离线横幅 =====
+let _nasOfflineEl = null;
+function _handleNasStatus(ok, roots){
+  if(ok){
+    // 恢复在线
+    if(_nasOfflineEl){ _nasOfflineEl.remove(); _nasOfflineEl = null; }
+    return;
+  }
+  if(_nasOfflineEl) return; // 已显示
+  // 找出离线的根路径
+  let offlineList = '';
+  if(roots){
+    offlineList = Object.keys(roots).filter(function(r){ return !roots[r]; });
+  }
+  const names = offlineList.length ? offlineList.join('<br>') : 'NAS 路径不可访问';
+  const bar = document.createElement('div');
+  bar.id = 'nasOfflineBanner';
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:23000;background:#c5221f;color:#fff;padding:10px 16px;text-align:center;font-size:13px;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.3)';
+  bar.innerHTML = '⚠️ NAS 离线：以下路径不可访问<br><span style="font-size:11px;font-weight:400;opacity:.9">' + names + '</span>'
+    + '<span style="margin-left:12px;cursor:pointer;font-weight:400;font-size:12px" onclick="if(window.WB){WB.offline.enable();}">📴 切换离线模式</span>'
+    + '<button onclick="this.parentElement.remove()" style="position:absolute;right:10px;top:6px;background:none;border:none;color:#fff;font-size:16px;cursor:pointer">✕</button>';
+  document.body.appendChild(bar);
+  _nasOfflineEl = bar;
 }
 
 /* ============ 全局快捷键 ============ */
@@ -235,7 +273,15 @@ function bindShortcuts(){
     }
     if(e.key === 'Escape'){
       var modal = document.querySelector('.modal-overlay');
-      if(modal) modal.remove();
+      if(modal){
+        // detailModal 必须先走 closeDeliverablesModal() 清理轮询，否则直接 remove
+        // 会导致 deliver-events.js 的进度轮询泄漏（继续每 2s 打 /api/projects 直到超时）
+        if(modal.id === 'detailModal' && typeof closeDeliverablesModal === 'function'){
+          closeDeliverablesModal();
+          return;
+        }
+        modal.remove();
+      }
       return;
     }
   });
@@ -394,6 +440,8 @@ function jumpToProject(name){
   function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+name));
+  // 离开 QA 页时停止质检进度轮询，避免切走后仍在后台每 1.5s 打请求
+  if(name!=='qa' && typeof qa2StopPolling==='function') qa2StopPolling();
   if(name==='fenji'){
     loadFenjiProjects();
     if(typeof fjUpdateTplBadge==='function')fjUpdateTplBadge();
@@ -489,7 +537,9 @@ function renderActions(p){
   const s=String(p.custom_status||'');
   const btns=[];
   const has = function(zh){ return s.indexOf(zh) >= 0; };
-  const pname = p.name.replace(/'/g,"\\'");
+  const pname = jsq(p.name);
+  // 属性值转义（HTML 属性上下文，区别于 onclick 内的 JS 字符串）
+  const pnameAttr = String(p.name||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   // 关键判断：项目在组NAS存在吗？
   const groupExists = p.on_group !== false;  // 后端 production 项目会给 on_group 字段
   const hasProdPath = !!p.production_path;
@@ -518,7 +568,8 @@ function renderActions(p){
   const _fmDepts = (window._fmConfig&&window._fmConfig.enabled_departments)||['AI漫剧一部海外','AI漫剧九部海外'];
   const _dept = p.department||'';
   if(_fmDepts.some(d => _dept.includes(d))){
-    btns.push(['🔗 分秒帧',`openFenmiaozhen('${pname}')`,'fm-main','']);
+    const _fmAttr = 'data-fm-proj="' + pnameAttr + '"';
+    btns.push(['🔗 分秒帧',`openFenmiaozhen('${pname}')`,'fm-main',_fmAttr]);
     btns.push(['✏️',`editFenmiaozhenLink('${pname}')`,'','title="修改分秒帧链接"']);
   }
   if(btns.length===0)btns.push(['🔍 质检',`qaStartFor('${pname}')`,'']);
@@ -668,7 +719,7 @@ async function renderWorkloadBoard(containerId){
       if(quota<=0) state = '<span style="font-size:11px;color:#86868b">组长</span>';
       else if(reached) state = '<span style="color:#34c759;font-weight:700">✓ 达标</span>';
       else state = `<span style="color:#ff3b30;font-weight:700">✗ 差${gap}集</span>`;
-      return `<div style="border:1px solid ${reached?'#c8f0d6':'#ffd7d7'};background:${reached?'#f6fff8':'#fff7f7'};border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px">
+      return `<div style="border:1px solid ${reached?'#c8f0d6':'#ffd7d7'};background:${reached?'#f6fff8':'#fff7f7'};border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px;cursor:pointer;transition:transform .08s" title="点击查看「${htm(e.name)}」的集数明细" onclick="showEditorDetail('${jsq(e.name)}')" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform=''">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span style="font-weight:700;font-size:13px" title="${htm(e.name)}">${htm(e.name)}</span>
           <span style="font-size:11px;color:#86868b">${e.projects}部</span>
@@ -745,6 +796,209 @@ async function renderWorkloadBoard(containerId){
     board.innerHTML = '';
   }
 }
+
+// ===== 点击剪辑师卡片：弹出集数明细（按项目分组的集号构成）=====
+// 支持两种形态：完整弹窗 / 紧凑浮窗（跳转项目卡片后保留，可拖动、可展开）
+async function showEditorDetail(editorName){
+  try{
+    const d = await api('GET', '/api/stats/dashboard');
+    if(!d || !d.ok){ toast('加载明细失败', 'error'); return; }
+    const editors = d.editors || [];
+    const e = editors.find(function(x){ return x.name === editorName; });
+    if(!e){ toast('未找到「' + editorName + '」的明细', 'warning'); return; }
+
+    // 明细行：每个项目一行，展示集号构成
+    const detail = e.project_detail || [];
+    const buildRows = function(){
+      if(detail.length === 0){
+        return '<div style="color:#86868b;padding:14px;text-align:center;font-size:13px">暂无集数明细（该剪辑师当月未分配分集）</div>';
+      }
+      return detail.map(function(pd){
+        const eps = pd.episodes || [];
+        const segs = [];
+        const sorted = eps.slice().sort(function(a,b){ return a-b; });
+        sorted.forEach(function(n, i){
+          const prev = sorted[i-1];
+          if(i===0 || n !== prev+1){ segs.push([n, n]); }
+          else { segs[segs.length-1][1] = n; }
+        });
+        const segText = segs.map(function(s){ return s[0]===s[1] ? s[0] : s[0]+'-'+s[1]; }).join('、');
+        return '<div style="padding:9px 2px;border-bottom:1px solid #f0f2f5">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+            + '<div style="font-weight:600;font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:var(--blue,#1d4ed8);text-decoration:underline" title="点击前往项目卡片「'+htm(pd.project)+'」，明细窗口将保留为右下角浮窗" onclick="event.stopPropagation();jumpToProjectKeepFloat(\''+jsq(pd.project)+'\')">📁 '+htm(pd.project)+'</div>'
+            + '<span style="font-size:11px;color:#2E7D32;font-weight:700;white-space:nowrap">'+pd.count+'集</span>'
+          + '</div>'
+          + '<div style="font-size:12px;color:#555;margin-top:3px;word-break:break-all">集号：<b>'+htm(segText)+'</b></div>'
+        + '</div>';
+      }).join('');
+    };
+
+    // 头部分（标题 + 统计行）
+    const headerHtml = function(){
+      return '<div style="padding:14px 16px;background:linear-gradient(135deg,#eef4ff,#dbe8ff);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #dbe3f0">'
+        + '<div style="font-weight:700;font-size:14px">👤 '+htm(e.name)+' — 集数明细（本月 '+(d.month||'')+'）</div>'
+        + '<button onclick="closeEditorDetail(this)" style="border:none;background:none;font-size:18px;cursor:pointer;color:#666;line-height:1" title="关闭">×</button>'
+      + '</div>'
+      + '<div style="padding:6px 16px;border-bottom:1px solid #f0f2f5;font-size:12px;color:#86868b;display:flex;gap:14px;flex-wrap:wrap">'
+        + '<span>总集数：<b style="color:#c5221f">'+(e.assigned||0)+'</b> 集</span>'
+        + '<span>涉及项目：<b>'+(e.projects||0)+'</b> 部</span>'
+        + (e.quota?'<span>提成卡点：<b style="color:#ff9500">'+e.quota+'</b> 集</span>':'')
+        + '<span style="color:#aaa">点击项目 → 保留本窗并跳转卡片</span>'
+      + '</div>';
+    };
+    // 列表滚动区：min-height:0 让 flex 子项可收缩形成滚动；onwheel 阻止滚轮穿透主页面
+    const listHtml = '<div class="editor-detail-list" style="padding:10px 16px;overflow-y:auto;flex:1;min-height:0;-webkit-overflow-scrolling:touch" onwheel="editorDetailWheel(event)">'+buildRows()+'</div>';
+
+    // 创建浮窗容器（初始即完整形态）
+    const wrap = document.createElement('div');
+    wrap.id = 'editorDetailFloat';
+    wrap.style.cssText = 'position:fixed;z-index:21000;width:460px;max-width:92vw;display:flex;flex-direction:column;box-shadow:0 10px 34px rgba(0,0,0,.25);border-radius:12px;overflow:hidden;background:#fff;border:1px solid #dbe3f0';
+    // 打开时居中显示完整明细
+    wrap.style.top = '50%';
+    wrap.style.left = '50%';
+    wrap.style.transform = 'translate(-50%,-50%)';
+    wrap.style.height = '70vh';
+    wrap.style.maxHeight = '82vh';
+    wrap.innerHTML = '<div class="editor-detail-float-body" style="display:flex;flex-direction:column;height:100%;min-height:0">'
+      + headerHtml() + listHtml
+      + '<div style="padding:10px 16px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:8px">'
+        + '<span style="font-size:11px;color:#aaa">⬅ 拖动边缘可移动本窗</span>'
+        + '<div style="display:flex;gap:8px">'
+          + '<button class="btn btn-sm" onclick="floatEditorDetailToggleMin()" title="收起为小浮窗">⬇ 收起</button>'
+          + '<button class="btn btn-sm btn-primary" onclick="closeEditorDetail(this)">关闭</button>'
+        + '</div>'
+      + '</div>'
+      + '</div>';
+    document.body.appendChild(wrap);
+
+    // 启用拖动（标题栏）
+    makeEditorDetailDraggable(wrap);
+  }catch(err){
+    toast('❌ 加载明细失败: ' + err.message, 'error');
+  }
+}
+
+// 拖动浮窗
+function makeEditorDetailDraggable(el){
+  let dragging = false, offX = 0, offY = 0;
+  el.addEventListener('mousedown', function(e){
+    // 只在标题栏区域拖动
+    if(!e.target.closest('.editor-detail-float-body') && !(e.target === el)) return;
+    // 排除点击按钮/链接
+    if(e.target.closest('button,a,input')) return;
+    dragging = true;
+    el.style.transform = 'none';
+    el.style.transition = 'none';
+    offX = e.clientX - el.offsetLeft;
+    offY = e.clientY - el.offsetTop;
+    function mv(ev){
+      if(!dragging) return;
+      el.style.left = (ev.clientX - offX) + 'px';
+      el.style.top = (ev.clientY - offY) + 'px';
+    }
+    function up(){ dragging = false; document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+}
+
+// 关闭明细（浮窗/完整）
+function closeEditorDetail(btn){
+  const w = document.getElementById('editorDetailFloat');
+  if(w) w.remove();
+}
+
+// 阻止滚轮事件穿透到主页面：
+//  - 列表内部可继续滚动（原生平滑滚动）时，仅阻止事件冒泡
+//  - 列表已到滚动边界时，阻止默认的滚动链（scroll chaining），避免滚轮滚动主页面
+function editorDetailWheel(e){
+  const el = e.currentTarget;
+  if(!el) return;
+  const canScroll = el.scrollHeight > el.clientHeight;
+  if(canScroll){
+    // 列表本身可滚动：让原生滚动生效，仅阻断事件向主页面传播
+    e.stopPropagation();
+    return;
+  }
+  // 列表不可滚动或已到边界：阻止穿透到主页面
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+// 跳转项目卡片，但保留明细浮窗
+function jumpToProjectKeepFloat(name){
+  // 把完整浮窗切换为右下角小浮窗（不遮页面）
+  const w = document.getElementById('editorDetailFloat');
+  if(w){
+    // 记录原始内容引用（从当前 DOM 读取即可，无需重建）
+    w.style.transform = 'none';
+    w.style.top = '';
+    w.style.left = '';
+    w.style.bottom = '16px';
+    w.style.right = '16px';
+    w.style.width = '340px';
+    w.style.height = '40vh';
+    w.style.maxHeight = '40vh';
+    // 切换为可展开的紧凑视图
+    const body = w.querySelector('.editor-detail-float-body');
+    if(body){
+      // 保持 flex 布局 + 固定高度，保证内部列表区形成滚动容器
+      body.style.height = '100%';
+      body.style.minHeight = '0';
+    }
+    // 标记为迷你态，供展开按钮判断
+    w.dataset.mode = 'mini';
+    // 替换底部操作为"展开"按钮
+    const foot = w.querySelector('.editor-detail-float-body > div:last-child');
+    if(foot){
+      foot.innerHTML = '<span style="font-size:11px;color:#aaa">集数明细已保留</span>'
+        + '<div style="display:flex;gap:8px">'
+        + '<button class="btn btn-sm" onclick="floatEditorDetailToggleMin()">↕ 展开</button>'
+        + '<button class="btn btn-sm" onclick="closeEditorDetail(this)">✕</button>'
+        + '</div>';
+    }
+  }
+  // 跳转到项目卡片（与搜索逻辑一致）
+  jumpToProject(name);
+}
+
+// 在迷你浮窗与完整浮窗之间切换
+function floatEditorDetailToggleMin(){
+  const w = document.getElementById('editorDetailFloat');
+  if(!w) return;
+  const isMini = w.dataset.mode === 'mini';
+  if(isMini){
+    // 展开为完整明细
+    w.dataset.mode = 'full';
+    w.style.width = '460px';
+    w.style.maxHeight = '82vh';
+    w.style.height = '70vh';
+    // 恢复底部按钮
+    const foot = w.querySelector('.editor-detail-float-body > div:last-child');
+    if(foot){
+      foot.innerHTML = '<span style="font-size:11px;color:#aaa">⬅ 拖动边缘可移动本窗</span>'
+        + '<div style="display:flex;gap:8px">'
+          + '<button class="btn btn-sm" onclick="floatEditorDetailToggleMin()">⬇ 收起</button>'
+          + '<button class="btn btn-sm btn-primary" onclick="closeEditorDetail(this)">关闭</button>'
+        + '</div>';
+    }
+  } else {
+    // 收起为小浮窗
+    w.dataset.mode = 'mini';
+    w.style.width = '340px';
+    w.style.height = '40vh';
+    w.style.maxHeight = '40vh';
+    const foot = w.querySelector('.editor-detail-float-body > div:last-child');
+    if(foot){
+      foot.innerHTML = '<span style="font-size:11px;color:#aaa">集数明细已保留</span>'
+        + '<div style="display:flex;gap:8px">'
+        + '<button class="btn btn-sm" onclick="floatEditorDetailToggleMin()">↕ 展开</button>'
+        + '<button class="btn btn-sm" onclick="closeEditorDetail(this)">✕</button>'
+        + '</div>';
+    }
+  }
+}
+
 function getDeptStyle(dept){
   if(!dept)return '';
   const map={
@@ -797,7 +1051,10 @@ function projectCardHTML(p){
   }
 
   // === 智能打开按钮 ===
-  const pname = p.name.replace(/'/g,"\'");
+  const pname = jsq(p.name);
+  // DOM id / 属性用安全标识（jsq 转义后的内容不适合做 id，故单独从原始名生成）
+  const safeId = String(p.name||'').replace(/[^a-zA-Z0-9_]/g,'_');
+  const pnameAttr = String(p.name||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   // 空壳项目（无状态+未交付+0集）强制不显示月份，即使有脏数据
   const _s = String(p.custom_status||'').trim(), _d = String(p.delivery_status||'').trim(), _t = Number(p.total_episodes||0);
   const _isShell = !_s && (!_d || _d==='pending') && _t===0;
@@ -825,24 +1082,24 @@ function projectCardHTML(p){
   openBtns += `<button class="btn btn-sm" onclick="refreshProjectStatus('${pname}', this)" title="扫描目录刷新进度">🔄 刷新</button>`;
 
   if (status === '修改中') {
-  
+
   }
 
-  const epPanel = `<div class="card-episodes-panel" id="ep-panel-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}"></div>`;
-  const epSummaryBox = `<div class="ep-missing-summary" data-ep-summary="${p.name.replace(/"/g,'&quot;')}"></div>`;
+  const epPanel = `<div class="card-episodes-panel" id="ep-panel-${safeId}"></div>`;
+  const epSummaryBox = `<div class="ep-missing-summary" data-ep-summary="${pnameAttr}"></div>`;
 
   const bulkChk = window._bulkMode
-    ? `<input type="checkbox" class="bulk-card-chk" data-pname="${p.name.replace(/"/g,'&quot;')}" onchange="updateBulkBar()" title="选择此项目">`
+    ? `<input type="checkbox" class="bulk-card-chk" data-pname="${pnameAttr}" onchange="updateBulkBar()" title="选择此项目">`
     : '';
   return`<div class="card">
     <div class="card-head">
-      <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${p.name}" data-project-name="${p.name.replace(/"/g,'&quot;')}">${p.name}</span></div>
+      <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${pnameAttr}" data-project-name="${pnameAttr}">${p.name}</span><button class="btn btn-sm ep-search-btn" onclick="searchEpisodeEditor('${jsq(p.name)}')" title="按集号检索该集剪辑师">🔍 查剪辑</button></div>
       <div class="card-meta-line">${dept}${month}${(() => {
   const cur = p.custom_status || '';
   const optsHtml = WF_STATUS_OPTIONS.map(o =>
     `<option value="${o.v}" ${o.v===cur?'selected':''}>${o.label}</option>`
   ).join('');
-  return `<select class="badge editable-badge ${badge.cls}" onchange="onStatusChange('${p.name.replace(/'/g,"\\'")}', this)" title="点击修改项目状态">${optsHtml}</select>`;
+  return `<select class="badge editable-badge ${badge.cls}" onchange="onStatusChange('${jsq(p.name)}', this)" title="点击修改项目状态">${optsHtml}</select>`;
 })()}</div>
     </div>
     ${workflowHTML(p.custom_status)}
@@ -855,14 +1112,135 @@ function projectCardHTML(p){
       <div class="status-row"><span class="sr-label">成片交付</span>${d}</div>
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
-    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${jsq(pname)}')">📌 待办 <span class="ctodo-count"></span></div>
+    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${pname}')">📌 待办 <span class="ctodo-count"></span></div>
     <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
   </div>`;
 }
 
-// ===== 项目卡片待办（居中模态框：查看/添加/编辑/删除）=====
-var _ctModal = null;  // 当前打开的待办模态框 DOM
+// ===== 项目卡片：按集号快速检索该集剪辑师 =====
+var _epSearchModal = null;
+function searchEpisodeEditor(projectName){
+  // 从当前项目列表里找该项目对象（含 episode_plan）
+  var proj = null;
+  try{
+    var list = window.__projectsCache || [];
+    if(!list || !list.length){
+      // 从 DOM 拿不到，直接先请求一次项目列表缓存到全局
+      proj = null;
+    } else {
+      proj = list.find(function(x){ return x.name === projectName; }) || null;
+    }
+  }catch(_){ proj = null; }
+  // 若内存无缓存，则异步拉取后再弹
+  if(!proj){
+    api('GET', '/api/projects').then(function(d){
+      var flat = (d.production || []).concat(d.group_all || []);
+      window.__projectsCache = flat;
+      var p2 = flat.find(function(x){ return x.name === projectName; }) || null;
+      _openEpSearchModal(projectName, p2 ? (p2.episode_plan || p2.episodes_plan || {}) : {});
+    }).catch(function(){ _openEpSearchModal(projectName, {}); });
+    return;
+  }
+  _openEpSearchModal(projectName, proj.episode_plan || proj.episodes_plan || {});
+}
+
+function _parsePlan(plan){
+  var out = {};
+  try{
+    if(!plan) return out;
+    var p = (typeof plan === 'string') ? JSON.parse(plan) : plan;
+    if(p && typeof p === 'object' && !Array.isArray(p)){
+      Object.entries(p).forEach(function(kv){
+        var ep = kv[0].trim();
+        var ed = String(kv[1] || '').trim();
+        if(ed) out[ep] = ed;
+      });
+    }
+  }catch(_){}
+  return out;
+}
+
+function _openEpSearchModal(projectName, plan){
+  var parsed = _parsePlan(plan);
+  var total = Object.keys(parsed).length;
+
+  if(_epSearchModal){ _epSearchModal.remove(); _epSearchModal = null; }
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay active';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;display:flex;align-items:center;justify-content:center';
+
+  var resultBoxId = 'ep-search-result';
+  overlay.innerHTML = '<div style="background:#fff;border-radius:12px;width:440px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.2)">'
+    + '<div style="padding:14px 18px;background:linear-gradient(135deg,#e3f2fd,#bbdefb);font-weight:700;font-size:14px">🔍 检索集数剪辑师</div>'
+    + '<div style="padding:16px 18px">'
+      + '<div style="font-size:12px;color:#86868b;margin-bottom:6px;word-break:break-all">项目：<b>' + htm(projectName) + '</b>' + (total>0 ? '（已登记 '+total+' 集）' : '（未登记分集数据）') + '</div>'
+      + '<div style="display:flex;gap:8px;align-items:center">'
+        + '<input id="ep-search-input" type="number" min="1" placeholder="输入集号，如 12" '
+        +   'style="flex:1;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px" '
+        +   'onkeydown="if(event.key===\'Enter\')doEpSearch(\'' + jsq(projectName) + '\',this.value,\'' + resultBoxId + '\')">'
+        + '<button class="btn btn-sm btn-primary" onclick="doEpSearch(\'' + jsq(projectName) + '\',document.getElementById(\'ep-search-input\').value,\'' + resultBoxId + '\')" style="padding:8px 14px">查询</button>'
+      + '</div>'
+      + '<div id="' + resultBoxId + '" style="margin-top:12px;min-height:20px"></div>'
+      + (total>0 ? '<div style="margin-top:12px;border-top:1px solid #eee;padding-top:10px;font-size:11px;color:#86868b">也可直接按剪辑师查：<span id="ep-search-editor-hint" style="word-break:break-all"></span></div>' : '')
+    + '</div>'
+    + '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px">'
+      + '<button class="btn btn-sm" onclick="this.closest(\'.modal-overlay\').remove()">关闭</button>'
+    + '</div>'
+  + '</div>';
+
+  // 将解析后的 plan 存到全局，供 doEpSearch 使用
+  window.__epSearchPlan = parsed;
+  window.__epSearchProject = projectName;
+
+  document.body.appendChild(overlay);
+  _epSearchModal = overlay;
+  setTimeout(function(){
+    var inp = document.getElementById('ep-search-input');
+    if(inp) inp.focus();
+    // 生成"剪辑师→集数"提示
+    var byEditor = {};
+    Object.entries(parsed).forEach(function(kv){ var ed=kv[1]; if(!byEditor[ed])byEditor[ed]=[]; byEditor[ed].push(kv[0]); });
+    var hint = document.getElementById('ep-search-editor-hint');
+    if(hint && Object.keys(byEditor).length){
+      hint.innerHTML = Object.entries(byEditor)
+        .map(function(e){ return '<span style="background:#f0f0f5;border-radius:4px;padding:1px 6px;margin-right:4px;cursor:pointer" onclick="doEpSearch(\'' + jsq(projectName) + '\',\'\',\'' + resultBoxId + '\',\'' + jsq(e[0]) + '\')">' + htm(e[0]) + ':' + e[1].join(',') + '</span>'; })
+        .join('');
+    }
+  }, 50);
+}
+
+function doEpSearch(projectName, epNum, resultBoxId, editorName){
+  var box = document.getElementById(resultBoxId);
+  if(!box) return;
+  var plan = window.__epSearchPlan || {};
+  var n = String(epNum || '').trim();
+
+  // 若给了剪辑师名，则按剪辑师反查集数
+  if(editorName){
+    var eps = [];
+    Object.entries(plan).forEach(function(kv){ if(kv[1] === editorName) eps.push(kv[0]); });
+    eps.sort(function(a,b){ return parseInt(a)-parseInt(b); });
+    box.innerHTML = eps.length
+      ? '<div style="padding:10px 12px;background:#e8f5e9;border-radius:6px;font-size:13px">剪辑师 <b>'+htm(editorName)+'</b> 负责：第 '+eps.map(htm).join('、')+' 集</div>'
+      : '<div style="padding:10px 12px;background:#fff3cd;border-radius:6px;font-size:13px">未找到剪辑师 <b>'+htm(editorName)+'</b> 的分集记录</div>';
+    return;
+  }
+
+  if(!n || isNaN(parseInt(n))){
+    box.innerHTML = '<div style="color:#c5221f;font-size:12px">请输入有效的集号</div>';
+    return;
+  }
+  var key = String(parseInt(n));
+  var editor = plan[key];
+  if(editor){
+    box.innerHTML = '<div style="padding:12px;background:#e8f5e9;border-radius:6px;font-size:14px">第 <b>'+key+'</b> 集 → 剪辑师 <b style="color:#1d4ed8;font-size:15px">'+htm(editor)+'</b></div>';
+  } else {
+    box.innerHTML = '<div style="padding:12px;background:#fff3cd;border-radius:6px;font-size:13px">⚠️ 未找到第 <b>'+key+'</b> 集的剪辑师登记（可能未分配或该集无数据）</div>';
+  }
+}
+
+
 
 // 优先级配置
 var TODO_PRIORITY = {
@@ -877,47 +1255,57 @@ function _ctCloseAll(){
 }
 
 // 打开项目待办居中模态框
+var _ctModal = null;
 function cardToggleTodo(name){
-  if(_ctModal){ _ctModal.remove(); _ctModal = null; }
-  const ov = document.createElement('div');
-  ov.className = 'todo-modal-overlay';
-  ov.id = 'todo-modal-overlay';
-  ov.innerHTML = `
-    <div class="todo-modal">
-      <div class="todo-modal-head">
-        <h3>📌 项目待办</h3>
-        <span class="todo-modal-close" title="关闭" onclick="closeTodoModal()">✕</span>
-      </div>
-      <div class="todo-modal-body" id="todoModalBody">
-        <div style="text-align:center;padding:32px 0;color:var(--text-sec)">⏳ 加载中...</div>
-      </div>
-      <div class="todo-form">
-        <div class="todo-form-row">
-          <input type="text" id="todoAddText" placeholder="添加待办..." onkeydown="if(event.key==='Enter')todoAdd('${jsq(name)}')">
+  try{
+    if(_ctModal){ _ctModal.remove(); _ctModal = null; }
+    const ov = document.createElement('div');
+    ov.className = 'todo-modal-overlay';
+    ov.id = 'todo-modal-overlay';
+    ov.innerHTML = `
+      <div class="todo-modal">
+        <div class="todo-modal-head">
+          <h3>📌 项目待办</h3>
+          <span class="todo-modal-close" title="关闭" onclick="closeTodoModal()">✕</span>
         </div>
-        <div class="todo-form-row">
-          <select id="todoAddPriority" title="优先级">
-            <option value="0">低优先级</option>
-            <option value="1" selected>中优先级</option>
-            <option value="2">高优先级</option>
-          </select>
-          <input type="date" id="todoAddDue" title="截止日期">
-          <input type="text" id="todoAddAssignee" placeholder="负责人（可选）" style="min-width:110px;flex:1">
-          <button class="btn-add" onclick="todoAdd('${jsq(name)}')">＋ 添加</button>
+        <div class="todo-modal-body" id="todoModalBody">
+          <div style="text-align:center;padding:32px 0;color:var(--text-sec)">⏳ 加载中...</div>
         </div>
-      </div>
-    </div>`;
-  ov.addEventListener('mousedown', function(e){ if(e.target === ov) closeTodoModal(); });
-  document.addEventListener('keydown', function _esc(e){
-    if(e.key === 'Escape') closeTodoModal();
-    document.removeEventListener('keydown', _esc);
-  });
-  document.body.appendChild(ov);
-  _ctModal = ov;
-  todoLoad(name);
-  // 更新触发按钮计数（如果卡片已渲染）
-  const trig = document.getElementById('ctodo-trigger-' + name.replace(/[^a-zA-Z0-9_]/g,'_'));
-  if(trig){ const cnt = trig.querySelector('.ctodo-count'); if(cnt) cnt.textContent = '…'; }
+        <div class="todo-form">
+          <div class="todo-form-row">
+            <input type="text" id="todoAddText" placeholder="添加待办..." onkeydown="if(event.key==='Enter')todoAdd('${jsq(name)}')">
+          </div>
+          <div class="todo-form-row">
+            <select id="todoAddPriority" title="优先级">
+              <option value="0">低优先级</option>
+              <option value="1" selected>中优先级</option>
+              <option value="2">高优先级</option>
+            </select>
+            <input type="date" id="todoAddDue" title="截止日期">
+            <input type="text" id="todoAddAssignee" placeholder="负责人（可选）" style="min-width:110px;flex:1">
+            <button class="btn-add" onclick="todoAdd('${jsq(name)}')">＋ 添加</button>
+          </div>
+        </div>
+      </div>`;
+    ov.addEventListener('mousedown', function(e){ if(e.target === ov) closeTodoModal(); });
+    document.addEventListener('keydown', function _esc(e){
+      if(e.key === 'Escape') closeTodoModal();
+      document.removeEventListener('keydown', _esc);
+    });
+    document.body.appendChild(ov);
+    _ctModal = ov;
+    todoLoad(name);
+    // 更新触发按钮计数（如果卡片已渲染）
+    const trig = document.getElementById('ctodo-trigger-' + name.replace(/[^a-zA-Z0-9_]/g,'_'));
+    if(trig){ const cnt = trig.querySelector('.ctodo-count'); if(cnt) cnt.textContent = '…'; }
+  }catch(err){
+    console.error('[cardToggleTodo]', err);
+    // 兜底：即使某一步出错也要让弹窗能打开，并把错误显示在内容区
+    const body = document.getElementById('todoModalBody');
+    if(body){
+      body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--red)">待办加载失败: '+htm(String(err&&err.message||err))+'</div>';
+    }
+  }
 }
 
 function closeTodoModal(){

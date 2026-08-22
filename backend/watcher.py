@@ -13,6 +13,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 from sync_engine import find_dir_recursive
+from output_dir_util import get_output_dir_name as _resolve_output_dir_name
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,11 @@ class Watcher:
         self._started = False    # 幂等保护，防止重复启动
 
     def _get_output_dir_name(self, project_name):
+        # 统一走 output_dir_util 解析，避免与 sync.py 的拷贝漂移
+        try:
+            return _resolve_output_dir_name(self.db, self.config, project_name)
+        except Exception:
+            pass
         if project_name in self.special_projects:
             return self.special_projects[project_name].get(
                 "output_dir_name", self.output_dir_name)
@@ -141,7 +147,8 @@ class Watcher:
                     watch = self.observer.schedule(
                         handler, od, recursive=True)
                     self._watched_dirs[od] = watch
-                    logger.info("监听成片目录: %s", od)
+                    # debug 级别：每次启动会一次性监听数百个目录，用 info 会刷屏撑大日志
+                    logger.debug("监听成片目录: %s", od)
 
     def _check_file(self, file_path):
         ext = os.path.splitext(file_path)[1].lower()

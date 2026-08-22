@@ -95,12 +95,12 @@
 
 ## 6. 前端导航
 
-- **页签**（`switchTab(name)`）：`dashboard`(首页) / `fenji`(分集) / `qa`(质检) / `activity`(动态) / `report`(月度报告) / `nameplate`(人名条) / `settings`(设置)。
-- **全局快捷键**：`Ctrl+K` 页面搜索（`openSearchModal`）；`Ctrl+P`/`Ctrl+Shift+K` 命令面板（`command-palette.js`）。
-- **公共 JS 助手**：`api(method,path,body)`（core.js）、`escHtml`（fenji-assign.js / qa.js）、`htm`（episode.js）、`toast`。
-- **数据中心/备份**：`openBackupDialog()`（backup.js）、`openInsightsDialog()`（insights.js）。
-
----
+- **页签**（`switchTab(name)`）：`dashboard`(首页) / `fenji`(分集) / `qa`(质检) / `activity`(动态) / `report`(月度报告) / `editor`(剪辑师) / `nameplate`(人名条) / `settings`(设置)。
+- **新增功能模块**：`static/js/wb-shared.js`（全局共享工具 + `window.WB` 命名空间，最先加载）、`static/js/wb-features.js`（剪辑师视图 `WB.editor` / 离线只读 `WB.offline`）。
+- **新增后端接口**（`backend/schedule_api.py`）：`/api/editor/view`(剪辑师聚合)、`/api/offline/cache`(离线缓存打包)；`/api/projects/episodes_status_batch`(批量集数进度，N+1 优化，在 enhanced_routes.py)。
+- **新增 DB 列**：`projects.output_dir_name`(成片目录项目级覆盖)、`projects.delivery_folder`(交付目录项目级覆盖)。
+- **目录名统一解析**：`backend/output_dir_util.py` 是成片输出目录名 / 交付目录名的唯一解析源，`sync.py` 与 `watcher.py` 均调用它，避免重复漂移。
+- **手机远程访问**：后端 `web.host` 已改为 `0.0.0.0`（`backend/config.yaml`），`main_desktop.py` 的 `_run_server` 也从 config 读取 host（默认 0.0.0.0）。通过 **Tailscale 组网**访问（电脑 `100.68.53.62`），不暴露公网。API key 由后端在渲染 `index.html` 时自动注入 `window.__API_KEY__`，手机端无需处理。安卓 WebView 壳 App 源码在 `mobile-app/WorkbenchMobile/`。
 
 ## 7. 隐私与 .gitignore
 

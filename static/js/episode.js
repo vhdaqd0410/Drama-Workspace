@@ -110,7 +110,7 @@ async function openProjectDetail(name){
     content.innerHTML=`
       <div class="detail-header">
         <h2>📁 ${p.name}</h2>
-        <button onclick="$('detailModal').classList.remove('active')">✕</button>
+        <button onclick="closeDeliverablesModal()">✕</button>
       </div>
       <div class="detail-section">
         <h3>📌 基本信息</h3>
@@ -139,8 +139,8 @@ async function openProjectDetail(name){
         <button onclick="setProjectOwner('${jsq(p.name)}')" class="secondary" title="指派/修改项目负责人（审核流责任到人）">👤 负责人${p.owner?':'+escHtml(p.owner):''}</button>
         ${p.group_path?`<button onclick="openFolder('group','${jsq(p.name)}')" class="secondary">📁 打开组内文件夹</button>`:''}
         ${p.production_path?`<button onclick="openFolder('production','${jsq(p.name)}')" class="secondary">📁 打开制作文件夹</button>`:''}
-        <button onclick="$('detailModal').classList.remove('active');openFenjiFor('${jsq(p.name)}')" class="secondary">📑 管理分集</button>
-        <button onclick="$('detailModal').classList.remove('active');qaStartFor('${jsq(p.name)}')" class="secondary">🔍 开始质检</button>
+        <button onclick="closeDeliverablesModal();openFenjiFor('${jsq(p.name)}')" class="secondary">📑 管理分集</button>
+        <button onclick="closeDeliverablesModal();qaStartFor('${jsq(p.name)}')" class="secondary">🔍 开始质检</button>
       </div>
     `;
     // 加载待办 + 时间轴
@@ -148,7 +148,7 @@ async function openProjectDetail(name){
     loadTimeline(name);
   }catch(e){
     content.innerHTML=`<div style="padding:40px;color:var(--red);text-align:center">加载失败: ${e.message}</div>
-      <div style="padding:0 20px 20px;text-align:right"><button class="btn" onclick="$('detailModal').classList.remove('active')">关闭</button></div>`;
+      <div style="padding:0 20px 20px;text-align:right"><button class="btn" onclick="closeDeliverablesModal()">关闭</button></div>`;
   }
 }
 // ===== 待办事项（融合自「项目档案管理器」）=====
@@ -407,13 +407,41 @@ function buildEpSummaryHtml(data, projectName, dbFallback, customStatus) {
     if (unnamed && unnamed.length > 0) {
       unnamedHtml = '<div class="ep-unnamed-tip">另有 ' + unnamed.length + ' 个文件未识别集号</div>';
     }
-    var detailBtn = '<div style="margin-top:8px"><button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>' + (customStatus === '修改中' ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-revising" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#ff9500;color:#fff">📝 修改预览</button>' : '') + ((customStatus === '待交付' || customStatus === '交付中' || customStatus === '已交付' || customStatus === '已完成') ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-delivery" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#34c759;color:#fff">📦 交付预览</button>' : '') + '</div>';
 
+    // 缺集详情文本（用于成片按钮悬停 tooltip）
+    var tipDetail = '缺 ' + missing.length + '/' + total + ' 集';
+    var personLines = [];
+    for (var pi in groups) {
+      if (!groups.hasOwnProperty(pi)) continue;
+      personLines.push(pi + ' ' + _compactRange(groups[pi]));
+    }
+    if (unassigned.length > 0) personLines.push('未分配 ' + _compactRange(unassigned));
+    if (personLines.length) tipDetail += '：' + personLines.join('；');
+    if (unnamed && unnamed.length) tipDetail += '。另有 ' + unnamed.length + ' 个文件未识别集号';
+
+    var detailBtn = '<div style="margin-top:8px"><button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" title="' + htm(tipDetail) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>' + (customStatus === '修改中' ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-revising" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#ff9500;color:#fff">📝 修改预览</button>' : '') + ((customStatus === '待交付' || customStatus === '交付中' || customStatus === '已交付' || customStatus === '已完成') ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-delivery" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#34c759;color:#fff">📦 交付预览</button>' : '') + '</div>';
+
+    var personDetailHtml = '<div class="ep-person-grid">' + personRows.join('') + '</div>' + unnamedHtml;
+    // 折叠：仅折叠"每人缺集明细"，成片/刷新等按钮始终显示在折叠区域外，方便直接操作
+    var detailId = 'ep-missing-detail-' + projectName.replace(/[^a-zA-Z0-9_]/g, '_');
+    var foldBtnId = detailId + '-btn';
     return {
       className: 'ep-missing-summary has-missing',
-      html: tipHtml + '<div class="ep-person-grid">' + personRows.join('') + '</div>' + unnamedHtml + detailBtn
+      html: tipHtml
+        + '<button class="ep-detail-btn ep-fold-btn" id="' + foldBtnId + '" onclick="toggleEpMissingDetail(\'' + detailId + '\', this)">▼ 展开缺集明细</button>'
+        + '<div id="' + detailId + '" style="display:none">' + personDetailHtml + '</div>'
+        + detailBtn
     };
   }
+
+// 缺集明细展开/收起切换
+function toggleEpMissingDetail(detailId, btn){
+  var el = document.getElementById(detailId);
+  if(!el) return;
+  var show = el.style.display === 'none';
+  el.style.display = show ? '' : 'none';
+  if(btn) btn.textContent = show ? '▲ 收起明细' : '▼ 展开缺集明细';
+}
 
 function fetchEpisodeStatus(projectName) {
     if (_episodeStatusPending[projectName]) return _episodeStatusPending[projectName];
@@ -800,6 +828,34 @@ async function runRefreshAllProgress(btn, isAuto, opts){
   }
 
   if (isAuto) toast('📡 扫描 ' + targets.length + ' 个进行中项目的成片进度...', 'info');
+
+  // N+1 优化：手动全量刷新时优先用批量接口一次拉回，减少请求数
+  if (!isAuto && targets.length >= 3){
+    try{
+      const batch = await api('POST','/api/projects/episodes_status_batch', { names: targets });
+      const results = (batch && batch.ok && batch.results) || {};
+      let bo = 0, bf = 0;
+      targets.forEach(function(t){
+        const d = results[t];
+        if(d && d.ok){
+          bo++;
+          _episodeStatusCache[t] = d;
+          updateCardEpisodeSummary(t, d);
+        } else {
+          bf++;
+          updateCardEpisodeSummary(t, { ok:false, project_name:t });
+        }
+        if(btn) btn.textContent = '⏳ ' + (bo+bf) + '/' + targets.length;
+      });
+      if(btn){btn.disabled=false;btn.textContent='🔄 刷新所有进度';}
+      toast(('✅ 进度扫描完成：' + bo + '/' + targets.length + ' 成功') + (bf>0 ? ('，' + bf + ' 失败') : ''),
+            bf>0 ? 'warning' : 'success');
+      return;
+    }catch(e){
+      // 批量失败则回退到逐个项目请求
+      if(btn){btn.textContent='🔄 刷新所有进度';}
+    }
+  }
 
   // 自动扫描用较低并发（4），避免占满后端线程池阻塞预览视频加载；
   // 手动刷新保持 8 路快速

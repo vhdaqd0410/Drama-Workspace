@@ -99,6 +99,11 @@
 | 👀 Watchdog | 后台线程监听成片目录 · 稳定 30s 后自动标记 |
 | 📑 Excel 导出 | 分集分配一键导出模板 · 自动备份 · 追加写入不覆盖 |
 | 🏢 NAS 路径设置 | 设置界面可自定义/编辑组内与制作部路径，含可访问性检测 |
+| 📱 安卓手机端 | WebView 壳 App（`mobile-app/`），通过 Tailscale 内网访问，底部导航 + 卡片列表 + 全屏详情，响应式双端自动切换 |
+| 📴 离线只读缓存 | 项目/待办/分集打包缓存到 localStorage，NAS 断开时可离线查看 |
+| ✂️ 剪辑师个人视图 | 按剪辑师聚合负责项目与集数进度，支持流程排序与搜索 |
+| 🗂️ 统一输出目录解析 | `output_dir_util.py` 统一成片/交付目录名解析，支持项目级覆盖 |
+| 🔐 高危操作审计 | 整目录交付/批量回传/删除/批量改状态写 `audit_logs` + 前端二次确认 |
 
 ---
 
@@ -219,6 +224,8 @@ Drama-Workspace/
 │   ├── config.py                  # (废弃) 旧 JSON 配置模块，已由 config.yaml 取代
 │   ├── config.example.yaml        # 📋 配置模板（公开，不含真实路径）
 │   ├── config.yaml                # ⚠️ 唯一配置源（已加入 .gitignore，含 NAS/服务/质检路径）
+│   ├── output_dir_util.py         # ⭐ 成片/交付目录名统一解析（唯一来源）
+│   ├── schedule_api.py            # 剪辑师视图 / 离线缓存接口
 │   ├── utils.py                   # 共享工具函数
 │   └── report_template.py         # 质检报告 HTML 模板
 │
@@ -239,6 +246,9 @@ Drama-Workspace/
 │   ├── qa.js                      # 质检中心 / 批量质检
 │   ├── tabs.js                    # 月度报告 / 任务中心
 │   ├── nameplate.js               # 人名条识别插件 前端逻辑
+│   ├── wb-shared.js                # 全局共享工具 + window.WB 命名空间（最先加载）
+│   ├── wb-features.js             # 剪辑师视图 / 离线缓存
+│   ├── wb-mobile.js               # 手机端专属界面（底部导航/卡片/全屏详情）
 │   └── app.js                     # 应用初始化 + SSE + 定时任务
 │
 ├── 🧩 plugins/                    # ═══════ 扩展插件 ═══════
@@ -247,6 +257,9 @@ Drama-Workspace/
 │       ├── make_icon.py / icon.ico
 │       ├── start_tool.bat         # 独立启动（双击运行 GUI）
 │       └── examples/              # 示例剧本
+│
+├── 📱 mobile-app/                 # ═══════ 安卓手机端（WebView 壳）═══════
+│   └── WorkbenchMobile/          # Android Studio 项目（APK 源码）
 │
 └── 💾 data/                       # ═══════ 运行时数据（自动生成）═══════
     ├── workbench.db               # SQLite 数据库

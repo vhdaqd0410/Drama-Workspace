@@ -538,6 +538,7 @@ class QAEngine:
                     on_progress=_on_progress,
                     on_result=_on_result,
                     on_log=_on_log,
+                    only_videos=pending_videos,  # 只检测未检视频，避免与 checkpoint 结果重复
                 )
                 if isinstance(batch_ret, tuple) and len(batch_ret) == 2:
                     new_results, folder_info = batch_ret
@@ -664,7 +665,7 @@ class QAEngine:
             'folders': folder_info,
             'videos': [
                 {'video': r.get('video'), 'status': r.get('status'),
-                 'issues': r.get('issues', []), 'details': r.get('details', '')}
+                 'issues': r.get('issues', []) or [], 'details': r.get('details', '')}
                 for r in results
             ],
         }
@@ -874,7 +875,7 @@ class QAEngine:
                 start_black_ms = int(first.get('start', 0) * 1000)
                 end_black_ms = int(last.get('end', 0) * 1000)
 
-            issues = r.get('issues', [])
+            issues = r.get('issues', []) or []
             details = r.get('details', '') or (', '.join(issues) if issues else '')
 
             subtitle_ok = not any(
@@ -885,6 +886,21 @@ class QAEngine:
 
             status_map = {'pass': 'pass', 'warn': 'warning', 'fail': 'fail'}
             public_status = status_map.get(r.get('status', 'pass'), 'pass')
+
+            # 黑帧段：为前端结果表补全每段的 duration（前端按 duration 累加展示总时长）
+            black_frames = r.get('black_frames', {}) or {}
+            bf_public = {}
+            for folder, segs in black_frames.items():
+                pub_segs = []
+                for seg in (segs or []):
+                    seg = dict(seg)
+                    seg.setdefault('duration', round(max(seg.get('end', 0) - seg.get('start', 0), 0), 3))
+                    pub_segs.append(seg)
+                bf_public[folder] = pub_segs
+
+            # 硬字幕映射：原样透传给前端结果表
+            hard_sub = r.get('hard_sub', {}) or {}
+            timing = r.get('timing', {}) or {}
 
             out.append({
                 'video': video,
@@ -898,6 +914,11 @@ class QAEngine:
                 'end_black_ms': end_black_ms,
                 'subtitle_ok': subtitle_ok,
                 'audio_ok': audio_ok,
+                # 结果表需要的完整字段（此前缺失导致黑帧/硬字幕/耗时列空白）
+                'black_frames': bf_public,
+                'hard_sub': hard_sub,
+                'timing': timing,
+                'issues': issues,
             })
         return out
 
@@ -907,7 +928,7 @@ class QAEngine:
             cp_folder = folder_layout.get('cp_folder', '')
             status_map = {'pass': 'pass', 'warn': 'warning', 'fail': 'fail'}
             status = status_map.get(result.get('status', 'pass'), 'pass')
-            issues = result.get('issues', [])
+            issues = result.get('issues', []) or []
             details = result.get('details', '') or (', '.join(issues) if issues else '')
 
             frame_count = 0

@@ -155,7 +155,7 @@ class PreviewMixin:
             return result
 
         elif mode == "delivery":
-            folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
+            folder_name = self.get_delivery_folder_name(project_name)
             base = os.path.join(group_path, folder_name)
             result = {
                 "folders": [],
@@ -171,7 +171,7 @@ class PreviewMixin:
             #   subpath="000交付" -> 扫描真实 000交付 下的子文件夹
             #   subpath="000交付/xxx" -> 继续深入
             if not subpath:
-                dc = self._delivery_completeness_check(base, result["total_episodes"])
+                dc = self._delivery_completeness_check(base, result["total_episodes"], editor_map)
                 result["delivery_check"] = dc
                 if os.path.isdir(base):
                     result["folders"].append({
@@ -235,12 +235,17 @@ class PreviewMixin:
 
         return []
 
-    def _delivery_completeness_check(self, base, total_episodes):
+    def _delivery_completeness_check(self, base, total_episodes, editor_map=None):
         """检测交付文件夹完整性。
-        返回 dict: { folders: [...], all_ok: bool, total_episodes: int, screenshot_expected: int }
+        返回 dict: {
+            folders: [...], all_ok, total_episodes, screenshot_expected, base_exists
+        }
+        每个 folder 额外含 present_episodes（已有集号列表）和
+        missing_episodes（缺失集号列表，含该集剪辑师 editor）。
         """
         SCREENSHOT_KEYWORDS = ("截图", "screenshot", "thumbnail", "thumb")
         SCREENSHOT_EXPECTED = 5
+        editor_map = editor_map or {}
 
         check = {
             "folders": [],
@@ -258,22 +263,52 @@ class PreviewMixin:
         except OSError:
             return check
 
+        total = total_episodes or 0
+        all_eps = list(range(1, total + 1)) if total > 0 else []
+
         results = []
         for name in entries:
             full = os.path.join(base, name)
             if not os.path.isdir(full):
                 continue
-            try:
-                file_count = sum(
-                    1 for sn in os.listdir(full)
-                    if os.path.isfile(os.path.join(full, sn))
-                )
-            except OSError:
-                file_count = 0
 
             is_screenshot = any(k in name.lower() for k in SCREENSHOT_KEYWORDS)
-            expected = SCREENSHOT_EXPECTED if is_screenshot else (total_episodes or 0)
-            ok = file_count >= expected and expected > 0
+            expected = SCREENSHOT_EXPECTED if is_screenshot else total
+
+            # 收集该版本目录下实际存在的集号（截图目录不做集号缺失检测）
+            present_eps = set()
+            file_count = 0
+            if is_screenshot:
+                try:
+                    file_count = sum(
+                        1 for sn in os.listdir(full)
+                        if os.path.isfile(os.path.join(full, sn))
+                    )
+                except OSError:
+                    file_count = 0
+            else:
+                try:
+                    for sn in os.listdir(full):
+                        fpath = os.path.join(full, sn)
+                        if os.path.isfile(fpath):
+                            file_count += 1
+                            n = self._extract_episode_number(sn)
+                            if n is not None:
+                                present_eps.add(n)
+                except OSError:
+                    pass
+
+            ok = (file_count >= expected and expected > 0) or (is_screenshot and file_count >= expected and expected > 0)
+
+            # 缺失集号（仅对成片类版本做逐集检测）
+            missing_episodes = []
+            if not is_screenshot and total > 0:
+                for ep in all_eps:
+                    if ep not in present_eps:
+                        missing_episodes.append({
+                            "episode": ep,
+                            "editor": editor_map.get(str(ep), "") or editor_map.get(ep, "") or "",
+                        })
 
             results.append({
                 "name": name,
@@ -281,6 +316,8 @@ class PreviewMixin:
                 "expected": expected,
                 "is_screenshot": is_screenshot,
                 "ok": ok,
+                "present_episodes": sorted(present_eps),
+                "missing_episodes": missing_episodes,
             })
 
         check["folders"] = results
@@ -341,7 +378,7 @@ class PreviewMixin:
             if not proj:
                 return None
             group_path = proj.get("group_path", "")
-            folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
+            folder_name = self.get_delivery_folder_name(project_name)
             base = os.path.join(group_path, folder_name)
             if subpath:
                 target = os.path.normpath(os.path.join(base, subpath.replace("/", "\\").strip("\\")))
@@ -405,7 +442,7 @@ class PreviewMixin:
                 return os.path.join(rev_abs, folder)
             return rev_abs
         if mode == "delivery":
-            folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
+            folder_name = self.get_delivery_folder_name(project_name)
             base = os.path.join(group_path, folder_name)
             safe_sub = subpath.replace("/", "\\").strip("\\")
             parts = safe_sub.split("\\")

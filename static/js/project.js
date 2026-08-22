@@ -85,6 +85,8 @@ async function loadProjects(){
     updateDepartmentFilter();
     renderDashboard();
     updateLightLists();
+    // 预填查剪辑缓存（searchEpisodeEditor 复用，避免每次点击都重复请求 /api/projects）
+    window.__projectsCache = flat;
     await loadAllEpisodeSummary();
   }catch(e){
     $('statsRow').innerHTML='<div style="color:var(--red);padding:20px;">加载失败: '+e.message+'</div>';
@@ -186,7 +188,7 @@ if(!confirm(`确认要将 "${name}" 从制作部NAS同步到组内NAS吗？\n（
 async function openFenmiaozhen(name){
   const enc = encodeURIComponent(name);
   const setBtn = (txt, disabled) => {
-    const b = document.querySelector(`button[onclick*="openFenmiaozhen('${name.replace(/'/g,'\\')}')"]`);
+    const b = document.querySelector(`button[data-fm-proj="${CSS.escape(name)}"]`);
     if(b){ b.textContent = txt; b.disabled = disabled; }
   };
   setBtn('⏳ 读取中...', true);

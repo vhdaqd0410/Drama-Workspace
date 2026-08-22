@@ -335,7 +335,7 @@ def api_deliver_folder(project_name):
     folder_names = [(fn or "").strip() for fn in folder_names if (fn or "").strip()]
 
     if mode == "delivery":
-        delivery_folder_name = os.path.basename(sync_engine._delivery_folder.rstrip("\/")).strip()
+        delivery_folder_name = sync_engine.get_delivery_folder_name(project_name)
         # 宽松判断：只要 folder_names 中包含 delivery 虚拟根文件夹（无论是单独还是和其他混合），
         # 都统一走整目录交付 deliver_to_production（复制整个 000交付 目录），避免把虚拟根文件夹
         # 当成子文件夹传入导致 "000交付下不存在文件夹: 000交付" 的错误。
@@ -362,11 +362,25 @@ def api_deliver_folder(project_name):
 _VIDEO_EXTS = {'.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv', '.ts', '.m2ts', '.wmv', '.rmvb', '.rm', '.3gp'}
 
 
-@app.route("/api/project/<path:project_name>/deliver_dst", methods=["GET"])
+@app.route("/api/project/<path:project_name>/deliver_dst", methods=["GET", "POST"])
 def api_project_deliver_dst(project_name):
-    """返回项目最近一次成片回传的目标目录（制作部上映单集版），供回传完成后打开/复制。"""
+    """返回项目最近一次往制作部回传的目标目录，供回传完成后"打开/复制路径"使用。
+
+    GET：仅按项目名返回（兼容旧逻辑，读内存任务 / 回退上映单集版根目录）。
+    POST：支持精确指定本次回传场景（mode/subpath/folder），解析制作部实际目标目录。
+    """
     proj = sync_engine.db.get_project(project_name) or {}
-    # 优先从最近交付任务取
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        mode = data.get("mode", "editing")
+        subpath = data.get("subpath", "")
+        folder = data.get("folder", "")
+        dst = sync_engine._resolve_deliver_dst(project_name, mode=mode, subpath=subpath, folder=folder)
+        if not dst:
+            return jsonify({"ok": False, "message": "未找到回传目标目录"}), 404
+        return jsonify({"ok": True, "path": dst, "project_name": project_name, "mode": mode})
+
+    # GET 旧逻辑
     dst = None
     with sync_engine._lock:
         t = sync_engine._deliver_tasks.get(project_name, {})
@@ -646,6 +660,43 @@ def api_project_custom_status(project_name):
     ok, msg = sync_engine.set_custom_status(project_name, status)
     if ok: return jsonify({"ok": True, "message": msg})
     return jsonify({"ok": False, "message": msg}), 400
+
+
+@app.route("/api/project/<path:project_name>/output_dir", methods=["GET", "POST"])
+def api_project_output_dir(project_name):
+    """获取/设置项目单独的成片存放目录名。
+    GET  → { project_name, dir_name(项目级), effective_dir_name(实际生效) }
+    POST → { dir_name } 设置项目级目录名（空串 = 恢复全局默认 01上映单集版）。
+    设置后清空目录缓存，下次读取立即按新目录名解析。
+    """
+    proj = sync_engine.db.get_project(project_name)
+    if not proj:
+        return jsonify({"ok": False, "message": "项目不存在"}), 404
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        dir_name = (data.get("dir_name") or "").strip()
+        # 项目级空串 = 恢复全局默认；仅允许目录名（去路径分隔符，防路径穿越）
+        import re as _re
+        dir_name = _re.sub(r'[\\/:*?"<>|]', '_', dir_name)
+        sync_engine.db.set_output_dir_name(project_name, dir_name)
+        # 清空目录缓存，让新的目录名立即生效（下次 list_output_files / 打开目录 重新递归查找）
+        try:
+            sync_engine.clear_cache()
+        except Exception:
+            pass
+        sync_engine.db.add_sync_log(
+            project_name, "修改成片目录",
+            status="success",
+            message="成片存放目录名设为: %s" % (dir_name or "01上映单集版(默认)"))
+        return jsonify({"ok": True, "message": "成片存放目录已更新: %s" % (dir_name or "01上映单集版(默认)")})
+    stored = (proj.get("output_dir_name") or "").strip()
+    effective = sync_engine._get_output_dir_name(project_name)
+    return jsonify({
+        "ok": True,
+        "project_name": project_name,
+        "dir_name": stored,
+        "effective_dir_name": effective,
+    })
 
 
 @app.route("/api/project/<path:project_name>/update_month", methods=["POST"])
@@ -1244,6 +1295,13 @@ try:
 except ImportError as e:
     print("[WARN] features(待办/时间轴/备份/缩略图) 未加载:", e)
 
+try:
+    from schedule_api import register_routes as _register_schedule
+    _register_schedule(app, db, sync_engine=sync_engine)
+    print("[OK] schedule_api(排期/剪辑师/离线) 已注册")
+except ImportError as e:
+    print("[WARN] schedule_api(排期/剪辑师/离线) 未加载:", e)
+
 # 启动数据库每日自动备份
 try:
     from backup_service import start_scheduler as _start_backup
@@ -1298,6 +1356,11 @@ def create_app():
     # 已由 Watcher.start 的幂等保护避免重复启动）
     try:
         threading.Thread(target=watcher.start, daemon=True).start()
+    except Exception:
+        pass
+    # 启动 NAS 健康检查（SSE 推送断线/恢复提示）
+    try:
+        sync_engine.start_nas_health_check()
     except Exception:
         pass
     return app

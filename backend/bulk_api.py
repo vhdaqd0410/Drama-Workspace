@@ -61,6 +61,12 @@ def register_routes(app, db):
                     f"UPDATE projects SET custom_status=? WHERE name IN ({placeholders})",
                     [status] + list(names),
                 )
+            # 审计：批量改状态
+            try:
+                for n in names:
+                    db.add_audit_log(n, "批量改状态", "状态 -> " + status)
+            except Exception:
+                pass
             return jsonify({"ok": True, "updated": len(names)})
         except Exception as e:
             return jsonify({"ok": False, "msg": str(e)}), 500

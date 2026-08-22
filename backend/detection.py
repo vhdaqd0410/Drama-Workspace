@@ -1149,7 +1149,8 @@ def process_single_video(base, vfile, info, cache=None, cancel_token=None):
 
 
 def run_detection_batch(base, opts, cache=None, cancel_token=None,
-                        on_progress=None, on_result=None, on_log=None):
+                        on_progress=None, on_result=None, on_log=None,
+                        only_videos=None):
     """批量检测入口（桌面端和 Web 端共用）。
 
     Args:
@@ -1161,6 +1162,8 @@ def run_detection_batch(base, opts, cache=None, cancel_token=None,
         on_progress(completed, total, pct): 进度回调
         on_result(result): 单个视频完成回调
         on_log(text): 日志回调
+        only_videos: 可选，只检测这些文件名（断点续检传未检视频清单）。
+                     不传则扫描 cp_dir 下全部视频。
 
     Returns:
         list: 全部检测结果
@@ -1171,6 +1174,9 @@ def run_detection_batch(base, opts, cache=None, cancel_token=None,
         [f for f in os.listdir(cp_dir) if f.endswith(VIDEO_EXTS)],
         key=natural_sort_key
     )
+    # 断点续检：只检测传入的未检视频，避免与已检结果重复
+    if only_videos:
+        video_files = [f for f in video_files if f in set(only_videos)]
     total = len(video_files)
 
     if not video_files:

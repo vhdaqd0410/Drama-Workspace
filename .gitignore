@@ -50,6 +50,7 @@ Thumbs.db
 # ===========================
 backend/config.yaml
 data/config.json
+data/fenmiaozhen_links.json
 
 # ===========================
 # 本地工具配置 / 运行时缓存

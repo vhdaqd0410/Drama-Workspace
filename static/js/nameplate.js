@@ -110,7 +110,7 @@ async function loadNameplateFiles() {
     var files = d.files || [];
     if (!files.length) { box.innerHTML = '暂无生成结果。上传剧本解析后会自动出现在这里。'; return; }
     var rows = files.map(function (f) {
-      var safe = String(f.name).replace(/'/g, "\\'");
+      var safe = jsq(f.name);
       return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid #eee">'
         + '<span>📄 ' + esc(f.name) + ' <small style="color:#999">(' + f.mtime + ', ' + (f.size/1024).toFixed(1) + 'KB)</small></span>'
         + '<span style="display:flex;gap:6px">'

@@ -1,0 +1,12 @@
+# Android/Gradle 构建产物
+*.apk
+*.aab
+build/
+.gradle/
+local.properties
+.idea/
+*.iml
+.DS_Store
+/captures
+.externalNativeBuild
+.cxx

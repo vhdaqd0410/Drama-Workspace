@@ -27,6 +27,10 @@ class SyncEngine(ScanMixin, SyncMixin, DeliverMixin, PreviewMixin):
         self._dept_labels = config["nas"].get("production_labels", {})
         self._unc_map = config["nas"].get("unc_map", {})
         self._delivery_check_running = False  # 防止重复后台检测
+        # get_delivery_stats 短时缓存：交付文件数量短时间内不变，避免每次 /api/projects
+        # 都对"待交付/已完成"项目逐个全目录扫描（N+1 性能瓶颈）。20 秒内命中缓存。
+        self._delivery_stats_cache = {}     # project_name -> (ts, result)
+        self._delivery_stats_ttl = 20.0     # 秒
         self._delivery_folder = config.get(
             "delivery_folder", r"C:\Users\Admin\Desktop\000交付")
         self._sse_clients = []       # 活跃 SSE 客户端队列列表

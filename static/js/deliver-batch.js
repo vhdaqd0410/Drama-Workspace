@@ -101,7 +101,7 @@ function openPasteEpisodesModal(projectName, currentTotal){
       </div>
       <div class="modal-foot" style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
         <button class="btn btn-sm" onclick="document.getElementById('${modalId}').remove()">取消</button>
-        <button class="btn btn-sm btn-primary" onclick="pasteEpSave('${htm(projectName)}', '${modalId}')">💾 保存并应用</button>
+        <button class="btn btn-sm btn-primary" onclick="pasteEpSave('${jsq(projectName)}', '${modalId}')">💾 保存并应用</button>
       </div>
     </div>
   `;
@@ -194,8 +194,8 @@ function renderEpisodesGrid(projectName, data){
     const title = isPresent ? '已输出' : '未输出';
     const creatorHtml = creator ? `<div class="card-ep-creator" title="${htm(creator)}">${htm(creator)}</div>` : '';
     cells.push(`
-      <div class="${cls}" title="${i}集 ${title}${creator ? ' · ' + htm(creator) : ''}" 
-           onclick="openEpisodeFile('${htm(projectName)}', ${i}, '${isPresent ? 'present' : 'missing'}')">
+      <div class="${cls}" title="${i}集 ${title}${creator ? ' · ' + htm(creator) : ''}"
+           onclick="openEpisodeFile('${jsq(projectName)}', ${i}, '${isPresent ? 'present' : 'missing'}')">
         ${i}${creatorHtml}
       </div>`);
   }
@@ -204,8 +204,8 @@ function renderEpisodesGrid(projectName, data){
   const header = `<div style="font-size:11px;color:#86868b;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
     <span>📺 ${total} 集 · 已输出 <b style="color:#34c759">${present.length}</b> · 缺 <b style="color:#ff3b30">${missingCount}</b></span>
     <span style="display:flex;gap:6px;align-items:center">
-      <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#f0f7ff;border:1px solid #007aff;color:#007aff;border-radius:4px;cursor:pointer" onclick="openPasteEpisodesModal('${htm(projectName)}', ${total})">📋 粘贴分集</button>
-      <span style="cursor:pointer;color:#007aff" onclick="refreshProjectStatus('${htm(projectName)}', null)">🔄 刷新进度</span>
+      <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#f0f7ff;border:1px solid #007aff;color:#007aff;border-radius:4px;cursor:pointer" onclick="openPasteEpisodesModal('${jsq(projectName)}', ${total})">📋 粘贴分集</button>
+      <span style="cursor:pointer;color:#007aff" onclick="refreshProjectStatus('${jsq(projectName)}', null)">🔄 刷新进度</span>
     </span>
   </div>`;
   

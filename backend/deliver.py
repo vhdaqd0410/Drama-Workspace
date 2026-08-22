@@ -226,16 +226,13 @@ class DeliverMixin:
 
         filename = os.path.basename(src)
 
-        # 在制作部项目目录下递归查找 01上映单集版
-        prod_output_dirs = self._find_output_dirs(
-            proj["production_path"], project_name)
+        # 在制作部项目目录下递归查找 01上映单集版（跟随项目自定义成片目录名）
+        dst_dir, dst_err = self.get_dest_output_dir(project_name)
 
-        if not prod_output_dirs:
-            return False, "制作部项目目录中未找到 %s 目录" % \
-                self._get_output_dir_name(project_name)
+        if not dst_dir:
+            return False, "制作部目标目录不可用: %s" % (dst_err or self._get_output_dir_name(project_name))
 
-        # 使用第一个匹配的制作部输出目录
-        dst_dir = prod_output_dirs[0]
+        # 使用匹配的制作部输出目录
         dst = os.path.join(dst_dir, filename)
 
         try:
@@ -285,15 +282,22 @@ class DeliverMixin:
                 sync_progress="批量回传失败: 所有文件都找不到")
             return [{"name": n, "ok": False, "message": "文件不存在", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
 
-        # 确定目标目录
-        prod_output_dirs = self._find_output_dirs(proj.get("production_path", ""), project_name)
-        if not prod_output_dirs:
+        # 审计：高危批量回传
+        try:
+            self.db.add_audit_log(
+                project_name, "批量回传",
+                "回传 %d 个文件" % len(file_map))
+        except Exception:
+            pass
+
+        # 确定目标目录（跟随项目自定义成片目录名；缺失则在制作部项目根下创建）
+        dst_dir, dst_err = self.get_dest_output_dir(project_name)
+        if not dst_dir:
             self.db.update_project_status(
                 project_name, delivery_status="error",
-                sync_progress="批量回传失败: 制作部目录中未找到 01上映单集版")
-            return [{"name": n, "ok": False, "message": "制作部目录中未找到对应输出目录", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
+                sync_progress="批量回传失败: 制作部目标目录不可用 (%s)" % (dst_err or ""))
+            return [{"name": n, "ok": False, "message": "制作部目标目录不可用: %s" % (dst_err or ""), "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
 
-        dst_dir = prod_output_dirs[0]
         os.makedirs(dst_dir, exist_ok=True)
 
         # 按源目录分组 (避免跨盘问题, 硬链接只能同盘)
@@ -850,7 +854,7 @@ class DeliverMixin:
             logger.warning("[DELIV] deliver_to_production: 项目无 production_path name=%s group_path=%s", project_name, group_path)
             return False, "该项目无制作部NAS路径，无法一键交付"
 
-        folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
+        folder_name = self.get_delivery_folder_name(project_name)
         src = os.path.join(group_path, folder_name)
         dst = os.path.join(prod_path, folder_name)
         logger.info("[DELIV] deliver_to_production 准备: project=%s src=%s dst=%s", project_name, src, dst)
@@ -858,6 +862,14 @@ class DeliverMixin:
         if not os.path.isdir(src):
             logger.warning("[DELIV] deliver_to_production: 源目录不存在 src=%s", src)
             return False, "组内NAS项目下不存在 %s 目录" % folder_name
+
+        # 审计：高危整目录交付
+        try:
+            self.db.add_audit_log(
+                project_name, "整目录交付",
+                "一键交付 %s -> %s" % (src, dst))
+        except Exception:
+            pass
 
         with self._lock:
             existing = self._deliver_tasks.get(project_name)
@@ -921,7 +933,7 @@ class DeliverMixin:
             return False, "该项目无制作部NAS路径"
 
         folder_name = (folder_name or "").strip()
-        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/")).strip()
+        delivery_folder_name = self.get_delivery_folder_name(project_name)
 
         # 如果传入的是 delivery 虚拟根文件夹本身，直接走整目录交付
         if folder_name == delivery_folder_name:
@@ -1059,7 +1071,7 @@ class DeliverMixin:
         if not folder_names:
             return [{"name": "(空)", "ok": False, "message": "文件夹名称为空", "index": 1, "total": 1}]
 
-        delivery_folder_name = os.path.basename(self._delivery_folder.rstrip("\/")).strip()
+        delivery_folder_name = self.get_delivery_folder_name(project_name)
 
         # 安全校验 + 宽松匹配：如果传入了虚拟根文件夹本身，直接走整目录交付
         if delivery_folder_name in folder_names:
@@ -1427,7 +1439,7 @@ class DeliverMixin:
                 with self._lock:
                     task["current"] = task["total"]
                     task["pct"] = 100
-                    self._sse_publish({"type":"deliver","project":project_name,"status":"done"})
+                    self._sse_publish({"type":"deliver","project":project_name,"status":"done","mode":"delivery"})
                     task["status"] = "done"
                     task["message"] = "交付完成（系统复制）"
                     task["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1718,6 +1730,37 @@ class DeliverMixin:
         candidates.sort(key=lambda x: x["date"], reverse=True)
         return candidates
 
+    def list_all_revision_folders_on_destination(self, project_name):
+        """列出制作部侧（production_path）01上映单集版目录中已有的修改文件夹（MMDD修改格式）。
+        返回 [{"name": "MMDD修改", "path": full_path}, ...] 按日期倒序排列。
+        供批量回传时复用已存在的目标修改文件夹，避免覆盖同名目录。
+        """
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return []
+        prod_path = proj.get("production_path", "") or ""
+        if not prod_path:
+            return []
+        output_dirs = self._find_output_dirs(prod_path, project_name)
+        if not output_dirs:
+            return []
+
+        rev_pattern = re.compile(r'^(\d{4})(修改)?$')
+        candidates = []
+        for od in output_dirs:
+            try:
+                for name in os.listdir(od):
+                    full = os.path.join(od, name)
+                    if os.path.isdir(full):
+                        m = rev_pattern.match(name)
+                        if m:
+                            candidates.append({"name": name, "path": full, "date": m.group(1)})
+            except OSError:
+                continue
+
+        candidates.sort(key=lambda x: x["date"], reverse=True)
+        return candidates
+
     def find_revision_folder(self, project_name):
         """查找项目01上映单集版目录中最近的修改文件夹（MMDD修改格式）。
         返回 (folder_path, folder_name) 或 (None, None)。
@@ -1726,6 +1769,70 @@ class DeliverMixin:
         if not folders:
             return None, None
         return folders[0]["path"], folders[0]["name"]
+
+    def _resolve_deliver_dst(self, project_name, mode="editing", subpath="", folder=""):
+        """解析"往制作部交付"的目标目录（制作部侧），供回传完成弹窗的"打开/复制路径"使用。
+
+        优先级（由精确到宽泛）：
+          1. 内存 _deliver_tasks["dst"]（本次真实回传目标，最精确，回传成功后已写入）
+          2. 指定 mode + folder（具体修改文件夹 / 000交付 子文件夹）→ 精确指向制作部目标
+          3. 回退到制作部上映单集版根目录 / 制作部000交付
+        返回绝对路径；解析不到返回 None。
+        """
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return None
+        prod_path = proj.get("production_path", "") or ""
+
+        # 1. 内存任务真实目标（本次回传已写入，最精确）
+        #    delivery 整目录回传（deliver_to_production）时，该目录是真实回传目标；
+        #    即便因 NAS 同步延迟暂时 isdir 为 False，也应优先返回它（回传刚完成），
+        #    避免回退到上映单集版根目录导致"打开/复制路径"指向错误位置。
+        with self._lock:
+            t = self._deliver_tasks.get(project_name, {})
+            mem_dst = t.get("dst") or None
+        if mem_dst:
+            if mode == "delivery":
+                return mem_dst
+            if os.path.isdir(mem_dst):
+                return mem_dst
+
+        # 2. 精确解析
+        folder = (folder or "").strip("\\/")
+        mode = mode or "editing"
+        if mode == "revising":
+            # 解析目标修改文件夹名：
+            #   - 优先用 folder（勾选文件夹回传时传入修改文件夹名）
+            #   - 若 folder 为空则用 subpath（在修改文件夹内回传文件时，subpath 即修改文件夹名）
+            rev_name = folder or subpath.replace("/", "\\").strip("\\")
+            # 制作部上映单集版 / 修改文件夹名
+            if rev_name:
+                prod_dirs = self._find_output_dirs(prod_path, project_name) if prod_path else []
+                if prod_dirs:
+                    cand = os.path.join(prod_dirs[0], rev_name)
+                    if os.path.isdir(cand):
+                        return cand
+                # 修改文件夹名未命中：查制作部已有的修改文件夹（按名称）
+                for f in self.list_all_revision_folders_on_destination(project_name):
+                    if f["name"] == rev_name:
+                        return f["path"]
+        elif mode == "delivery":
+            delivery_name = self.get_delivery_folder_name(project_name)
+            base = os.path.join(prod_path, delivery_name) if prod_path else ""
+            if folder:
+                cand = os.path.normpath(os.path.join(base, folder)) if base else ""
+                if cand and cand.startswith(os.path.normpath(base)) and os.path.isdir(cand):
+                    return cand
+            if base and os.path.isdir(base):
+                return base
+
+        # 3. 回退
+        if prod_path:
+            dirs = self._find_output_dirs(prod_path, project_name)
+            if dirs:
+                return dirs[0]
+        dst, _ = self.get_dest_dir(project_name)
+        return dst
 
     def get_delivery_stats(self, project_name):
         """返回项目 000交付 子文件夹的统计信息，用于卡片首页渲染。
@@ -1743,6 +1850,18 @@ class DeliverMixin:
                 "overall_pct": int,            # 综合完成百分比
             }
         """
+        # 短时缓存：交付文件数量短时间内不变，命中 20 秒内缓存则跳过全目录扫描
+        # （解决 /api/projects 对"待交付/已完成"项目逐个 get_delivery_stats 的 N+1 性能瓶颈）
+        try:
+            _cached = getattr(self, "_delivery_stats_cache", None)
+            if _cached is not None and project_name in _cached:
+                _ts, _res = _cached[project_name]
+                ttl = getattr(self, "_delivery_stats_ttl", 20.0)
+                if time.time() - _ts < ttl:
+                    return _res
+        except Exception:
+            pass
+
         proj = self.db.get_project(project_name)
         group_path = ""
         if proj:
@@ -1751,7 +1870,7 @@ class DeliverMixin:
         if not group_path:
             return {"found": False, "total_episodes": 0, "items": [], "overall_pct": 0}
 
-        folder_name = os.path.basename(self._delivery_folder.rstrip("\\/"))
+        folder_name = self.get_delivery_folder_name(project_name)
         base = os.path.join(group_path, folder_name)
         total_episodes = (proj.get("total_episodes", 0) or 0) if proj else 0
 
@@ -1803,12 +1922,25 @@ class DeliverMixin:
         total_max = sum(it["total"] for it in checked_items)
         overall_pct = round(total_cur / total_max * 100) if total_max > 0 else 0
 
-        return {
+        result = {
             "found": len(found_folders) > 0,
             "total_episodes": total_episodes,
             "items": items,
             "overall_pct": overall_pct,
         }
+        # 写入短时缓存（限制条目数，防止无界增长）
+        try:
+            _cached = getattr(self, "_delivery_stats_cache", None)
+            if _cached is not None:
+                if len(_cached) >= 500:
+                    # 简单淘汰：清掉最旧的一半
+                    _sorted = sorted(_cached.items(), key=lambda kv: kv[1][0])
+                    for _k, _v in _sorted[:len(_sorted) // 2]:
+                        _cached.pop(_k, None)
+                _cached[project_name] = (time.time(), result)
+        except Exception:
+            pass
+        return result
 
     def deliver_revision_file(self, project_name, file_name, rev_folder_name=None):
         """将修改文件夹中的单个文件回传到制作部NAS的对应修改文件夹中。
@@ -1847,11 +1979,11 @@ class DeliverMixin:
         if not prod_path:
             return False, "该项目无制作部路径"
 
-        prod_output_dirs = self._find_output_dirs(prod_path, project_name)
-        if not prod_output_dirs:
-            return False, "制作部项目中未找到%s目录" % self._get_output_dir_name(project_name)
+        dst_base, dst_err = self.get_dest_output_dir(project_name)
+        if not dst_base:
+            return False, "制作部目标目录不可用: %s" % (dst_err or "")
 
-        dst_dir = os.path.join(prod_output_dirs[0], rev_name)
+        dst_dir = os.path.join(dst_base, rev_name)
         dst = os.path.join(dst_dir, file_name)
 
         try:
@@ -1909,12 +2041,12 @@ class DeliverMixin:
             if not rev_path:
                 return [{"name": n, "ok": False, "message": "未找到修改文件夹", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
 
-        # 找目标目录: 制作部/项目/01上映单集版/MMDD修改/
-        prod_output_dirs = self._find_output_dirs(proj.get("production_path", ""), project_name)
-        if not prod_output_dirs:
-            return [{"name": n, "ok": False, "message": "制作部项目中未找到对应输出目录", "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
+        # 找目标目录: 制作部/项目/成片目录/MMDD修改/（跟随项目自定义成片目录名）
+        dst_base, dst_err = self.get_dest_output_dir(project_name)
+        if not dst_base:
+            return [{"name": n, "ok": False, "message": "制作部目标目录不可用: %s" % (dst_err or ""), "index": i + 1, "total": len(file_names)} for i, n in enumerate(file_names)]
 
-        dst_dir = os.path.join(prod_output_dirs[0], rev_name)
+        dst_dir = os.path.join(dst_base, rev_name)
         try:
             os.makedirs(dst_dir, exist_ok=True)
         except Exception:
@@ -1959,9 +2091,13 @@ class DeliverMixin:
             def _mark_done():
                 import time as _t
                 _t.sleep(5)
-                self.db.update_project_status(
-                    project_name, delivery_status="delivered",
-                    sync_progress="", last_delivered_at=now)
+                # 竞态保护：仅当仍是批量回传中的 delivering 状态时才置为 delivered，
+                # 避免覆盖延迟期间用户做的其它状态变更。
+                cur = self.db.get_project(project_name) or {}
+                if (cur.get("delivery_status") or "") == "delivering":
+                    self.db.update_project_status(
+                        project_name, delivery_status="delivered",
+                        sync_progress="", last_delivered_at=now)
             import threading as _th
             _th.Thread(target=_mark_done, daemon=True).start()
 
@@ -1994,11 +2130,11 @@ class DeliverMixin:
         if not prod_path:
             return False, "该项目无制作部路径"
 
-        prod_output_dirs = self._find_output_dirs(prod_path, project_name)
-        if not prod_output_dirs:
-            return False, "制作部项目中未找到%s目录" % self._get_output_dir_name(project_name)
+        dst_base, dst_err = self.get_dest_output_dir(project_name)
+        if not dst_base:
+            return False, "制作部目标目录不可用: %s" % (dst_err or "")
 
-        dst_dir = os.path.join(prod_output_dirs[0], rev_folder_name)
+        dst_dir = os.path.join(dst_base, rev_folder_name)
 
         try:
             try:
@@ -2054,11 +2190,11 @@ class DeliverMixin:
         if not proj:
             return [{"name": n, "ok": False, "message": "项目不存在", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
 
-        prod_output_dirs = self._find_output_dirs(proj.get("production_path", ""), project_name)
-        if not prod_output_dirs:
-            return [{"name": n, "ok": False, "message": "制作部项目中未找到对应输出目录", "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
+        dst_base, dst_err = self.get_dest_output_dir(project_name)
+        if not dst_base:
+            return [{"name": n, "ok": False, "message": "制作部目标目录不可用: %s" % (dst_err or ""), "index": i + 1, "total": len(folder_names)} for i, n in enumerate(folder_names)]
 
-        prod_output = prod_output_dirs[0]
+        prod_output = dst_base
         folders_on_dest = self.list_all_revision_folders_on_destination(project_name)
         dest_set = {f["name"]: f["path"] for f in folders_on_dest}
 
@@ -2120,9 +2256,13 @@ class DeliverMixin:
             def _mark_done():
                 import time as _t
                 _t.sleep(5)
-                self.db.update_project_status(
-                    project_name, delivery_status="delivered",
-                    sync_progress="", last_delivered_at=now)
+                # 竞态保护：仅当仍是批量回传中的 delivering 状态时才置为 delivered，
+                # 避免覆盖延迟期间用户做的其它状态变更。
+                cur = self.db.get_project(project_name) or {}
+                if (cur.get("delivery_status") or "") == "delivering":
+                    self.db.update_project_status(
+                        project_name, delivery_status="delivered",
+                        sync_progress="", last_delivered_at=now)
             import threading as _th
             _th.Thread(target=_mark_done, daemon=True).start()
 

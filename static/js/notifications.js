@@ -86,7 +86,7 @@ function renderNotifBody(body){
       +'<button class="btn btn-sm" onclick="notifDismiss(\'upcoming:'+jsq(p.name||'')+'\')">🙈 忽略</button>');
   });
   html += notifGroup('📌 待办提醒', '#0071e3', d.todos, function(t){
-    const proj = (t.project||'').replace(/'/g,"");
+    const proj = jsq(t.project||'');
     const items = (t.items||[]).slice(0,5).map(function(it){
       return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#555;padding:2px 0"><input type="checkbox" onchange="notifTodoDone(\''+proj+'\','+it.id+',this.checked)"><span>'+escHtml(it.text)+'</span></div>';
     }).join('');

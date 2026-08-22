@@ -13,6 +13,8 @@ import fnmatch
 from datetime import datetime
 from scan import find_dir_recursive
 from utils import decode_output
+from output_dir_util import get_output_dir_name as _resolve_output_dir_name
+from output_dir_util import get_delivery_folder_name as _resolve_delivery_folder_name
 
 logger = logging.getLogger(__name__)
 
@@ -456,6 +458,34 @@ class SyncMixin:
             return None, "制作部项目中未找到 %s 目录" % self._get_output_dir_name(project_name)
         return dirs[0], None
 
+    def get_dest_output_dir(self, project_name):
+        """获取成片回传目标目录（制作部侧），若该目录不存在则在项目根下创建。
+
+        跟随项目单独指定的成片存放目录名（output_dir_name）；若制作部项目里还没有该
+        命名的目录，则在 production_path 根下新建它，保证回传（单个/批量/修改）都能
+        落到制作部对应的目录。
+        返回 (dir_path, err)；失败返回 (None, err)。
+        """
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return None, "项目不存在"
+        prod_path = proj.get("production_path", "") or ""
+        if not prod_path:
+            return None, "该项目无制作部路径（仅组内项目）"
+        dir_name = self._get_output_dir_name(project_name)
+        dirs = self._find_output_dirs(prod_path, project_name)
+        if dirs:
+            return dirs[0], None
+        # 未找到：在制作部项目根下创建同名目录
+        if not os.path.isdir(prod_path):
+            return None, "制作部项目目录不存在: %s" % prod_path
+        try:
+            new_dir = os.path.join(prod_path, dir_name)
+            os.makedirs(new_dir, exist_ok=True)
+            return new_dir, None
+        except Exception as e:
+            return None, "创建制作部输出目录失败: %s" % e
+
     def get_source_dir(self, project_name):
         """获取项目的成片源目录（组内NAS侧的01上映单集版）"""
         proj = self.db.get_project(project_name)
@@ -469,8 +499,20 @@ class SyncMixin:
             return None, "组内项目中未找到 %s 目录" % self._get_output_dir_name(project_name)
         return dirs[0], None
 
+    def get_delivery_folder_name(self, project_name):
+        """返回项目实际生效的交付目录名（默认 000交付；支持项目级 delivery_folder 覆盖）。"""
+        try:
+            return _resolve_delivery_folder_name(self.db, self.config, project_name)
+        except Exception:
+            return os.path.basename(self._delivery_folder.rstrip("\\/"))
+
     def _get_output_dir_name(self, project_name):
-        """获取项目的成片输出目录名"""
+        """获取项目的成片输出目录名（优先级：项目级 > special_projects 配置 > 全局默认）"""
+        # 统一走 output_dir_util 解析，避免与 watcher.py 的拷贝漂移
+        try:
+            return _resolve_output_dir_name(self.db, self.config, project_name)
+        except Exception:
+            pass
         if project_name in self.special_projects:
             return self.special_projects[project_name].get(
                 "output_dir_name", self.output_dir_name)
@@ -596,3 +638,57 @@ class SyncMixin:
                     pass
         except Exception:
             pass
+
+    # ============================================================
+    # NAS 可达性健康检查
+    # ============================================================
+    def _nas_roots(self):
+        """返回需要监测的 NAS 根路径（组内 + 制作部根目录）。"""
+        roots = []
+        nas = self.config.get("nas", {}) if isinstance(self.config, dict) else {}
+        gr = nas.get("group_root", "")
+        if gr:
+            roots.append(gr)
+        prs = nas.get("production_roots", []) or []
+        for p in prs:
+            if p:
+                roots.append(p)
+        return roots
+
+    def check_nas_health(self):
+        """探测 NAS 各根路径可达性。返回 {root: bool, all_ok: bool}。"""
+        roots = self._nas_roots()
+        status = {}
+        for r in roots:
+            try:
+                status[r] = os.path.isdir(r)
+            except Exception:
+                status[r] = False
+        return {"roots": status, "all_ok": all(status.values()) if status else True}
+
+    def start_nas_health_check(self):
+        """启动 NAS 健康检查后台线程：状态变化时通过 SSE 广播。幂等。"""
+        if getattr(self, "_nas_health_started", False):
+            return
+        self._nas_health_started = True
+
+        def _loop():
+            last_ok = None
+            import time as _t
+            while True:
+                try:
+                    h = self.check_nas_health()
+                    ok = h["all_ok"]
+                    if last_ok is not None and ok != last_ok:
+                        self._sse_publish({
+                            "type": "nas",
+                            "ok": ok,
+                            "roots": h["roots"],
+                        })
+                        logger.info("NAS 状态变化: %s", "在线" if ok else "离线")
+                    last_ok = ok
+                except Exception:
+                    pass
+                _t.sleep(30)
+        threading.Thread(target=_loop, daemon=True).start()
+        logger.info("NAS 健康检查已启动")
