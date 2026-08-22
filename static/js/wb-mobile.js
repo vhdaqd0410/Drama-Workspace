@@ -15,14 +15,24 @@
     _filter: { q: '', status: '' },
     // 手机端分集 Tab 状态（total 默认 70）
     _fj: { project:'', total:70, selected:[], ranges:{} },
+    // 数据 Tab 提成缓存（30 秒内不重复请求）
+    _statsCache: { data: null, ts: 0 },
 
-    // 是否处于手机模式
-    isMobile: function(){ return window.innerWidth <= MOBILE_BREAKPOINT; },
+    // 是否处于手机模式：窄屏 + 触摸设备（或 WebView App）。
+    // 避免桌面浏览器缩小窗口误入手机模式。
+    isMobile: function(){
+      if(window.innerWidth > MOBILE_BREAKPOINT) return false;
+      if(window.__IS_APP__) return true;  // WebView 壳 App 注入的标志
+      // 真移动设备：支持触摸（maxTouchPoints>0）
+      return (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0)
+        || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || '');
+    },
 
     // 初始化：检测宽度 + 监听变化
     init: function(){
       var self = this;
       this.applyMode();
+      this._bindPullRefresh();
       // 注意：输入法弹出会触发 resize（高度变化），此时不能重渲染否则丢失焦点。
       // 只在跨越手机/桌面宽度断点时切换模式，高度变化（输入法）忽略。
       var _lastMobile = this.isMobile();
@@ -33,6 +43,43 @@
           self.applyMode();
         }
       });
+    },
+
+    // 下拉刷新手势：内容区顶部下拉超过阈值刷新当前页
+    _bindPullRefresh: function(){
+      var self = this;
+      var el = document.getElementById('m-content');
+      if(!el) return;
+      var startY = 0, startX = 0, pulling = false, isScrollTop = true;
+      el.addEventListener('touchstart', function(e){
+        if(e.touches.length !== 1) return;
+        // 只在滚动容器在顶部时允许下拉
+        if(el.scrollTop <= 0){
+          startY = e.touches[0].clientY;
+          startX = e.touches[0].clientX;
+          pulling = true;
+        }
+      }, { passive: true });
+      el.addEventListener('touchmove', function(e){
+        if(!pulling) return;
+        var dy = e.touches[0].clientY - startY;
+        var dx = Math.abs(e.touches[0].clientX - startX);
+        // 下拉且横向位移不大（避免与左滑冲突）
+        if(dy > 0 && dx < 30 && dy > 40){
+          e.preventDefault();
+        }
+      }, { passive: false });
+      el.addEventListener('touchend', function(e){
+        if(!pulling) return;
+        var dy = e.changedTouches[0].clientY - startY;
+        var dx = Math.abs(e.changedTouches[0].clientX - startX);
+        pulling = false;
+        // 下拉超过 80px 且非横向滑动 → 刷新
+        if(dy > 80 && dx < 30){
+          self.refresh();
+          toast('🔄 已刷新','info');
+        }
+      }, { passive: true });
     },
 
     // 根据宽度应用手机/桌面模式（只在断点切换时调用）
@@ -647,69 +694,76 @@
         + '<div class="m-stat"><div class="m-num" style="color:#ff9500">'+(ov.producing||0)+'</div><div class="m-lab">制作中</div></div>'
         + '</div></div>';
       content.innerHTML = html;
-      // 加载剪辑师工作量和提成
+      // 提成数据：30 秒缓存，避免重复请求
+      var now = Date.now();
+      if(this._statsCache.data && (now - this._statsCache.ts) < 30000){
+        this._renderStatsBody(content, this._statsCache.data);
+        return;
+      }
       api('GET','/api/commission/monthly').then(function(d){
         if(!d || !d.ok) return;
-        var rows = (d.rows || []).slice().sort(function(a,b){ return (b.commission||0)-(a.commission||0); });
-        var summary = d.summary || {};
-        var totalComm = summary.total_commission || 0;
-        var met = summary.met_quota || 0;
-        var all = summary.total_people || 0;
-        var totalEp = summary.total_episodes || 0;
-
-        // 顶部汇总卡（深色）
-        var h2 = '<div class="m-sum-card">'
-          + '<div class="m-sum-label">本月总提成（'+escHtml(d.month||'')+'）</div>'
-          + '<div class="m-sum-main">¥'+(totalComm<0?'-':'')+Math.abs(totalComm).toLocaleString()+'</div>'
-          + '<div class="m-sum-row">'
-          + '<div class="m-sum-item"><div class="m-num" style="color:#34c759">'+met+'/'+all+'</div><div class="m-lab">达标</div></div>'
-          + '<div class="m-sum-item"><div class="m-num">'+totalEp+'</div><div class="m-lab">总集数</div></div>'
-          + '<div class="m-sum-item"><div class="m-num" style="color:#ffd60a">'+(all-met)+'</div><div class="m-lab">未达标</div></div>'
-          + '</div></div>';
-
-        // 每人明细卡
-        rows.forEach(function(r){
-          var isPos = (r.commission||0) >= 0;
-          var commColor = isPos ? '#34c759' : '#ff3b30';
-          var commSign = isPos ? '' : '-';
-          var episodes = r.episodes || 0;
-          var quota = r.quota || 0;
-          // 进度条百分比（集数/基准）
-          var pct = quota>0 ? Math.min(100, Math.round(episodes/quota*100)) : (episodes>0?100:0);
-          var barColor = r.is_complete ? '#34c759' : '#ff9500';
-          // 头像首字
-          var avatar = String(r.name||'?').charAt(0);
-          // 标签
-          var tags = [];
-          tags.push('<span class="m-ed-tag">集数 <b>'+episodes+'</b></span>');
-          if(quota) tags.push('<span class="m-ed-tag">基准 <b>'+quota+'</b></span>');
-          tags.push(r.is_complete ? '<span class="m-ed-tag ok">✔ 达标</span>' : '<span class="m-ed-tag warn">✘ 未达标</span>');
-          if(r.overtime_bonus) tags.push('<span class="m-ed-tag money">超额 +'+r.overtime_bonus+'</span>');
-          if(r.shortage_penalty) tags.push('<span class="m-ed-tag warn">缺集 -'+r.shortage_penalty+'</span>');
-          if(r.group_bonus) tags.push('<span class="m-ed-tag money2">组奖 +'+r.group_bonus+'</span>');
-
-          h2 += '<div class="m-ed-card">'
-            + '<div class="m-ed-head">'
-            + '<div class="m-ed-avatar">'+escHtml(avatar)+'</div>'
-            + '<div class="m-ed-info"><div class="m-ed-name">'+escHtml(r.name)+'</div>'
-            + (r.role?'<div class="m-ed-role">'+escHtml(r.role)+'</div>':'')
-            + '</div>'
-            + '<div class="m-ed-comm"><div class="m-ed-comm-val" style="color:'+commColor+'">'+commSign+'¥'+Math.abs(r.commission||0)+'</div>'
-            + '<div class="m-ed-comm-lab">提成</div></div>'
-            + '</div>'
-            + '<div class="m-ed-bar">'
-            + '<div class="m-ed-bar-track"><div class="m-ed-bar-fill" style="width:'+pct+'%;background:'+barColor+'"></div></div>'
-            + '<div class="m-ed-bar-text">'+episodes+'/'+quota+' 集</div>'
-            + '</div>'
-            + '<div class="m-ed-tags">'+tags.join('')+'</div>'
-            + '</div>';
-        });
-        h2 += '</div>';
-        var tmp = document.createElement('div');
-        tmp.innerHTML = h2;
-        // 追加全部子节点（h2 含汇总卡 + 多个剪辑师卡片，不能只取 firstChild）
-        while(tmp.firstChild) content.appendChild(tmp.firstChild);
+        self._statsCache = { data: d, ts: Date.now() };
+        self._renderStatsBody(content, d);
       }).catch(function(){});
+    },
+
+    // 渲染提成明细（汇总卡 + 每人卡）
+    _renderStatsBody: function(content, d){
+      var rows = (d.rows || []).slice().sort(function(a,b){ return (b.commission||0)-(a.commission||0); });
+      var summary = d.summary || {};
+      var totalComm = summary.total_commission || 0;
+      var met = summary.met_quota || 0;
+      var all = summary.total_people || 0;
+      var totalEp = summary.total_episodes || 0;
+
+      // 顶部汇总卡（深色）
+      var h2 = '<div class="m-sum-card">'
+        + '<div class="m-sum-label">本月总提成（'+escHtml(d.month||'')+'）</div>'
+        + '<div class="m-sum-main">¥'+(totalComm<0?'-':'')+Math.abs(totalComm).toLocaleString()+'</div>'
+        + '<div class="m-sum-row">'
+        + '<div class="m-sum-item"><div class="m-num" style="color:#34c759">'+met+'/'+all+'</div><div class="m-lab">达标</div></div>'
+        + '<div class="m-sum-item"><div class="m-num">'+totalEp+'</div><div class="m-lab">总集数</div></div>'
+        + '<div class="m-sum-item"><div class="m-num" style="color:#ffd60a">'+(all-met)+'</div><div class="m-lab">未达标</div></div>'
+        + '</div></div>';
+
+      // 每人明细卡
+      rows.forEach(function(r){
+        var isPos = (r.commission||0) >= 0;
+        var commColor = isPos ? '#34c759' : '#ff3b30';
+        var commSign = isPos ? '' : '-';
+        var episodes = r.episodes || 0;
+        var quota = r.quota || 0;
+        var pct = quota>0 ? Math.min(100, Math.round(episodes/quota*100)) : (episodes>0?100:0);
+        var barColor = r.is_complete ? '#34c759' : '#ff9500';
+        var avatar = String(r.name||'?').charAt(0);
+        var tags = [];
+        tags.push('<span class="m-ed-tag">集数 <b>'+episodes+'</b></span>');
+        if(quota) tags.push('<span class="m-ed-tag">基准 <b>'+quota+'</b></span>');
+        tags.push(r.is_complete ? '<span class="m-ed-tag ok">✔ 达标</span>' : '<span class="m-ed-tag warn">✘ 未达标</span>');
+        if(r.overtime_bonus) tags.push('<span class="m-ed-tag money">超额 +'+r.overtime_bonus+'</span>');
+        if(r.shortage_penalty) tags.push('<span class="m-ed-tag warn">缺集 -'+r.shortage_penalty+'</span>');
+        if(r.group_bonus) tags.push('<span class="m-ed-tag money2">组奖 +'+r.group_bonus+'</span>');
+
+        h2 += '<div class="m-ed-card">'
+          + '<div class="m-ed-head">'
+          + '<div class="m-ed-avatar">'+escHtml(avatar)+'</div>'
+          + '<div class="m-ed-info"><div class="m-ed-name">'+escHtml(r.name)+'</div>'
+          + (r.role?'<div class="m-ed-role">'+escHtml(r.role)+'</div>':'')
+          + '</div>'
+          + '<div class="m-ed-comm"><div class="m-ed-comm-val" style="color:'+commColor+'">'+commSign+'¥'+Math.abs(r.commission||0)+'</div>'
+          + '<div class="m-ed-comm-lab">提成</div></div>'
+          + '</div>'
+          + '<div class="m-ed-bar">'
+          + '<div class="m-ed-bar-track"><div class="m-ed-bar-fill" style="width:'+pct+'%;background:'+barColor+'"></div></div>'
+          + '<div class="m-ed-bar-text">'+episodes+'/'+quota+' 集</div>'
+          + '</div>'
+          + '<div class="m-ed-tags">'+tags.join('')+'</div>'
+          + '</div>';
+      });
+      h2 += '</div>';
+      var tmp = document.createElement('div');
+      tmp.innerHTML = h2;
+      while(tmp.firstChild) content.appendChild(tmp.firstChild);
     },
 
     // 当月提成表（复用 /api/commission/monthly）

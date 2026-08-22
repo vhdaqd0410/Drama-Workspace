@@ -1363,4 +1363,11 @@ def create_app():
         sync_engine.start_nas_health_check()
     except Exception:
         pass
+    # 清理超过 90 天的日志表（delivery_logs/sync_logs/audit_logs），防 DB 无限膨胀
+    try:
+        _n = db.prune_logs(keep_days=90)
+        if _n:
+            print("[OK] 已清理 %d 条过期日志" % _n)
+    except Exception:
+        pass
     return app

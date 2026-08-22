@@ -927,6 +927,31 @@ class Database:
         except Exception:
             return []
 
+    def prune_logs(self, keep_days=90):
+        """清理超过 keep_days 的日志表记录，防止 DB 无限膨胀。
+        返回被清理的总行数。表：
+          - delivery_logs（交付记录，量大）
+          - sync_logs（同步日志）
+          - audit_logs（审计日志）
+        deliver_runs / qa_runs 保留（可能有进行中任务），不做清理。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d %H:%M:%S")
+        total = 0
+        tables = ["delivery_logs", "sync_logs", "audit_logs"]
+        try:
+            with self.get_conn() as conn:
+                for t in tables:
+                    try:
+                        cur = conn.execute(
+                            "DELETE FROM %s WHERE created_at < ?" % t, (cutoff,))
+                        total += cur.rowcount
+                    except Exception:
+                        pass
+            return total
+        except Exception:
+            return 0
+
 
 db = Database()
 

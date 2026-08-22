@@ -66,6 +66,12 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 progressBar.setVisibility(View.GONE);
+                // 注入 App 标识，让前端始终启用手机模式（避免被误判为桌面）
+                try {
+                    view.evaluateJavascript("window.__IS_APP__=true;", null);
+                } catch (Exception e) {
+                    // ignore
+                }
             }
 
             @Override
