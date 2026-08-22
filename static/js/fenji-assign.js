@@ -1269,5 +1269,5 @@ function fjGetAssignList(){
                .filter(d => d.range && fjRangeToCount(d.range) > 0);
 }
 
-function escHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function escHtml(s){ return window.WB && WB.escHtml ? WB.escHtml(s) : String(s==null?'':s); }
 /* ============ QA Center ============ */

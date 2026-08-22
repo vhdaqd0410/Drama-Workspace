@@ -308,7 +308,7 @@ function openFolderByPath(name, path){
 var _episodeStatusCache = {};
 var _episodeStatusPending = {};
 
-function htm(s){ if(s===undefined||s===null)return ""; return String(s).replace(/[&<>"\'`]/g,function(c){ return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","\'":"&#39;","`":"&#96;"}[c]; }); }
+function htm(s){ return window.WB && WB.escHtml ? WB.escHtml(s) : String(s==null?'':s); }
 
 function _compactRange(nums) {
     if (!nums.length) return '';

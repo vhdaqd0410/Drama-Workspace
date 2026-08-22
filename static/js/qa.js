@@ -836,9 +836,7 @@ function qa2UpdateStats(total, passed, warn, fail) {
 }
 
 function escHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
-    });
+    return window.WB && WB.escHtml ? WB.escHtml(s) : String(s==null?'':s);
 }
 function naturalCmp(a, b) {
     // 简易自然排序：把数字段按数值比

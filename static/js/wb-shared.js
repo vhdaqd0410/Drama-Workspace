@@ -11,7 +11,7 @@
 (function(){
   var WB = window.WB || (window.WB = {});
 
-  // ===== 转义工具（统一口径） =====
+  // ===== 转义工具（统一口径，最安全：含反引号） =====
   function escHtml(s){
     if(s === undefined || s === null) return '';
     return String(s)
@@ -19,7 +19,8 @@
       .replace(/</g,'&lt;')
       .replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;')
-      .replace(/'/g,'&#39;');
+      .replace(/'/g,'&#39;')
+      .replace(/`/g,'&#96;');
   }
   function htm(s){ return escHtml(s); }
 

@@ -898,19 +898,8 @@
 
     // 解析 "1-5,11-15" 等多段范围为 {集号: 剪辑师}（供保存用）
     _parseRangeToAssign: function(rangeStr, person){
-      var assign = {};
-      var segs = String(rangeStr||'').split(',');
-      segs.forEach(function(seg){
-        seg = seg.trim();
-        if(!seg) return;
-        var parts = seg.split('-');
-        var start = parseInt(parts[0]);
-        var end = parseInt(parts[1] || parts[0]);
-        if(isNaN(start)) return;
-        if(isNaN(end)) end = start;
-        for(var ep=start; ep<=end; ep++) assign[ep] = person;
-      });
-      return assign;
+      // 复用公共分集工具（支持逗号分隔多段）
+      return window.FenjiCore ? FenjiCore.rangeToAssign(rangeStr, person) : {};
     },
 
     fjSelectProject: function(name){
@@ -1025,17 +1014,8 @@
       var selected = this._fj.selected;
       if(total<=0){ toast('请设置总集数','warning'); return; }
       if(!selected.length){ toast('请选择剪辑师','warning'); return; }
-      var persons = selected.slice();
-      var segLen = total;
-      var per = Math.floor(segLen/persons.length);
-      var rem = segLen % persons.length;
-      var cur = 1;
-      var ranges = {};
-      persons.forEach(function(p, i){
-        var sz = per + (i < rem ? 1 : 0);
-        ranges[p] = cur + '-' + (cur+sz-1);
-        cur += sz;
-      });
+      // 复用公共分集工具（与桌面端同源，避免算法漂移）
+      var ranges = window.FenjiCore ? FenjiCore.splitEpisodes(total, selected.slice()) : this._fj.ranges;
       this._fj.ranges = ranges;
       var el = document.getElementById('m-fj-result');
       if(el) el.innerHTML = this._fjResultHTML();
