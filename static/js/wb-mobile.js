@@ -33,6 +33,7 @@
       var self = this;
       this.applyMode();
       this._bindPullRefresh();
+      this._startNotifPolling();
       // 注意：输入法弹出会触发 resize（高度变化），此时不能重渲染否则丢失焦点。
       // 只在跨越手机/桌面宽度断点时切换模式，高度变化（输入法）忽略。
       var _lastMobile = this.isMobile();
@@ -98,6 +99,10 @@
 
     // 加载数据（用精简接口，大幅减小传输量，加快手机加载）
     async load(){
+      // 数据未就绪时显示骨架屏
+      if(!this._data.projects.length && this.isMobile()){
+        this._renderSkeleton();
+      }
       try{
         // 优先用手机端精简接口（只含卡片字段，约减小 5-10 倍）
         var d = await api('GET','/api/projects/mobile');
@@ -192,23 +197,66 @@
           if(ao!==bo) return ao-bo;
           return String(a.name||'').localeCompare(String(b.name||''));
         });
-        // 默认折叠：除「组内进行中」外，其他分组折叠
+        // 默认折叠：除「组内进行中」外，其他分组折叠，且折叠时不渲染卡片 DOM（性能优化）
         var isGroupActive = sec.key === 'group_active';
         var secId = 'm-sec-' + String(sec.key||'').replace(/[^a-zA-Z0-9_]/g,'_');
-        html += '<div style="font-size:13px;font-weight:700;color:#86868b;margin:14px 2px 8px;display:flex;align-items:center;gap:6px;cursor:pointer" onclick="var d=document.getElementById(\''+secId+'\');if(d){d.style.display=d.style.display===\'none\'?\'\':\'none\'}">'
+        html += '<div style="font-size:13px;font-weight:700;color:#86868b;margin:14px 2px 8px;display:flex;align-items:center;gap:6px;cursor:pointer" '
+          + 'onclick="WB.mobile.toggleGroup(\''+secId+'\',\''+sec.key+'\',this)">'
           + '<span style="font-size:10px;color:#86868b">'+(isGroupActive?'▼':'▶')+'</span>'
-          + escHtml(sec.name||'项目') + ' <span style="font-weight:400;font-size:11px">('+projects.length+')</span></div>'
-          + '<div id="'+secId+'"'+(isGroupActive?'':' style="display:none"')+'>';
-        projects.forEach(function(p){
-          html += self._projectCard(p);
-        });
-        html += '</div>';
+          + escHtml(sec.name||'项目') + ' <span style="font-weight:400;font-size:11px">('+projects.length+')</span></div>';
+        if(isGroupActive){
+          // 组内进行中：直接渲染卡片
+          html += '<div id="'+secId+'">';
+          projects.forEach(function(p){ html += self._projectCard(p); });
+          html += '</div>';
+        } else {
+          // 折叠部门：不渲染卡片 DOM，仅放空容器，展开时动态填充
+          html += '<div id="'+secId+'" style="display:none" data-key="'+String(sec.key||'').replace(/[^a-zA-Z0-9_]/g,'_')+'" data-loaded="0"></div>';
+        }
       });
 
       if(!html){
         html = '<div class="m-empty">📭 暂无项目</div>';
       }
       el.innerHTML = html;
+    },
+
+    // 展开/折叠部门分组；展开时按需渲染该部门卡片（懒加载，减少 DOM）
+    toggleGroup: function(secId, key, titleEl){
+      var box = document.getElementById(secId);
+      if(!box) return;
+      var isHidden = box.style.display === 'none';
+      if(isHidden){
+        box.style.display = '';
+        // 未加载过则填充该部门卡片
+        if(box.getAttribute('data-loaded') !== '1'){
+          var q = (this._filter.q||'').toLowerCase();
+          var sec = (this._data.sections||[]).find(function(s){ return s.key === key; });
+          if(sec){
+            var self = this;
+            var projects = (sec.projects||[]).filter(function(p){
+              if(q && String(p.name||'').toLowerCase().indexOf(q)<0) return false;
+              if(self._filter.status && (p.custom_status||'')!==self._filter.status) return false;
+              return true;
+            });
+            projects.sort(function(a,b){
+              var ao = _workflowOrder(a.custom_status), bo = _workflowOrder(b.custom_status);
+              if(ao!==bo) return ao-bo;
+              return String(a.name||'').localeCompare(String(b.name||''));
+            });
+            var html = projects.map(function(p){ return self._projectCard(p); }).join('');
+            box.innerHTML = html;
+            box.setAttribute('data-loaded', '1');
+          }
+        }
+        // 更新箭头
+        var arrow = titleEl ? titleEl.querySelector('span') : null;
+        if(arrow) arrow.textContent = '▼';
+      } else {
+        box.style.display = 'none';
+        var arrow2 = titleEl ? titleEl.querySelector('span') : null;
+        if(arrow2) arrow2.textContent = '▶';
+      }
     },
 
     // 单个项目卡片
@@ -839,14 +887,125 @@
       if(typeof scanProjects === 'function'){ scanProjects(); }
       else { toast('扫描不可用','warning'); }
     },
-    openNotifications: function(){
-      if(typeof openNotifications === 'function'){ openNotifications(); }
-      else toast('通知不可用','warning');
+
+    // 移动端专属通知中心（全屏弹窗，展示逾期/今日交付/待办提醒）
+    async openNotifications(){
+      var self = this;
+      var html = '<div class="m-detail" id="m-detail">'
+        + '<div class="m-detail-bar"><button class="m-back" onclick="WB.mobile.closeDetail()">✕</button><div class="m-dt">🔔 通知中心</div></div>'
+        + '<div class="m-detail-body"><div style="color:#86868b;text-align:center;padding:40px">加载中...</div></div></div>';
+      document.getElementById('m-detail-root').innerHTML = html;
+      this._bindSwipeBack();
+      try{
+        var d = await api('GET','/api/notifications');
+        var body = document.querySelector('#m-detail .m-detail-body');
+        if(!body) return;
+        var overdue = d.overdue || [];
+        var today = d.today_deliver || [];
+        var upcoming = d.upcoming || [];
+        var todos = d.todo_reminders || [];
+        var h = '';
+        if(!d.count){
+          h = '<div class="m-empty">🎉 没有待处理通知</div>';
+        } else {
+          h += '<div class="m-section"><h4>⏰ 逾期交付（'+overdue.length+'）</h4>';
+          if(!overdue.length) h += '<div style="color:#86868b;font-size:13px;padding:6px 0">无</div>';
+          overdue.forEach(function(x){ h += '<div class="m-row"><span class="m-k">🔴 '+escHtml(x.name)+'</span><span class="m-v" style="color:#ff3b30">'+escHtml(x.date||'')+'</span></div>'; });
+          h += '</div>';
+          h += '<div class="m-section"><h4>📦 今日交付（'+today.length+'）</h4>';
+          if(!today.length) h += '<div style="color:#86868b;font-size:13px;padding:6px 0">无</div>';
+          today.forEach(function(x){ h += '<div class="m-row"><span class="m-k">'+escHtml(x.name)+'</span><span class="m-v" style="color:#0071e3">今日</span></div>'; });
+          h += '</div>';
+          h += '<div class="m-section"><h4>📅 即将交付（'+upcoming.length+'）</h4>';
+          if(!upcoming.length) h += '<div style="color:#86868b;font-size:13px;padding:6px 0">无</div>';
+          upcoming.forEach(function(x){ h += '<div class="m-row"><span class="m-k">'+escHtml(x.name)+'</span><span class="m-v">'+escHtml(x.date||'')+'</span></div>'; });
+          h += '</div>';
+          h += '<div class="m-section"><h4>📌 待办提醒（'+todos.length+'）</h4>';
+          if(!todos.length) h += '<div style="color:#86868b;font-size:13px;padding:6px 0">无</div>';
+          todos.forEach(function(x){ h += '<div class="m-row"><span class="m-k">'+escHtml(x.project||'')+'</span><span class="m-v">'+escHtml(x.text||'')+'</span></div>'; });
+          h += '</div>';
+        }
+        body.innerHTML = h;
+        // 已查看，清角标
+        this._notifCount = 0;
+        this._updateNotifBadge();
+      }catch(e){
+        var b2 = document.querySelector('#m-detail .m-detail-body');
+        if(b2) b2.innerHTML = '<div class="m-empty">加载失败: '+escHtml(e.message)+'</div>';
+      }
+    },
+
+    // 更新顶部铃铛角标
+    _updateNotifBadge: function(){
+      var badge = document.getElementById('m-notif-badge');
+      if(!badge) return;
+      var n = this._notifCount || 0;
+      if(n > 0){
+        badge.style.display = '';
+        badge.textContent = n > 99 ? '99+' : n;
+      } else {
+        badge.style.display = 'none';
+      }
+    },
+
+    // 定期检查通知（每 5 分钟）：新通知弹浏览器通知 + 更新角标
+    _startNotifPolling: function(){
+      var self = this;
+      if(this._notifPolling) return;
+      this._notifPolling = true;
+      this._notifCount = 0;
+      var lastCount = -1;
+      var check = async function(){
+        try{
+          var d = await api('GET','/api/notifications');
+          var count = (d && d.count) || 0;
+          if(count > lastCount){
+            self._notifCount = count;
+            self._updateNotifBadge();
+            // 浏览器通知（需授权）
+            if(count > 0 && 'Notification' in window && Notification.permission === 'granted'){
+              var over = (d.overdue||[]).length;
+              var today = (d.today_deliver||[]).length;
+              try{
+                new Notification('🎬 视频工作台提醒', {
+                  body: (over?('逾期 '+over+' 个')+' ':'') + (today?('今日交付 '+today+' 个'):'') || ('共 '+count+' 条通知'),
+                });
+              }catch(_){}
+            }
+          }
+          lastCount = count;
+        }catch(_){}
+      };
+      // 首次请求通知权限
+      if('Notification' in window && Notification.permission === 'default'){
+        Notification.requestPermission().catch(function(){});
+      }
+      check();
+      setInterval(check, 5*60*1000);
     },
 
     renderError: function(msg){
       var content = document.getElementById('m-content');
       if(content) content.innerHTML = '<div class="m-empty">'+escHtml(msg)+'</div>';
+    },
+
+    // 首页骨架屏：数据加载时显示灰色占位卡
+    _renderSkeleton: function(){
+      var content = document.getElementById('m-content');
+      if(!content || this._curTab !== 'home') return;
+      var cards = '';
+      for(var i=0; i<4; i++){
+        cards += '<div class="m-skel-card">'
+          + '<div class="m-skeleton m-skel-line" style="width:70%"></div>'
+          + '<div class="m-skeleton m-skel-chip"></div>'
+          + '<div class="m-skeleton m-skel-chip"></div>'
+          + '<div class="m-skeleton m-skel-chip"></div>'
+          + '<div class="m-skeleton m-skel-line" style="margin-top:12px"></div>'
+          + '</div>';
+      }
+      content.innerHTML = '<div class="m-stats">'
+        + ['','','',''].map(function(){ return '<div class="m-stat"><div class="m-skeleton" style="width:70%;height:20px;margin:0 auto"></div><div class="m-skeleton" style="width:50%;height:10px;margin:6px auto 0"></div></div>'; }).join('')
+        + '</div>' + cards;
     },
 
     /* ============ 手机端分集 Tab ============ */

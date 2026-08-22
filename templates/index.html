@@ -49,6 +49,17 @@ a{color:var(--blue);text-decoration:none}
 .stat-num{font-size:24px;font-weight:600}.stat-label{font-size:12px;color:var(--text-sec);margin-top:2px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
 .card{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:18px;transition:box-shadow .2s;position:relative}
+/* 卡片状态色块：左侧竖条，按项目状态着色，一眼区分 */
+.card-stripe{position:absolute;left:0;top:10px;bottom:10px;width:4px;border-radius:0 4px 4px 0}
+.card-stripe.jianji{background:#ff3b30}      /* 剪辑中 红 */
+.card-stripe.shenhe{background:#af52de}      /* 审核中 紫 */
+.card-stripe.xiugai{background:#ff9500}      /* 修改中 橙 */
+.card-stripe.jiaofu{background:#b58100}      /* 交付中 棕 */
+.card-stripe.daijiaofu{background:#ffcc00}   /* 待交付 黄 */
+.card-stripe.zhijian{background:#0071e3}     /* 质检 蓝 */
+.card-stripe.completed{background:#34c759}   /* 已完成 绿 */
+.card-stripe.fenji{background:#86868b}       /* 分集中 灰 */
+.card-stripe.default{background:#c0c0c5}     /* 未设置 浅灰 */
 .card:hover{box-shadow:var(--shadow-lg)}
 /* 搜索结果定位高亮动画 */
 @keyframes searchHighlightPulse{
@@ -750,6 +761,50 @@ a{color:var(--blue);text-decoration:none}
   .m-todo-add { display: flex; gap: 8px; margin-top: 12px; }
   .m-todo-add input { flex: 1; padding: 10px 12px; border: 1px solid var(--border,#e5e5ea); border-radius: 10px; font-size: 14px; }
   .m-todo-add button { padding: 10px 16px; border: none; background: #0071e3; color: #fff; border-radius: 10px; font-size: 14px; font-weight: 600; }
+
+  /* 骨架屏：加载时灰色占位块 + 呼吸动画 */
+  @keyframes mShimmer { 0%{background-position:-200px 0} 100%{background-position:200px 0} }
+  .m-skeleton{ background:#e5e5ea; border-radius:8px; position:relative; overflow:hidden;
+    background-image:linear-gradient(90deg,#e5e5ea 25%,#efeff1 50%,#e5e5ea 75%);
+    background-size:200px 100%; animation:mShimmer 1.2s infinite linear; }
+  .m-skel-card{ background:#fff; border-radius:14px; padding:14px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .m-skel-line{ height:14px; margin-bottom:10px; }
+  .m-skel-line.short{ width:40%; }
+  .m-skel-chip{ display:inline-block; width:60px; height:18px; margin-right:6px; }
+
+  /* 手机端暗色主题（跟随系统深色模式） */
+  @media (prefers-color-scheme: dark){
+    #mobile-app{ background:#1c1c1e; }
+    .m-topbar{ background:#1c1c1e; border-bottom-color:#38383a; }
+    .m-topbar .m-title{ color:#f5f5f7; }
+    .m-topbar .m-icon-btn{ background:#2c2c2e; color:#f5f5f7; }
+    .m-stat, .m-card, .m-sum-item{ background:#2c2c2e; box-shadow:none; }
+    .m-stat .m-lab, .m-card-meta .m-chip{ color:#98989d; }
+    .m-chip{ background:#3a3a3c; color:#d1d1d6; }
+    .m-card-name{ color:#f5f5f7; }
+    .m-filter input, .m-filter select{ background:#2c2c2e; border-color:#48484a; color:#f5f5f7; }
+    .m-filter select{ color:#f5f5f7; }
+    .m-section h4{ color:#98989d; }
+    .m-row{ border-bottom-color:#38383a; color:#f5f5f7; }
+    .m-row .m-k{ color:#98989d; }
+    .m-tabbar{ background:#1c1c1e; border-top-color:#38383a; }
+    .m-tab{ color:#98989d; }
+    .m-tab.active{ color:#0a84ff; }
+    .m-detail{ background:#1c1c1e; }
+    .m-detail-bar{ background:#1c1c1e; border-bottom-color:#38383a; }
+    .m-detail-bar .m-dt{ color:#f5f5f7; }
+    .m-detail-bar .m-back{ background:#2c2c2e; color:#f5f5f7; }
+    .m-empty{ color:#98989d; }
+    .m-ed-card{ background:#2c2c2e; box-shadow:none; }
+    .m-ed-name{ color:#f5f5f7; }
+    .m-ed-role, .m-ed-comm-lab, .m-ed-bar-text{ color:#98989d; }
+    .m-ed-tag{ background:#3a3a3c; color:#d1d1d6; }
+    .m-sum-card{ background:linear-gradient(135deg,#2c2c2e,#3a3a3c); }
+    .m-status-select{ background:#2c2c2e; border-color:#48484a; color:#f5f5f7; }
+    .m-todo-item{ border-bottom-color:#38383a; }
+    .m-todo-item .m-td-text{ color:#f5f5f7; }
+    .m-todo-add input{ background:#2c2c2e; border-color:#48484a; color:#f5f5f7; }
+  }
 }
 </style><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/></head>
 <body>
@@ -758,7 +813,7 @@ a{color:var(--blue);text-decoration:none}
   <div class="m-topbar">
     <div class="m-title">🎬 视频工作台</div>
     <button class="m-icon-btn" onclick="WB.mobile.openScan()">🔄</button>
-    <button class="m-icon-btn" onclick="WB.mobile.openNotifications()">🔔</button>
+    <button class="m-icon-btn" onclick="WB.mobile.openNotifications()" style="position:relative">🔔<span id="m-notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#ff3b30;color:#fff;font-size:10px;font-weight:700;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px"></span></button>
   </div>
   <div class="m-content" id="m-content"></div>
   <div class="m-tabbar">

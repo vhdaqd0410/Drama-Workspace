@@ -104,6 +104,27 @@ class Database:
                 current_episodes INTEGER DEFAULT 0,
                 episode_plan TEXT DEFAULT '{}'
             )""")
+            # 性能索引：覆盖高频查询（月份过滤/状态过滤/部门分组/交付状态/时间排序）
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_projects_month ON projects(project_month)")
+            except Exception:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(custom_status)")
+            except Exception:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_projects_dept ON projects(department)")
+            except Exception:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_projects_deliv ON projects(delivery_status)")
+            except Exception:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_projects_created ON projects(created_at)")
+            except Exception:
+                pass
 
             c.execute("""CREATE TABLE IF NOT EXISTS sync_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

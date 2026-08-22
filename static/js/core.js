@@ -1092,6 +1092,7 @@ function projectCardHTML(p){
     ? `<input type="checkbox" class="bulk-card-chk" data-pname="${pnameAttr}" onchange="updateBulkBar()" title="选择此项目">`
     : '';
   return`<div class="card">
+    <div class="card-stripe ${badge.cls}"></div>
     <div class="card-head">
       <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${pnameAttr}" data-project-name="${pnameAttr}">${p.name}</span><button class="btn btn-sm ep-search-btn" onclick="searchEpisodeEditor('${jsq(p.name)}')" title="按集号检索该集剪辑师">🔍 查剪辑</button></div>
       <div class="card-meta-line">${dept}${month}${(() => {
