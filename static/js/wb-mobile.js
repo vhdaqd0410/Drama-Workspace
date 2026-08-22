@@ -96,14 +96,19 @@
       }
     },
 
-    // 加载数据
+    // 加载数据（用精简接口，大幅减小传输量，加快手机加载）
     async load(){
       try{
-        var d = await api('GET','/api/projects');
-        if(d && d.ok){
+        // 优先用手机端精简接口（只含卡片字段，约减小 5-10 倍）
+        var d = await api('GET','/api/projects/mobile');
+        if(!d || !d.ok){
+          // 回退到完整接口
+          d = await api('GET','/api/projects');
+          d = d || {};
+        }
+        if(d && (d.sections || d.ok)){
           this._data.sections = d.sections || [];
           this._data.overview = d.overview_stats || null;
-          // 平铺所有项目
           var flat = [];
           (d.sections||[]).forEach(function(s){ (s.projects||[]).forEach(function(p){ flat.push(p); }); });
           this._data.projects = flat;
@@ -257,6 +262,17 @@
       var p = this._findProject(name);
       if(!p){ toast('项目不存在','warning'); return; }
       var self = this;
+      // 精简接口不含 group_path/production_path（同步/打开目录需要），进入详情时异步补全
+      if(!p.group_path && !p.production_path){
+        api('GET','/api/project/'+encodeURIComponent(name)).then(function(d){
+          var full = d && (d.project || d);
+          if(full && typeof full === 'object'){
+            ['group_path','production_path','source_root','episode_plan','on_group','has_production_match'].forEach(function(k){
+              if(full[k] !== undefined) p[k] = full[k];
+            });
+          }
+        }).catch(function(){});
+      }
       var st = p.custom_status || '';
       var badge = this._statusBadge(st);
       var total = p.total_episodes || 0;

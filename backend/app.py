@@ -273,6 +273,40 @@ def api_projects():
     return jsonify(result)
 
 
+@app.route("/api/projects/mobile", methods=["GET"])
+def api_projects_mobile():
+    """手机端精简项目列表：与 /api/projects 相同的分组结构，但裁剪掉大字段
+    （episode_plan、group_path、production_path 等），大幅减小传输量，加快手机加载。
+    返回 sections + overview_stats（与桌面端一致的统计口径）。
+    """
+    # 复用桌面端完整数据，再裁剪字段
+    full = api_projects()
+    if not full or not full.is_json:
+        return jsonify({"ok": False, "message": "加载失败"}), 500
+    d = full.get_json()
+    keep = ["name", "custom_status", "delivery_status", "department", "project_month",
+            "total_episodes", "current_episodes", "due_date", "delivered_date",
+            "project_type", "on_group", "has_production_match", "is_completed"]
+    sections = []
+    for sec in d.get("sections", []):
+        projs = []
+        for p in sec.get("projects", []):
+            item = {k: p.get(k) for k in keep if k in p}
+            projs.append(item)
+        sections.append({
+            "key": sec.get("key"),
+            "name": sec.get("name"),
+            "type": sec.get("type"),
+            "projects": projs,
+        })
+    return jsonify({
+        "ok": True,
+        "sections": sections,
+        "total": d.get("total"),
+        "overview_stats": d.get("overview_stats"),
+    })
+
+
 
 @app.route("/api/sync/<path:project_name>", methods=["POST"])
 def api_sync(project_name):
