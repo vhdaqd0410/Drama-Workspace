@@ -41,6 +41,16 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // 状态栏浅色 + 深色图标，去掉顶部黑边（与网页背景 #f5f5f7 融合）
+        try {
+            getWindow().setStatusBarColor(android.graphics.Color.parseColor("#f5f5f7"));
+            View decor = getWindow().getDecorView();
+            decor.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR); // 浅色背景 → 深色状态栏图标
+        } catch (Exception e) {
+            // ignore
+        }
+
         prefs = getSharedPreferences("workbench", MODE_PRIVATE);
         String url = prefs.getString(PREF_URL, DEFAULT_URL);
 

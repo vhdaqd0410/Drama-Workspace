@@ -375,14 +375,19 @@ class QAEngine:
             import qa_toolkits
 
             cp_folder = folder_layout['cp_folder']
-            hardsub_folders = folder_layout.get('hardsub_folders', [cp_folder])
+            # 兜底：即使 layout 里 hardsub_folders 为空/缺失，也至少保证有成片目录，
+            # 避免后续遍历空列表导致 "for f in None" 类崩溃
+            hardsub_folders = folder_layout.get('hardsub_folders') or [cp_folder]
             srt_folder = ((folder_layout.get('srt_folders') or [None])[0]
                           if not merged_opts.get('srt_folder') else merged_opts['srt_folder'])
 
             # opts 以 merged_opts 为基础（已包含检测项复选 / sub_region / hardsub_folders）
             opts = dict(merged_opts)
+            # 注意：setdefault 在 key 存在但值为 None 时不会生效（前端可能传 hardsub_folders=null），
+            # 因此这里用显式空值判断兜底，避免下方 `for f in opts['hardsub_folders']` 遍历 None 崩溃。
             opts.setdefault('cp_folder', cp_folder)
-            opts.setdefault('hardsub_folders', hardsub_folders)
+            if not opts.get('hardsub_folders'):
+                opts['hardsub_folders'] = hardsub_folders
             opts.setdefault('srt_folder', srt_folder)
             opts.setdefault('opt_blackframes', True)
             opts.setdefault('opt_hardsubs', True)
@@ -745,7 +750,7 @@ class QAEngine:
 
     def _auto_advance_workflow(self, project_name, passed, failed):
         """质检完成后自动推进项目工作流状态：
-        - 全部通过(failed==0) → 流转到"待交付"（进入交付环节）
+        - 全部通过(failed==0) → 流转到"交付中"（交付文件就绪，进入交付回传环节）
         - 有失败(failed>0)   → 流转到"修改中"（需修复后重新质检）
         """
         try:
@@ -756,7 +761,7 @@ class QAEngine:
             # 只在"质检中/待质检"状态推进，避免覆盖用户手动设置的其他状态
             if cur not in ("质检中", "待质检"):
                 return
-            target = "待交付" if failed == 0 else "修改中"
+            target = "交付中" if failed == 0 else "修改中"
             db.update_project_status(
                 project_name, custom_status=target,
                 sync_progress="质检%s，自动流转到%s" % ("通过" if failed == 0 else "未通过", target))

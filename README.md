@@ -9,7 +9,7 @@
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.5+-5C3EE8?style=for-the-badge&logo=opencv)](https://opencv.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/status-active-brightgreen?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/v2.6.0-blue?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/v3.4.0-blue?style=for-the-badge)]()
 
 📡 **实时扫描 · 可视化进度 · 智能协作 · 一键交付 · 快捷键直达**
 
@@ -104,6 +104,13 @@
 | ✂️ 剪辑师个人视图 | 按剪辑师聚合负责项目与集数进度，支持流程排序与搜索 |
 | 🗂️ 统一输出目录解析 | `output_dir_util.py` 统一成片/交付目录名解析，支持项目级覆盖 |
 | 🔐 高危操作审计 | 整目录交付/批量回传/删除/批量改状态写 `audit_logs` + 前端二次确认 |
+| 📋 任务中心/待办 | 全局待办看板 · 拖拽状态 · 截止日期/负责人 · 分组筛选统计 |
+| 💰 提成/绩效 | 分集数据→绩效→提成全链路报表 · 个人年度工作量卡片 · 组长组奖 · 卡点标注 |
+| 📅 数据洞察/交付日历 | 交付日历 · 延迟预警 · 按时交付率 · 项目档案 CSV 导出 |
+| 🧵 集号识别单源化 | `episode_number.py` 统一集号提取（deliver/preview 共用，防正则漂移） |
+| 📁 本地剪辑项目 | 一键在本地项目盘创建「序号-项目名」文件夹 + 复制模板结构，只拉取"我负责集数"的素材（扁平放入 `01原素材/第N集`）+ 整个剧本，异步进度条 |
+| 🔄 制作部自动扫描 | 后台定时扫描制作部源目录，新建项目自动发现入库（无需手动点扫描） |
+| 🎯 递归扫描修复 | 修复 `H0189-11587《剧名》` 类命名、含"国内/海外"项目名被误判漏扫的问题 |
 
 ---
 
@@ -117,11 +124,18 @@ app.py ─┬── scan.py      (ScanMixin)      — get_projects_enriched, 自
         ├── deliver.py   (DeliverMixin)   — 成片/修改/交付三场景回传 + 进度追踪
         └── preview.py   (PreviewMixin)   — 视频路径解析 + 流式预览路由
 
-enhanced_routes.py   — 扩展路由（团队、分集、Excel同步、质检、设置）
+enhanced_routes.py   — 扩展路由（团队、分集、Excel同步、质检、设置、分集导出）
 bulk_api.py          — 批量操作 + 任务中心 + 月度报告 + 数据看板
-fenji.py / fenji_exporter.py — 分集分配 + Excel 导出
-qa_engine.py + detection.py — 质检引擎（黑帧/花屏/PSNR/SSIM）
+features.py          — 融合路由（待办/时间轴/数据洞察/交付日历/项目档案导出）
+fenji.py / fenji_exporter.py / fenji_parser.py — 分集分配 + Excel 导出 + 分集解析(统一口径)
+qa_engine.py + detection.py + qa_toolkits.py — 质检引擎（黑帧/花屏/PSNR/SSIM）
+commission.py / commission_service.py — 提成工具接入层 + 绩效提成纯函数计算
+schedule_api.py      — 剪辑师视图 + 离线缓存接口
+episode_number.py    — 集号识别单源模块（deliver/preview 共用）
+output_dir_util.py   — 成片/交付目录名统一解析（唯一来源）
 watcher.py           — Watchdog 后台线程
+local_project.py     — 本地剪辑项目创建 + 素材拉取（只拉负责集，扁平到 01原素材/第N集）
+project_scan_service.py — 制作部源定时自动扫描后台线程
 db.py                — SQLite ORM + 建表迁移 + 用户设置(key-value)
 utils.py             — 共享工具函数
 main_desktop.py      — 桌面版入口（托盘 + 全局热键 RegisterHotKey）
@@ -130,22 +144,33 @@ main_desktop.py      — 桌面版入口（托盘 + 全局热键 RegisterHotKey�
 ### 前端模块拆分
 
 ```
-templates/index.html ── 骨架 HTML + 内联样式（1028 行）
+templates/index.html ── 骨架 HTML + 内联样式（1484 行）
 
 static/js/
-├── core.js              (1064 行) — Dashboard 渲染 / 数据看板 / 快捷键 / 剪辑提醒
-├── project.js           (234 行)  — 项目加载 / 月份 merge / 名称去重
-├── episode.js           (598 行)  — 分集详情 / 缺集扫描 / setProjectMonth
-├── fenji-assign.js      (1184 行) — 分集分配 / 人员模板 / Excel同步
-├── fenji-init.js        (51 行)   — 分集初始化
-├── deliverables.js      (329 行)  — 成片/修改预览面板
+├── wb-shared.js         (77 行)   — 全局共享工具 + window.WB 命名空间（最先加载，含统一转义 escHtml）
+├── core.js              (1670 行) — Dashboard 渲染 / 数据看板 / 快捷键 / 剪辑提醒
+├── project.js           (263 行)  — 项目加载 / 月份 merge / 名称去重
+├── episode.js           (868 行)  — 分集详情 / 缺集扫描 / setProjectMonth
+├── fenji-core.js        (67 行)   — 公共分集工具 FenjiCore（分集解析/去重）
+├── fenji-assign.js      (1217 行) — 分集分配 / 人员模板 / Excel同步
+├── fenji-init.js        (55 行)   — 分集初始化
+├── deliverables.js      (550 行)  — 成片/修改预览面板
 ├── deliver-batch.js     (212 行)  — 批量回传进度
-├── deliver-events.js    (373 行)  — 回传事件 + 完成弹窗
-├── preview.js           (122 行)  — 视频预览弹窗
-├── team.js              (448 行)  — 团队成员 + 设置 + NAS路径管理 + 快捷键录制
-├── qa.js                (1087 行) — 质检中心 + 批量质检
-├── tabs.js              (246 行)  — 月度报告 / 任务中心
-└── app.js               (67 行)   — 应用初始化 + SSE + 定时任务
+├── deliver-events.js    (352 行)  — 回传事件 + 完成弹窗
+├── preview.js           (121 行)  — 视频预览弹窗
+├── team.js              (477 行)  — 团队成员 + 设置 + NAS路径管理 + 快捷键录制
+├── qa.js                (993 行)  — 质检中心 + 批量质检
+├── tabs.js              (376 行)  — 月度报告 / 任务中心
+├── insights.js          (507 行)  — 数据洞察 / 交付日历 / 项目档案导出
+├── data-center.js       (485 行)  — 任务中心 / 数据看板强化
+├── wb-features.js       (245 行)  — 剪辑师视图 WB.editor / 离线只读 WB.offline
+├── wb-mobile.js         (1185 行) — 手机端专属界面（底部导航/卡片/全屏详情）
+├── command-palette.js   (182 行)  — 全局命令面板 / 搜索
+├── notifications.js     (164 行)  — 桌面通知
+├── nameplate.js         (180 行)  — 人名条识别插件 前端逻辑
+├── backup.js            (74 行)   — 数据备份前端
+├── thumbnail.js         (72 行)   — 视频缩略图
+└── app.js               (65 行)   — 应用初始化 + SSE + 定时任务
 ```
 
 ### 数据流向
@@ -159,7 +184,7 @@ static/js/
 ┌────────────────────▼────────────────────────────────────────┐
 │ Flask 后端 0.0.0.0:8089  (waitress WSGI 生产模式)          │
 │                                                             │
-│  app.py (1207行)                                            │
+│  app.py (1213行)                                            │
 │  ├── /api/projects            → ScanMixin.get_projects     │
 │  ├── /api/project_months      → SELECT project_month 专门接口│
 │  ├── /api/project/<n>/update_month  → 月份下拉框持久化       │
@@ -205,37 +230,46 @@ Drama-Workspace/
 │
 ├── 🐍 backend/                    # ═══════ Python 后端 ═══════
 │   ├── __init__.py                # 包初始化：导出 create_app / db
-│   ├── app.py                     # Flask 主入口 + 核心路由（1207 行）
-│   ├── enhanced_routes.py         # 扩展路由：团队/分集/Excel同步/质检/设置（1195 行）
-│   ├── bulk_api.py                # 批量操作/任务中心/月度报告/数据看板（369 行）
+│   ├── app.py                     # Flask 主入口 + 核心路由（1213 行）
+│   ├── enhanced_routes.py         # 扩展路由：团队/分集/Excel同步/质检/设置（1245 行）
+│   ├── features.py                # 融合路由：待办/洞察/交付日历/项目档案导出（1106 行）
+│   ├── bulk_api.py                # 批量操作/任务中心/月度报告/数据看板（406 行）
 │   ├── nameplate.py               # 人名条插件 Web 接入层（/api/nameplate/*）
-│   ├── scan.py ⭐ Mixin           # 项目扫描 + 按名称去重（481 行）
-│   ├── sync.py ⭐ Mixin           # robocopy + Shell.Application.CopyHere（597 行）
-│   ├── deliver.py ⭐ Mixin        # 成片/修改/交付 三场景回传 + 进度追踪（2081 行）
-│   ├── preview.py ⭐ Mixin        # 视频路径解析 + 跨盘 fallback（333 行）
-│   ├── sync_engine.py             # 兼容桥：从 app 导入 Mixin + 缓存持久化
-│   ├── db.py                      # SQLite ORM + 建表 + 用户设置（704 行）
-│   ├── fenji.py                   # 分集分配逻辑（83 行）
-│   ├── fenji_exporter.py          # Excel 模板导出 + 追加写入（156 行）
-│   ├── qa_engine.py               # 视频质检引擎（940 行）
-│   ├── detection.py               # OpenCV 黑帧/花屏/PSNR/SSIM（1244 行）
-│   ├── watcher.py                 # Watchdog 后台线程（234 行）
+│   ├── scan.py ⭐ Mixin           # 项目扫描 + 按名称去重（427 行）
+│   ├── sync.py ⭐ Mixin           # robocopy + Shell.Application.CopyHere（637 行）
+│   ├── deliver.py ⭐ Mixin        # 成片/修改/交付 三场景回传 + 进度追踪（2022 行）
+│   ├── preview.py ⭐ Mixin        # 视频路径解析 + 跨盘 fallback（424 行）
+│   ├── sync_engine.py             # 兼容桥：组装各 Mixin + 缓存持久化
+│   ├── db.py                      # SQLite ORM + 建表 + 用户设置（916 行）
+│   ├── fenji.py                   # 分集分配逻辑
+│   ├── fenji_exporter.py          # Excel 模板导出 + 追加写入
+│   ├── fenji_parser.py            # ⭐ 分集解析统一口径（三处共用）
+│   ├── qa_engine.py / qa_toolkits.py  # 视频质检引擎 + 质检工具（黑帧/花屏/PSNR）
+│   ├── detection.py               # OpenCV 黑帧/花屏/PSNR/SSIM（1256 行）
+│   ├── watcher.py                 # Watchdog 后台线程
+│   ├── local_project.py           # ⭐ 本地剪辑项目创建 + 素材拉取（只拉负责集，扁平到 01原素材）
+│   ├── project_scan_service.py    # ⭐ 制作部源定时自动扫描后台线程
+│   ├── episode_number.py          # ⭐ 集号识别单源模块（deliver/preview 共用）
+│   ├── commission.py              # 提成工具接入层（launch/月度/个人卡片路由）
+│   ├── commission_service.py      # 绩效/提成纯函数计算（读 plugins/commission/config.json）
+│   ├── schedule_api.py            # 剪辑师视图 / 离线缓存接口
 │   ├── version.py                 # ⭐ 统一版本号来源（VERSION / APP_TITLE）
 │   ├── config.py                  # (废弃) 旧 JSON 配置模块，已由 config.yaml 取代
 │   ├── config.example.yaml        # 📋 配置模板（公开，不含真实路径）
 │   ├── config.yaml                # ⚠️ 唯一配置源（已加入 .gitignore，含 NAS/服务/质检路径）
 │   ├── output_dir_util.py         # ⭐ 成片/交付目录名统一解析（唯一来源）
-│   ├── schedule_api.py            # 剪辑师视图 / 离线缓存接口
 │   ├── utils.py                   # 共享工具函数
 │   └── report_template.py         # 质检报告 HTML 模板
 │
 ├── 🖥️ templates/
-│   └── index.html                 # 单页应用骨架（1028 行 · 样式内联）
+│   └── index.html                 # 单页应用骨架（1484 行 · 样式内联）
 │
 ├── 🧩 static/js/                  # ═══════ 前端模块化 ═══════
+│   ├── wb-shared.js               # 全局共享工具 + window.WB 命名空间（最先加载，统一转义）
 │   ├── core.js                    # Dashboard / 数据看板 / 快捷键 / 剪辑提醒
 │   ├── project.js                 # 项目加载 / 名称去重 / localStorage merge
 │   ├── episode.js                 # 缺集扫描 / setProjectMonth 下拉框
+│   ├── fenji-core.js              # 公共分集工具 FenjiCore（解析/去重）
 │   ├── fenji-assign.js            # Chips 可视化分配 / 人员模板 / Excel同步
 │   ├── fenji-init.js              # 分集初始化
 │   ├── deliverables.js            # 成片/修改预览
@@ -245,18 +279,28 @@ Drama-Workspace/
 │   ├── team.js                    # 团队成员 / 设置 / NAS路径 / 快捷键录制
 │   ├── qa.js                      # 质检中心 / 批量质检
 │   ├── tabs.js                    # 月度报告 / 任务中心
+│   ├── insights.js                # 数据洞察 / 交付日历 / 项目档案导出
+│   ├── data-center.js             # 任务中心 / 数据看板强化
 │   ├── nameplate.js               # 人名条识别插件 前端逻辑
-│   ├── wb-shared.js                # 全局共享工具 + window.WB 命名空间（最先加载）
 │   ├── wb-features.js             # 剪辑师视图 / 离线缓存
 │   ├── wb-mobile.js               # 手机端专属界面（底部导航/卡片/全屏详情）
+│   ├── command-palette.js         # 全局命令面板 / 搜索
+│   ├── notifications.js           # 桌面通知
+│   ├── backup.js / thumbnail.js   # 数据备份 / 视频缩略图
 │   └── app.js                     # 应用初始化 + SSE + 定时任务
 │
 ├── 🧩 plugins/                    # ═══════ 扩展插件 ═══════
-│   └── nameplate/                 # 人名条识别工具（独立脚本，功能完整保留）
-│       ├── script_parser.py       # docx 剧本解析核心（GUI + CLI）
-│       ├── make_icon.py / icon.ico
-│       ├── start_tool.bat         # 独立启动（双击运行 GUI）
-│       └── examples/              # 示例剧本
+│   ├── nameplate/                 # 人名条识别工具（独立脚本，功能完整保留）
+│   │   ├── script_parser.py       # docx 剧本解析核心（GUI + CLI）
+│   │   ├── make_icon.py / icon.ico
+│   │   ├── start_tool.bat         # 独立启动（双击运行 GUI）
+│   │   └── examples/              # 示例剧本
+│   ├── commission/                # 提成/绩效独立桌面工具（tkinter GUI）
+│   │   ├── ai_commission_gui.py   # 主 GUI（Excel 导出 + 仪表盘 HTML）
+│   │   ├── src/                   # 计算核心（generate_commission.py 等）
+│   │   ├── config.json            # ⚠️ 角色/提成规则唯一配置源（主应用亦读取）
+│   │   └── 启动工具.vbs           # 独立启动
+│   └── dramatool/                 # 拆集重命名工具（独立 GUI）
 │
 ├── 📱 mobile-app/                 # ═══════ 安卓手机端（WebView 壳）═══════
 │   └── WorkbenchMobile/          # Android Studio 项目（APK 源码）
@@ -266,7 +310,8 @@ Drama-Workspace/
     ├── output_dirs_cache.json     # 上映单集版目录缓存（持久化）
     ├── fenji_templates/           # 分集导出模板
     ├── fenji_targets/             # 分集累积目标文件
-    └── config.json                # 前端运行时配置
+    ├── backups/                   # 数据库备份
+    └── thumbs/                    # 视频缩略图缓存
 ```
 
 ---
@@ -313,8 +358,8 @@ start.vbs            # 后台静默启动（无 CMD 窗口）
 
 ```
 ============================================================
-  🎬 视频工作台 v2.6.0
-  📦 统一集成: 项目管理 + NAS同步 + 分集 + 质检 + 数据看板
+  🎬 视频工作台 v3.4.0
+  📦 统一集成: 项目管理 + NAS同步 + 分集 + 质检 + 数据看板 + 移动端
 ============================================================
   🌐 访问地址: http://127.0.0.1:8089/
   💾 数据库:   data/workbench.db
@@ -398,6 +443,10 @@ start.vbs            # 后台静默启动（无 CMD 窗口）
 | `POST` | `/api/project/<name>/custom_status` | 更新项目状态 |
 | `POST` | `/api/project/<name>/open_folder` | 用资源管理器打开 |
 | `POST` | `/api/project/<name>/check_on_group` | 检查是否已在组盘 |
+| `POST` | `/api/project/<name>/detect_total_episodes` | 自动推断总集数（扫素材文件夹，组内/制作部双路径） |
+| `POST` | `/api/project/<name>/set_episodes` | 更新 current/total_episodes（供 CEP 插件等外部工具调用） |
+| `POST` | `/api/project/<name>/create_local_project` | 异步创建本地剪辑项目 + 拉取我负责集素材 |
+| `GET` | `/api/project/<name>/local_project_progress` | 查询本地剪辑项目创建进度 |
 
 ### 📑 分集
 
@@ -649,9 +698,21 @@ Python 3.10+ 标准库：`subprocess`（robocopy）· `sqlite3` · `threading`�
 - [x] **v2.4** — 分集管理持久化（模板/目标文件/历史记录）+ 人员模板 + 快捷键录制自定义
 - [x] **v2.5** — 全局搜索/唤醒系统热键（RegisterHotKey）+ 搜索定位卡片动画 + 回传进度与完成反馈
 - [x] **v2.6** — 工作量/数据看板 + Excel 分集同步 + 剪辑完成自动提醒 + NAS 路径自定义
-- [ ] **v2.7** — Premiere Pro CEP 插件联动（字幕自动导入）
-- [ ] **v2.8** — 多人实时协作（WebSocket 推送状态变更）
-- [ ] **v2.9** — 移动端适配（响应式 Dashboard）
+- [x] **v2.7** — 移动端适配 + 离线只读缓存 + 剪辑师个人视图
+- [x] **v2.8** — 任务中心/待办重构（看板 + 拖拽 + 截止日期/负责人）
+- [x] **v2.9** — 提成/绩效全链路（分集→绩效→提成）+ 个人工作量卡片 + 组长组奖
+- [x] **v3.0** — 统一统计口径（三统计端点）+ 统一分集解析器 + 前端 XSS 收尾 + 统一转义
+- [x] **v3.1** — 待办弹窗交互优化 + 交付日历增强（延迟预警/按时交付率）+ 统一编码（GBK/UTF-8）
+- [x] **v3.2** — 手机端/离线缓存/剪辑师视图 + 统一目录解析 + 数据看板增强 + 线程安全加固
+- [x] **v3.3** — 桌面端性能与UI + 移动端推送/UI/性能优化 + 日志治理 + 运行健壮性修复
+- [x] **v3.4** — 本地剪辑项目一键创建（只拉负责集素材）+ 制作部自动扫描 + 递归扫描项目识别修复 + 集号识别单源化
+
+### 下一步（规划）
+- [ ] 拆分巨型文件（deliver.py 2022 行 / app.py / enhanced_routes.py / core.js）
+- [ ] 前端引入轻量构建（Vite/esbuild）收敛全局变量 + 内联事件收尾
+- [ ] 提成 GUI 算法与主应用单源化
+- [ ] Premiere Pro CEP 插件联动（字幕自动导入）
+- [ ] 多人实时协作（WebSocket 推送状态变更）
 
 ---
 

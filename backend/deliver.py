@@ -14,6 +14,8 @@ import json
 from datetime import datetime
 from scan import _natural_key, _quick_find_file
 from utils import decode_output
+# 集号识别单源模块：集号正则 + 提取逻辑统一在此，deliver/preview 共用（避免漂移）
+import episode_number
 
 logger = logging.getLogger(__name__)
 
@@ -189,12 +191,8 @@ def _shell_copy_files_batch(src_dir, file_names, dst_dir):
 
 
 class DeliverMixin:
-    _EP_PATTERNS = [
-        re.compile(r'(?i)(?:^|[^a-z0-9])EP[_\s\-]?(\d{1,3})(?!\d)'),
-        re.compile(r'(?i)(?:^|[^a-z0-9])S\d{1,2}E[_\s\-]?(\d{1,3})(?!\d)'),
-        re.compile(r'第[_\s\-]*(\d{1,3})[集话]'),
-        re.compile(r'(?:[_\-\s]|^)(\d{1,3})(?:[_\-\s\.]|$)'),
-    ]
+    # 集号识别正则统一来自 episode_number 模块（单源，preview.py 亦共用）
+    _EP_PATTERNS = episode_number.EP_PATTERNS
 
     def deliver_file(self, project_name, file_path):
         """手动回传成片：从组内NAS 01上映单集版 → 制作部NAS对应项目的01上映单集版"""
@@ -667,13 +665,19 @@ class DeliverMixin:
         return True, "项目已移入 00已完成"
 
     def set_custom_status(self, project_name, status):
-        """设置项目的自定义状态（剪辑中/审核中/修改中/待交付/已完成）。
+        """设置项目的自定义状态。
+
+        状态动作：
         - 设为"修改中"时，在01上映单集版目录中新建以日期命名的文件夹（如0810修改）。
         - 设为"待交付"时，自动将交付文件夹模板复制到项目根目录。
         - 设为"已完成"时，自动将组内NAS项目移动到 00已完成 子目录。
+        审核循环：支持"审核中 → 修改中 → 二审中 → 修改中 → 三审中..."动态递增，
+        状态名含"N审中"（二审/三审/四审...），由 _next_review_status 自动推进。
         """
-        valid_statuses = ["", "分集中", "剪辑中", "审核中", "修改中", "交付中", "待交付", "待质检", "质检中", "已完成"]
-        if status not in valid_statuses:
+        # 基础状态 + 动态"N审中"（二审/三审/四审...）
+        base_statuses = ["", "分集中", "剪辑中", "待提交审核", "审核中", "修改中",
+                         "交付中", "待交付", "待质检", "质检中", "已完成"]
+        if status not in base_statuses and not self._is_review_status(status):
             return False, "无效的状态: " + str(status)
 
         proj = self.db.get_project(project_name)
@@ -683,6 +687,14 @@ class DeliverMixin:
         old_status = proj.get("custom_status", "")
         self.db.update_project_status(project_name, custom_status=status)
         logger.info("项目状态变更: %s %s -> %s", project_name, old_status, status)
+
+        # 状态变更写入审计日志（供项目时间线展示）
+        try:
+            self.db.add_audit_log(
+                project_name, "状态变更",
+                "%s -> %s" % (old_status or "未设置", status))
+        except Exception as e:
+            logger.warning("状态变更写审计日志失败: %s", e)
 
         # 融合功能：状态改为"已完成"时，自动记录交付/归档日期到日历（若未设置）
         if status == "已完成":
@@ -718,6 +730,29 @@ class DeliverMixin:
             return True, "状态已更新为已完成，" + msg
 
         return True, "状态已更新为: " + status
+
+    def _is_review_status(self, status):
+        """判断状态是否为"N审中"（二审/三审/四审...）。"""
+        s = str(status or "").strip()
+        # 匹配 "X审中"（X为中文数字：二/三/四/五/六/七/八/九/十）
+        return bool(re.match(r'^[二三四五六七八九十]审中$', s))
+
+    def _next_review_status(self, old_status):
+        """根据当前状态推进到下一审核轮次。
+        审核中(第1次) 修改后 → 二审中；二审中 修改后 → 三审中；以此类推。"""
+        cn_num = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+        s = str(old_status or "").strip()
+        if s == "审核中" or s == "待提交审核":
+            return "二审中"
+        if s == "修改中":
+            return "审核中"  # 修改中提交 → 若首次则审核中（由调用方判断）
+        # 解析当前是第几审
+        m = re.match(r'^([一二三四五六七八九十])审中$', s)
+        if m:
+            idx = cn_num.index(m.group(1))
+            if idx < len(cn_num) - 1:
+                return cn_num[idx + 1] + "审中"
+        return "审核中"
 
     def _create_revision_folder(self, project_name):
         """在项目的01上映单集版目录中新建以日期命名的修改文件夹（如0810修改）。
@@ -1008,8 +1043,8 @@ class DeliverMixin:
                     src_folder, dst_folder, total_size,
                     "success", "交付文件夹回传成功: " + folder_name + " (" + str(file_count) + " 个文件)")
 
-                # 回传完成后自动变状态为"待质检"
-                self.set_custom_status(project_name, "待质检")
+                # 回传完成后自动变状态为"已完成"（新流程：质检通过→交付中→交付完成→已完成）
+                self.set_custom_status(project_name, "已完成")
                 self.db.update_project_status(
                     project_name, delivery_status="delivered",
                     last_delivered_at=now,
@@ -1203,7 +1238,8 @@ class DeliverMixin:
             task["finished_at"] = now
 
         if any_ok:
-            self.set_custom_status(project_name, "待质检")
+            # 交付回传完成 → 已完成（新流程：质检通过→交付中→交付完成→已完成）
+            self.set_custom_status(project_name, "已完成")
             self.db.update_project_status(
                 project_name,
                 delivery_status="delivered",
@@ -1576,33 +1612,14 @@ class DeliverMixin:
         return count
 
     def _extract_episode_number(self, filename):
-        """从单个文件名里提取集号，失败返回 None。"""
-        base = os.path.splitext(filename)[0]
-        hits = []
-        for idx, pat in enumerate(self._EP_PATTERNS):
-            for m in pat.finditer(base):
-                try:
-                    n = int(m.group(1))
-                except (TypeError, ValueError):
-                    continue
-                if 1 <= n <= 999:
-                    hits.append((idx, n))
-                    break  # 每个 pattern 最多取一次匹配，避免一个文件名里出现多个独立数字
-        if not hits:
-            return None
-        # 优先级：pattern 索引越小越优先
-        hits.sort(key=lambda x: x[0])
-        return hits[0][1]
+        """从单个文件名里提取集号，失败返回 None。
+        集号识别规则单源在 episode_number.extract_episode_number。"""
+        return episode_number.extract_episode_number(filename)
 
     def _editor_for_filename(self, filename, editor_map):
         """根据文件名提取集号，并从 {集号:剪辑师} 映射中返回该集剪辑师。
-        集号匹配失败或无映射时返回 ''。editor_map 为空时跳过，避免无谓计算。"""
-        if not editor_map:
-            return ""
-        n = self._extract_episode_number(filename)
-        if n is None:
-            return ""
-        return editor_map.get(str(n), "")
+        集号匹配失败或无映射时返回 ''。editor_map 为空时跳过。"""
+        return episode_number.editor_for_filename(filename, editor_map)
 
     def _collect_video_filenames(self, project_name, which="group"):
         """收集项目视频文件名列表。which: group=组内成片, dest=制作部成片"""

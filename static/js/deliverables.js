@@ -83,6 +83,24 @@ async function refreshDeliverablesList(){
             _deliverablesState.deliveryCheck = resp.delivery_check || null;
         }
         renderDeliverablesModal();
+
+        // 自动全选 + 批量回传（审核流程：二部项目待提交审核/修改回传）
+        if(window._autoDeliverAfterLoad){
+          var auto = window._autoDeliverAfterLoad;
+          if(auto.name === _deliverablesState.projectName && _deliverablesState.files && _deliverablesState.files.length){
+            window._autoDeliverAfterLoad = null;
+            // 全选所有文件
+            _deliverablesState.selected = {};
+            _deliverablesState.files.forEach(function(f){ _deliverablesState.selected[f.name] = true; });
+            renderDeliverablesModal();
+            // 自动触发批量回传，完成后改状态
+            if(typeof deliverBatch === 'function'){
+              // 挂一个回调：回传完成改状态
+              window._afterDeliverBatch = auto;
+              deliverBatch();
+            }
+          }
+        }
     }catch(e){
         console.error("[deliverables]", e);
         var c2 = document.getElementById('detailContent');
@@ -293,18 +311,26 @@ function renderDeliverablesModal(){
                 var bad = dc.folders.filter(function(f){ return !f.ok; });
                 var good = dc.folders.filter(function(f){ return f.ok; });
                 var header = '<div style="padding:10px 16px;background:#fff3cd;color:#856404;border-bottom:1px solid #ffeaa7;font-size:13px;font-weight:600">⚠️ 交付文件不齐套（共 ' + dc.folders.length + ' 个文件夹，缺 ' + bad.length + ' 个）</div>';
-                var gridHtml = '<div style="padding:8px 16px;background:#fffdf0;border-bottom:1px solid #ffeaa7;font-size:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px 16px">';
+                var gridHtml = '<div style="padding:8px 16px;background:#fffdf0;border-bottom:1px solid #ffeaa7;font-size:12px">';
                 dc.folders.forEach(function(f){
                   var color = f.ok ? '#2E7D32' : '#c5221f';
                   var emoji = f.ok ? '✅' : '❌';
                   var label = f.ok
                     ? (f.actual + '/' + f.expected)
                     : (f.actual + '/' + f.expected + ' 缺 ' + Math.max(0, f.expected - f.actual));
-                  gridHtml += '<div style="display:flex;align-items:center;gap:6px">'
+                  gridHtml += '<div style="display:flex;align-items:center;gap:6px;padding:3px 0">'
                     + '<span>' + emoji + '</span>'
-                    + '<span style="color:#1d1d1f">' + htm(f.name) + '</span>'
+                    + '<span style="color:#1d1d1f;font-weight:600">' + htm(f.name) + '</span>'
                     + '<span style="color:' + color + ';font-weight:600;margin-left:auto">' + label + '</span>'
                     + '</div>';
+                  // 缺失集数：显示具体缺哪一集 + 剪辑师
+                  if(!f.ok && f.missing_episodes && f.missing_episodes.length){
+                    var epsHtml = f.missing_episodes.map(function(me){
+                      var ed = (me.editor || '').trim();
+                      return '<span style="display:inline-block;background:#ffe8e8;color:#c5221f;border:1px solid #f5c6c6;border-radius:4px;padding:1px 6px;margin:2px 4px 2px 0;font-size:11px">第' + me.episode + '集' + (ed ? ' · 👤' + htm(ed) : '') + '</span>';
+                    }).join('');
+                    gridHtml += '<div style="padding:0 0 6px 24px;color:#666">缺：' + (epsHtml || '（无法识别集号）') + '</div>';
+                  }
                 });
                 gridHtml += '</div>';
                 return header + gridHtml;
@@ -344,7 +370,8 @@ function renderDeliverablesModal(){
                 + '<b>' + (_m === 'delivery' ? '全选交付文件夹' : '全选修改文件夹') + '</b>'
                 + '<span style="color:#86868b">已选文件夹 ' + selFolderCount + ' / ' + _deliverablesState.folders.length + '</span>'
                 + '<span style="flex:1"></span>'
-                + '<button class="btn btn-sm" onclick="delivNewFolder()" style="padding:2px 10px;font-size:11px" title="在当前位置新建文件夹">📁 新建文件夹</button>'
+                + '<button class="btn btn-sm" onclick="delivNewFolder()" style="padding:2px 10px;font-size:11px" title="在当前位置新建文件夹（默认当天日期+修改）">📁 新建文件夹</button>'
+                + (_m === 'revising' ? '<button class="btn btn-sm" onclick="delivNewTodayRevFolder()" style="padding:2px 10px;font-size:11px;background:#fff3cd;color:#856404" title="一键新建当天日期的修改文件夹（如 0825修改）">📅 当日修改文件夹</button>' : '')
                 + '<button class="btn btn-sm btn-primary" onclick="deliverFolders()" style="padding:2px 10px;font-size:11px"' + (selFolderCount===0?' disabled':'') + '>⚡ ' + (_m === 'delivery' ? '回传到制作部' : '回传选中文件夹') + '</button>'
               + '</div>'
             : '';
@@ -519,13 +546,20 @@ function _delivCopyFallback(text){
   }
 }
 
-// ===== 预览界面：新建文件夹 =====
+// ===== 预览界面：新建文件夹（默认填入当天日期+修改） =====
+function _todayRevFolderName(){
+  var d = new Date();
+  var mm = String(d.getMonth()+1).padStart(2,'0');
+  var dd = String(d.getDate()).padStart(2,'0');
+  return mm + dd + '修改';
+}
 async function delivNewFolder(){
   var name = _deliverablesState.projectName;
   var mode = _deliverablesState.mode;
   var subpath = _deliverablesState.subpath || '';
   if(!name){ toast('缺少项目', 'warning'); return; }
-  var newName = window.prompt('请输入新文件夹名称');
+  // 默认填入"当天日期+修改"（如 0825修改），可直接确定或修改
+  var newName = window.prompt('请输入新文件夹名称（默认当天日期+修改）：', _todayRevFolderName());
   if(!newName || !newName.trim()) return;
   try{
     var r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/preview_folder', {
@@ -536,6 +570,28 @@ async function delivNewFolder(){
       return;
     }
     toast('✅ 已创建文件夹: ' + r.path, 'success');
+    refreshDeliverablesList();
+  }catch(e){
+    toast('❌ 创建失败: ' + e.message, 'error');
+  }
+}
+
+// ===== 一键新建"当日修改文件夹"（直接确定，无需改输入框） =====
+async function delivNewTodayRevFolder(){
+  var name = _deliverablesState.projectName;
+  var mode = _deliverablesState.mode;
+  var subpath = _deliverablesState.subpath || '';
+  if(!name){ toast('缺少项目', 'warning'); return; }
+  var newName = _todayRevFolderName();
+  try{
+    var r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/preview_folder', {
+      mode: mode, subpath: subpath, folder: '', action: 'mkdir', name: newName
+    });
+    if(!r || !r.ok){
+      toast(r && r.message || '创建失败', 'error');
+      return;
+    }
+    toast('✅ 已创建当日修改文件夹: ' + r.path, 'success');
     refreshDeliverablesList();
   }catch(e){
     toast('❌ 创建失败: ' + e.message, 'error');

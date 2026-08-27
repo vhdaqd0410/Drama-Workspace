@@ -29,6 +29,31 @@ def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _coerce_priority(value):
+    """把待办 priority 规范化为整数，杜绝 int('高') 之类崩溃。
+
+    兼容三种来源：
+      - 数值型/数字字符串（新式：priority 即数字，越大越靠前）
+      - 中文 '高/中/低'（历史遗留）
+      - 英文 'high/medium/low'（任务看板分组）
+    无法识别的输入统一回退到 0，保证任何前端传参都不会抛 ValueError。
+    """
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip().lower()
+    if not text:
+        return 0
+    if text.isdigit() or (text.lstrip('-').isdigit()):
+        try:
+            return int(text)
+        except (ValueError, OverflowError):
+            return 0
+    mapping = {"高": 3, "high": 3, "中": 2, "medium": 2, "低": 1, "low": 1}
+    return mapping.get(text, 0)
+
+
 class Database:
     """Per-thread-connection, WAL-enabled SQLite wrapper."""
 
@@ -891,7 +916,7 @@ class Database:
         with self.get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO project_todos(project_name, text, priority, status, remind_at, due_date, assignee) VALUES(?,?,?,?,?,?,?)",
-                (project_name, text, int(priority or 0), str(status), str(remind_at or ''),
+                (project_name, text, _coerce_priority(priority), str(status), str(remind_at or ''),
                  str(due_date or ''), str(assignee or '')))
             return cur.lastrowid
 
@@ -905,7 +930,7 @@ class Database:
                              (str(text).strip(), todo_id))
             if priority is not None:
                 conn.execute("UPDATE project_todos SET priority=? WHERE id=?",
-                             (int(priority or 0), todo_id))
+                             (_coerce_priority(priority), todo_id))
             if status is not None:
                 conn.execute("UPDATE project_todos SET status=? WHERE id=?",
                              (str(status), todo_id))

@@ -72,6 +72,67 @@ def compute_overview_stats(production, group_all, group_completed, now_month=Non
     }
 
 
+# ============ 递归扫描项目识别 ============
+# 项目编号模式：任意位置 4-6 位连续数字即视为项目编号
+# （兼容 00_10018_名称 / H0189-11587《剧名》 / 1234_5678_名称 等各类命名）
+_PROJECT_NUM_RE = re.compile(r'\d{4,6}')
+# 明确是"分类/汇总"目录的词（不是项目，需继续往下递归或跳过）。
+# 注意：不含"海外/国内"——这些词会出现在项目名里（如《...国内版/海外版》），
+# 部门区分由源路径(_get_department_label)处理，不应在项目识别时误伤。
+_CATEGORY_WORDS = ('类', '合集', '中转', '存档', '备份', '模板')
+# 项目级结构子目录：含这些子目录的目录基本可判定为项目
+_PROJECT_STRUCT_DIRS = ('01上映单集版', '000交付', '分集', '成片', '制作端对标', '运营对标')
+
+
+def _looks_like_project(dirpath, dirname):
+    """判断一个目录是否"像项目"（而非分类/汇总目录）。
+    依据：1) 名称含项目编号（4-6位连续数字）；2) 内含项目级结构子目录。
+    都不满足 → 视为分类目录（继续递归）。"""
+    if not dirname or dirname.startswith('.'):
+        return False
+    # 排除明确的分类/汇总词
+    if any(w in dirname for w in _CATEGORY_WORDS):
+        return False
+    # 1) 名称含项目编号（4-6 位连续数字）
+    if _PROJECT_NUM_RE.search(dirname):
+        return True
+    # 2) 内含项目级结构子目录
+    try:
+        for entry in os.listdir(dirpath):
+            if any(s in entry for s in _PROJECT_STRUCT_DIRS):
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def _is_skippable_dir(dirname):
+    """递归扫描时跳过明显非项目、非分类的目录（模板/临时/系统目录）。"""
+    if not dirname or dirname.startswith('.'):
+        return True
+    if dirname.startswith('00') and 'id' in dirname.lower():
+        return True  # 00_id_ 等占位/系统目录
+    if re.match(r'^\d{4}月$', dirname):  # 月份目录（父层处理）
+        return False
+    return False
+
+
+def _is_template_dir(dirname):
+    """判断 00 开头的目录是否为"模板/占位目录"（应跳过）。
+
+    七部等部门的项目命名是 00编号_项目名（如 00153_11005_医统天下），
+    以 00 开头但确实是项目，不能跳过。而 00模板/0000某人 等是模板/占位。
+    精确规则：00 开头且后面紧跟数字 + _ 或 - 分隔（项目编号格式）→ 是项目，保留；
+    否则（00 + 中文/字母、0000+中文）→ 模板/占位，跳过。"""
+    if not dirname or not dirname.startswith('00'):
+        return False
+    # 00 + 编号 + 分隔符（_ 或 -）→ 项目编号格式（如 00153_11005_xxx），保留
+    if re.match(r'^00\d+[-_]', dirname):
+        return False
+    # 其余 00 开头的视为模板/占位
+    return True
+
+
 def _natural_key(text):
     """自然排序键：将数字段转为整数，使 '2' 排在 '10' 前面。"""
     parts = re.split(r'(\d+)', str(text))
@@ -142,7 +203,12 @@ class ScanMixin:
 
     def scan_projects(self):
         """扫描所有制作部 NAS 源中的项目列表，写入数据库。
-        自动识别月份子目录（如 7月/8月），进入下一层扫描实际项目。
+
+        支持两种目录结构：
+        - 直接结构：根目录第一层就是项目
+        - 嵌套结构：根 → 分类/月份子目录 → 项目（如漫剧七部：分类 → 项目）
+        递归扫描并用 _looks_like_project 识别真正的项目文件夹，避免把分类目录当项目。
+        可通过 config.yaml 每源配置 recursive_depth 限制递归深度（默认 3）。
         """
         roots = self.nas.get("production_roots", [])
         if not roots:
@@ -157,47 +223,56 @@ class ScanMixin:
                 logger.warning("制作部 NAS 路径不存在，跳过: %s", root)
                 continue
 
-            # 先看第一层是否都是月份目录，如果是则进入第二层
+            # 该源可配置的递归深度（默认 3，0 表示只扫第一层）
+            src_cfg = (self.nas.get("production_roots_config") or {}).get(root, {}) or {}
             try:
-                entries = os.listdir(root)
-            except OSError:
-                continue
+                max_depth = int(src_cfg.get("recursive_depth", 3))
+            except (TypeError, ValueError):
+                max_depth = 3
+            if max_depth < 0:
+                max_depth = 3
 
-            dirs = [e for e in entries
-                    if os.path.isdir(os.path.join(root, e))]
-            month_dirs = [d for d in dirs if month_pattern.match(d)]
-
-            if month_dirs and len(month_dirs) / max(len(dirs), 1) > 0.3:
-                # 大部分子目录是月份 → 进入每个月目录扫描实际项目
-                logger.info("检测到月份子目录结构: %s，进入深层扫描", root)
-                scan_dirs = [os.path.join(root, md) for md in month_dirs]
-            else:
-                # 正常结构 → 第一层就是项目
-                scan_dirs = [root]
-
-            for parent in scan_dirs:
+            def _scan_dir(base, depth):
+                """递归扫描 base 目录下的项目。depth 为当前层级（根=0）。"""
                 try:
-                    children = os.listdir(parent)
+                    entries = os.listdir(base)
                 except OSError:
-                    continue
-                for name in children:
-                    full = os.path.join(parent, name)
-                    if not os.path.isdir(full):
-                        continue
-                    # 跳过模板/配置目录（00开头的一般是模板）
-                    if name.startswith("00"):
-                        continue
+                    return
+                dirs = [e for e in entries
+                        if os.path.isdir(os.path.join(base, e))
+                        and not _is_skippable_dir(e)]
+                if not dirs:
+                    return
+                # 判断这一层是否是"月份子目录"（如 7月/8月）→ 进入下一层
+                month_dirs = [d for d in dirs if month_pattern.match(d)]
+                is_month_layer = len(month_dirs) / max(len(dirs), 1) > 0.3 if dirs else False
+
+                for name in dirs:
+                    full = os.path.join(base, name)
                     if month_pattern.match(name):
+                        # 月份目录：跳过（父层逻辑已处理），直接递归内部
+                        _scan_dir(full, depth + 1)
                         continue
-                    is_special = name in self.special_projects
-                    sc = self.special_projects.get(name, {})
-                    group_path = os.path.join(self.nas["group_root"], name)
-                    self.db.upsert_project(
-                        name, full, group_path,
-                        source_root=root,
-                        is_special=1 if is_special else 0,
-                        special_config=sc)
-                    all_names.append(name)
+                    if is_month_layer:
+                        # 当前层是月份目录，实际项目在其内部
+                        _scan_dir(full, depth + 1)
+                        continue
+                    # 判断是否为项目
+                    if _looks_like_project(full, name):
+                        is_special = name in self.special_projects
+                        sc = self.special_projects.get(name, {})
+                        group_path = os.path.join(self.nas["group_root"], name)
+                        self.db.upsert_project(
+                            name, full, group_path,
+                            source_root=root,
+                            is_special=1 if is_special else 0,
+                            special_config=sc)
+                        all_names.append(name)
+                    elif depth < max_depth:
+                        # 不是项目 → 可能是分类目录，继续向下递归
+                        _scan_dir(full, depth + 1)
+
+            _scan_dir(root, 0)
 
         logger.info("从 %d 个制作部源扫描到 %d 个项目",
                     len(roots), len(all_names))
@@ -226,7 +301,8 @@ class ScanMixin:
                 full = os.path.join(group_root, name)
                 if not os.path.isdir(full):
                     continue
-                if name.startswith("00"):
+                # 跳过模板/占位目录（00模板/0000某人等），但保留 00编号_项目 这类项目
+                if _is_template_dir(name):
                     continue
                 if month_pattern.match(name):
                     continue
@@ -314,7 +390,8 @@ class ScanMixin:
                 full = os.path.join(group_root, name)
                 if not os.path.isdir(full):
                     continue
-                if name.startswith("00") or month_pattern.match(name):
+                # 跳过模板/占位目录，但保留 00编号_项目 这类项目
+                if _is_template_dir(name) or month_pattern.match(name):
                     continue
 
                 # 从数据库获取项目状态（delivery_status 等）

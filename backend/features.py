@@ -732,12 +732,23 @@ def register_routes(app, db):
         # 5. 审计日志
         try:
             for l in db.get_audit_logs(name, limit=100):
-                events.append({
-                    "time": l.get("created_at", ""), "type": "audit",
-                    "title": "🔧 " + (l.get("action") or "操作"),
-                    "detail": l.get("detail") or "",
-                    "icon": "🔧", "color": "#8e8e93",
-                })
+                action = l.get("action") or ""
+                detail = l.get("detail") or ""
+                # 状态变更事件：单独识别，带原状态->新状态，用醒目图标
+                if action == "状态变更" and "->" in detail:
+                    events.append({
+                        "time": l.get("created_at", ""), "type": "status_change",
+                        "title": "🔁 状态变更",
+                        "detail": detail,
+                        "icon": "🔁", "color": "#0071e3",
+                    })
+                else:
+                    events.append({
+                        "time": l.get("created_at", ""), "type": "audit",
+                        "title": "🔧 " + action,
+                        "detail": detail,
+                        "icon": "🔧", "color": "#8e8e93",
+                    })
         except Exception:
             pass
 
@@ -783,10 +794,13 @@ def register_routes(app, db):
     # ==================== 数据洞察（可选增强：大屏 / 日历 / 导出）====================
     @app.route("/api/insights/summary")
     def features_insights_summary():
-        """KPI 汇总（以当月为基准），口径与 compute_overview_stats 一致。"""
+        """KPI 汇总。口径与 compute_overview_stats 一致。
+        ?month=YYYY-MM 可选，缺省用当月（便于跨端点口径一致性与历史回溯测试）。"""
         try:
             from datetime import datetime
-            month = datetime.now().strftime("%Y-%m")
+            month = (request.args.get("month") or "").strip()
+            if not month or len(month) != 7:
+                month = datetime.now().strftime("%Y-%m")
             data = compute_insights_summary(db, month=month)
             return jsonify({"ok": True, **data})
         except Exception as e:

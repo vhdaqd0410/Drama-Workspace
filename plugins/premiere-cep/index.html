@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>视频工作台</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 连接配置 -->
+    <div class="card" id="configCard">
+      <div class="card-title">🔌 连接视频工作台</div>
+      <label>服务器地址
+        <input id="serverUrl" type="text" value="http://127.0.0.1:8089" placeholder="http://127.0.0.1:8089">
+      </label>
+      <label>API Key
+        <input id="apiKey" type="password" placeholder="工作台的 API Key">
+      </label>
+      <div class="row">
+        <button id="btnConnect" class="primary">检测连接</button>
+        <span id="connStatus" class="status"></span>
+      </div>
+    </div>
+
+    <!-- 当前 Premiere 项目 -->
+    <div class="card">
+      <div class="card-title">🎬 当前 Premiere 项目</div>
+      <div class="info-row"><span class="k">项目名</span><span id="prName" class="v">—</span></div>
+      <div class="info-row"><span class="k">当前序列</span><span id="prSeq" class="v">—</span></div>
+      <div class="info-row"><span class="k">序列数</span><span id="prSeqCount" class="v">—</span></div>
+      <div class="row">
+        <button id="btnRefreshPr">读取项目</button>
+        <button id="btnFind">在工作台查找</button>
+      </div>
+    </div>
+
+    <!-- 工作台项目匹配 -->
+    <div class="card" id="matchCard" style="display:none">
+      <div class="card-title">📁 工作台匹配项目</div>
+      <div class="info-row"><span class="k">项目名</span><span id="wbName" class="v">—</span></div>
+      <div class="info-row"><span class="k">当前状态</span><span id="wbStatus" class="v">—</span></div>
+      <div class="info-row"><span class="k">集数</span><span id="wbEp" class="v">—</span></div>
+      <div class="row">
+        <button id="btnMarkDone" class="primary">✂️ 标记剪辑完成</button>
+        <button id="btnSyncEp">更新当前集数</button>
+      </div>
+      <div class="hint" id="matchHint"></div>
+    </div>
+
+    <div class="footer">视频工作台 CEP 插件 · v1.0</div>
+  </div>
+  <script src="js/panel.js"></script>
+</body>
+</html>

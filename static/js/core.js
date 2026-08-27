@@ -208,8 +208,9 @@ function closeEditCompleteDialog(btn, overlayEl){
 async function confirmEditComplete(name, btn){
   var overlayEl = btn && btn.closest ? btn.closest('.modal-overlay') : null;
   try{
-    await api('POST', '/api/project/' + encodeURIComponent(name) + '/custom_status', { custom_status: '审核中' });
-    toast('✅ ' + name + ' 已进入审核', 'success');
+    // 新流程：成片检测完成后进入"待提交审核"（再由部门流程转入审核中）
+    await api('POST', '/api/project/' + encodeURIComponent(name) + '/custom_status', { custom_status: '待提交审核' });
+    toast('✅ ' + name + ' 已进入待提交审核', 'success');
   }catch(e){
     toast('操作失败: '+e.message, 'error');
   }finally{
@@ -449,6 +450,7 @@ function jumpToProject(name){
   }
   if(name==='qa'){ loadQAProjects(); if(typeof loadQASummary==='function') loadQASummary(); }
   if(name==='nameplate' && typeof loadNameplateTab==='function'){ loadNameplateTab(); }
+  if(name==='risk' && typeof loadRiskCenter==='function'){ loadRiskCenter(); }
   if(name==='settings')loadConfig();
 }
 
@@ -457,11 +459,12 @@ function getStepIndex(status){
   const map={
     fenji:0, 分集:0, 分集中:0,
     jianji:1, 剪辑:1, 剪辑中:1,
-    shenhe:2, 审核:2, 审核中:2,
-    xiugai:3, 修改:3, 修改中:3,
-    jiaofu:4, 交付:4, 交付中:4, 待交付:4,
-    zhijian:5, 质检:5, 待质检:5, 质检中:5,
-    wancheng:6, 完成:6, 已完成:6
+    tixshenhe:2, 待提交审核:2, 待提交:2,
+    shenhe:3, 审核:3, 审核中:3, 二审中:3, 三审中:3, 四审中:3, 五审中:3,
+    xiugai:4, 修改:4, 修改中:4,
+    jiaofu:5, 交付:5, 交付中:5, 待交付:5,
+    zhijian:6, 质检:6, 待质检:6, 质检中:6,
+    wancheng:7, 完成:7, 已完成:7
   };
   if(!status)return -1;
   const key=String(status).trim();
@@ -471,17 +474,20 @@ function getStepIndex(status){
   // 包含匹配
   if(key.includes('分集'))return 0;
   if(key.includes('剪辑'))return 1;
-  if(key.includes('审核'))return 2;
-  if(key.includes('修改'))return 3;
-  if(key.includes('交付'))return 4;
-  if(key.includes('质检'))return 5;
-  if(key.includes('完成'))return 6;
+  if(key.includes('待提交'))return 2;
+  if(key.includes('审中'))return 3;   // 审核中 / N审中
+  if(key.includes('审核'))return 3;
+  if(key.includes('修改'))return 4;
+  if(key.includes('交付'))return 5;
+  if(key.includes('质检'))return 6;
+  if(key.includes('完成'))return 7;
   return -1;
 }
 const WF_STATUS_OPTIONS = [
   {v:'', label:'— 未设置 —', cls:'default'},
   {v:'分集中', label:'📋 分集中', cls:'fenji'},
   {v:'剪辑中', label:'✂️ 剪辑中', cls:'jianji'},
+  {v:'待提交审核', label:'📤 待提交审核', cls:'daijiaofu'},
   {v:'审核中', label:'👀 审核中', cls:'shenhe'},
   {v:'修改中', label:'✏️ 修改中', cls:'xiugai'},
   {v:'交付中', label:'📦 交付中', cls:'jiaofu'},
@@ -554,10 +560,26 @@ function renderActions(p){
       btns.push(['📋 分集',`openFenjiFor('${pname}')`,'btn-primary']);
     }
   } else {
-    if(has('分集中')||has('待分集'))btns.push(['📋 继续分集',`openFenjiFor('${pname}')`,'btn-primary']);
-    else if(has('待质检')||has('质检中'))btns.push(['🔍 开始质检',`qaStartFor('${pname}')`,'btn-primary']);
-    if(has('剪辑中')||has('审核中'))btns.push(['✏️ 标记修改',`updateStatus('${pname}','修改中')`,'']);
-    if(has('修改中'))btns.push(['📦 待交付',`updateStatus('${pname}','待交付')`,'']);
+    // —— 分集中：继续分集 + 同步到工作台 ——
+    if(has('分集中')||has('待分集')){
+      btns.push(['📋 继续分集',`openFenjiFor('${pname}')`,'btn-primary']);
+      btns.push(['⚡ 同步到工作台',`goFenjiSync('${pname}')`,'btn-primary']);
+    }
+    // —— 待提交审核：进入审核流程 ——
+    else if(has('待提交审核')||has('待提交')){
+      btns.push(['📤 进入审核',`submitReview('${pname}')`,'btn-primary']);
+    }
+    // —— 剪辑中 / 审核中 / N审中 ——
+    if(has('剪辑中')){ /* 剪辑中：显示进度由卡片其他部分呈现 */ }
+    if(has('审核中')||has('审中'))btns.push(['✏️ 标记修改',`updateStatus('${pname}','修改中')`,'']);
+    // —— 修改中：修改完毕（提交下一轮审核）+ 终审完毕（进入待交付） ——
+    if(has('修改中')){
+      btns.push(['✅ 修改完毕',`submitRevision('${pname}')`,'']);
+      btns.push(['🏁 终审完毕',`finalReviewComplete('${pname}')`,'btn-primary']);
+    }
+    // —— 待质检 / 质检中 ——
+    if(has('待质检')||has('质检中'))btns.push(['🔍 开始质检',`qaStartFor('${pname}')`,'btn-primary']);
+    // —— 已交付 / 交付中 / 待交付 ——
     if(has('已交付')||has('交付中')||has('待交付'))btns.push(['📦 初版交付',`updateStatus('${pname}','待质检')`,'btn-primary']);
     if(has('已交付')||has('待交付'))btns.push(['🔍 去质检',`qaStartFor('${pname}')`,'']);
     // 同步按钮：仅当组NAS还没有这个项目 或 sync_status=pending 时显示
@@ -573,8 +595,183 @@ function renderActions(p){
     btns.push(['✏️',`editFenmiaozhenLink('${pname}')`,'','title="修改分秒帧链接"']);
   }
   if(btns.length===0)btns.push(['🔍 质检',`qaStartFor('${pname}')`,'']);
+  // 组内项目：创建本地剪辑项目（拉取我负责集数的素材+剧本）
+  if(groupExists)btns.push(['📁 创建本地项目',`createLocalProject('${pname}')`,'']);
   btns.push(['📋 详情',`openProjectDetail('${pname}')`,'']);
   return btns.map(([label,fn,cls,extra])=>`<button class="btn btn-sm ${cls||''}" ${extra||''} onclick="${fn}">${label}</button>`).join('');
+}
+
+// ===== 通用确认弹窗（统一风格，替代原生 confirm） =====
+let _confirmResolve = null;
+function showConfirm(message, title='确认', okText='确定', cancelText='取消'){
+  return new Promise((resolve) => {
+    _confirmResolve = resolve;
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMsg').textContent = message;
+    document.getElementById('confirmOkBtn').textContent = okText;
+    document.getElementById('confirmModal').classList.add('active');
+  });
+}
+function closeConfirm(result){
+  document.getElementById('confirmModal').classList.remove('active');
+  if(_confirmResolve){ _confirmResolve(result); _confirmResolve = null; }
+}
+
+// ===== 创建本地剪辑项目（拉取我负责集数的素材 + 剧本） =====
+const LOCAL_PROJ_PROGRESS_HTML = '<div class="modal-head"><h3>📁 创建本地剪辑项目</h3><span class="modal-close" onclick="document.getElementById(\'localProjModal\').classList.remove(\'active\')">×</span></div>'
+  + '<div class="modal-body">'
+  + '<div id="localProjStage" style="color:var(--text-sec);font-size:13px;margin-bottom:12px">准备中...</div>'
+  + '<div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden"><div id="localProjBar" style="height:100%;width:0%;background:var(--blue);transition:width .3s var(--ease)"></div></div>'
+  + '<div id="localProjPct" style="text-align:right;font-size:12px;color:var(--text-sec);margin-top:6px">0%</div>'
+  + '</div>';
+
+async function createLocalProject(name){
+  const ok = await showConfirm(
+    '创建本地剪辑项目「'+name+'」？\n\n将根据设置：\n· 在本地项目盘创建「序号-项目名」文件夹\n· 复制模板结构\n· 只拉取你负责集数的素材（扁平放入 01原素材/第N集）\n· 拉取整个剧本文件夹',
+    '📁 创建本地剪辑项目', '创建'
+  );
+  if(!ok) return;
+
+  // 使用统一风格的进度弹窗（重置为进度条结构）
+  const overlay = document.getElementById('localProjModal');
+  const modal = overlay.querySelector('.modal');
+  modal.innerHTML = LOCAL_PROJ_PROGRESS_HTML;
+  const stageEl = document.getElementById('localProjStage');
+  const barEl = document.getElementById('localProjBar');
+  const pctEl = document.getElementById('localProjPct');
+  overlay.classList.add('active');
+
+  try{
+    const r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/create_local_project');
+    if(!r || !r.ok){
+      overlay.classList.remove('active');
+      toast('❌ ' + ((r && r.message) || '创建失败'), 'error');
+      return;
+    }
+    // 轮询进度
+    const timer = setInterval(async () => {
+      try{
+        const d = await api('GET', '/api/project/' + encodeURIComponent(name) + '/local_project_progress');
+        const t = (d && d.task) || {};
+        if(t.status === 'done' || t.status === 'error'){
+          clearInterval(timer);
+          overlay.classList.remove('active');
+          if(t.status === 'done'){
+            toast('✅ 本地剪辑项目创建成功', 'success');
+          } else {
+            toast('❌ 创建失败', 'error');
+          }
+          showLocalProjResult(t.message || '', t.status === 'done');
+          return;
+        }
+        // 更新进度
+        if(t.stage) stageEl.textContent = t.stage + (t.total ? (' (' + t.done + '/' + t.total + ')') : '');
+        const pct = t.total > 0 ? Math.round(t.done / t.total * 100) : 0;
+        barEl.style.width = pct + '%';
+        pctEl.textContent = pct + '%';
+      }catch(e){ /* 忽略单次轮询失败 */ }
+    }, 600);
+  }catch(e){
+    overlay.classList.remove('active');
+    toast('❌ 创建失败: ' + e.message, 'error');
+  }
+}
+
+// 用统一风格的弹窗显示创建结果
+function showLocalProjResult(message, isSuccess){
+  const overlay = document.getElementById('localProjModal');
+  const modal = overlay.querySelector('.modal');
+  modal.innerHTML = '<div class="modal-head"><h3>' + (isSuccess ? '✅ 创建成功' : '❌ 创建失败') + '</h3><span class="modal-close" onclick="document.getElementById(\'localProjModal\').classList.remove(\'active\')">×</span></div>'
+    + '<div class="modal-body">'
+    + '<div style="font-size:13px;line-height:1.6;white-space:pre-line;color:var(--text);margin-bottom:16px">' + (message || '') + '</div>'
+    + '<div style="display:flex;justify-content:flex-end"><button class="btn btn-primary" onclick="document.getElementById(\'localProjModal\').classList.remove(\'active\')">知道了</button></div>'
+    + '</div>';
+  overlay.classList.add('active');
+}
+
+// ===== 分集中 → 跳转分集页并触发"同步到工作台" =====
+function goFenjiSync(name){
+  if(typeof openFenjiFor === 'function'){
+    openFenjiFor(name);
+    // 稍等分集页加载完成后触发一键同步
+    setTimeout(function(){
+      if(typeof fjSyncToWorkbench === 'function') fjSyncToWorkbench();
+      else toast('同步功能暂不可用','warning');
+    }, 600);
+  } else {
+    toast('分集功能不可用','warning');
+  }
+}
+
+// ===== 待提交审核 → 进入审核流程 =====
+// 二部项目：自动批量回传；其他部门：打开成片目录+分秒帧，确认已上传
+function submitReview(name){
+  const p = (window.allProjects && window.allProjects.group_all || []).find(x => x.name === name);
+  const dept = p ? (p.department || '') : '';
+  // 二部项目 → 自动批量回传审核
+  if(dept.indexOf('二部') >= 0){
+    if(!confirm('项目「'+name+'」为二部项目，将自动全选成片并批量回传审核。是否继续？')) return;
+    // 标记：成片列表加载后自动全选 + 批量回传
+    window._autoDeliverAfterLoad = { name: name, mode: 'editing', status: '审核中' };
+    if(typeof openDeliverablesModal === 'function') openDeliverablesModal(name, 'editing');
+    else if(typeof openSmart === 'function'){ openSmart(name, 'editing'); }
+    return;
+  }
+  // 其他部门 → 打开组内NAS项目根目录 + 分秒帧，确认已上传
+  if(typeof openSmart === 'function'){ openSmart(name, 'group_root'); }
+  if(typeof openFenmiaozhen === 'function'){ openFenmiaozhen(name); }
+  if(confirm('请确认成片是否已经上传至分秒帧并提交审核？\n（将项目「'+name+'」进入审核中）')){
+    updateStatus(name, '审核中');
+    toast('✅ 上传成功，项目进入审核中','success');
+  }
+}
+
+// ===== 修改中 → 提交下一轮审核（N审递增） =====
+function submitRevision(name){
+  const p = (window.allProjects && window.allProjects.group_all || []).find(x => x.name === name);
+  const dept = p ? (p.department || '') : '';
+  if(!confirm('项目「'+name+'」修改完成，提交下一轮审核？（将进入二审/三审...）')) return;
+  if(dept.indexOf('二部') >= 0){
+    // 二部项目：自动修改回传（标记修改文件夹自动全选回传）
+    window._autoDeliverAfterLoad = { name: name, mode: 'revising', status: 'next_review' };
+    if(typeof openDeliverablesModal === 'function') openDeliverablesModal(name, 'revising');
+    else toast('修改回传功能不可用','warning');
+    return;
+  }
+  // 其他部门：打开修改文件夹 + 分秒帧，确认已上传
+  if(typeof openSmart === 'function'){ openSmart(name, 'revising'); }
+  if(typeof openFenmiaozhen === 'function'){ openFenmiaozhen(name); }
+  if(confirm('请确认修改内容是否已经上传至分秒帧并提交审核？')){
+    submitRevisionSetStatus(name);
+    toast('✅ 修改上传成功，项目进入下一轮审核','success');
+  }
+}
+// 计算下一轮审核状态并更新
+function submitRevisionSetStatus(name){
+  const p = (window.allProjects && window.allProjects.group_all || []).find(x => x.name === name);
+  const cur = p ? (p.custom_status || '') : '';
+  // 前端计算下一审核轮次：修改中→审核中(第1次)；N审中→N+1审中
+  let next;
+  if(cur.indexOf('修改中') >= 0){
+    next = '审核中';
+  } else {
+    // 已在审核中/N审中，取当前审核数+1
+    const m = cur.match(/^([二三四五六七八九十])审中$/);
+    const cn = ['零','一','二','三','四','五','六','七','八','九','十'];
+    if(m){
+      const idx = cn.indexOf(m[1]);
+      next = (idx >= 0 && idx < cn.length-1) ? cn[idx+1]+'审中' : '审核中';
+    } else next = '审核中';
+  }
+  updateStatus(name, next);
+}
+
+// ===== 终审完毕：所有审核通过，直接进入待交付（自动创建 000交付） =====
+function finalReviewComplete(name){
+  if(!confirm('项目「'+name+'」全部审核通过，标记为待交付？\n（将自动创建 000交付 文件夹）')) return;
+  // 待交付状态会自动触发后端创建 000交付 文件夹
+  updateStatus(name, '待交付');
+  toast('✅ 终审完毕，项目进入待交付，已创建 000交付','success');
 }
 function renderStats(){
   // 优先用后端统一计算的概览统计（口径一致），不存在则本地兜底
@@ -1068,7 +1265,7 @@ function projectCardHTML(p){
   const status = p.custom_status || '';
 
   if (hasGroup && isGroup) {
-    openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','group')">📁 组内NAS</button>`;
+    openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','group_output')">📁 组内NAS</button>`;
   } else if (hasProd) {
     openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','prod')">📁 打开项目</button>`;
   }
@@ -1621,6 +1818,30 @@ function renderDashboard(){
   }else{
     container.innerHTML=sectionHTML;
   }
+
+  // 状态变更后重排：若存在"刚修改状态的项目"，渲染完成后定位并高亮它（无需手动寻找）
+  if(window._lastStatusChanged){
+    var _name = window._lastStatusChanged;
+    window._lastStatusChanged = null;   // 只高亮一次
+    setTimeout(function(){ highlightProject(_name); }, 120);
+  }
+}
+
+// 轻量定位 + 高亮项目卡片（状态变更后重排用；复用 jumpToProject 的 search-highlight 动画）
+function highlightProject(name){
+  var cards = document.querySelectorAll('.card');
+  var target = null;
+  for(var i=0;i<cards.length;i++){
+    var tn = cards[i].querySelector('.card-title-name');
+    if(tn && (tn.getAttribute('title') === name || tn.textContent === name)){ target = cards[i]; break; }
+  }
+  if(!target) return;
+  // 滚动到卡片
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // 高亮动画（复用搜索定位动画）
+  target.classList.add('search-highlight');
+  document.querySelectorAll('.card.search-highlight').forEach(function(c){ if(c!==target) c.classList.remove('search-highlight'); });
+  setTimeout(function(){ target.classList.remove('search-highlight'); }, 3000);
 }
 
 function toggleBulkMode(){

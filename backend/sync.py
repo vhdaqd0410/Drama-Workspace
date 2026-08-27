@@ -80,6 +80,109 @@ class SyncMixin:
                 return os.path.join(unc, rest)
         return path
 
+    # ===== 自动推断项目总集数（从素材/剧本文件夹） =====
+    # 素材文件夹关键词（各部门命名可能不同）
+    _MATERIAL_FOLDER_KEYWORDS = ("视频素材", "抽卡素材", "素材")
+    # 剧本分集关键词（剧本文件夹里按集分集的子目录）
+    _SCRIPT_FOLDER_KEYWORDS = ("剧本", "分集")
+
+    @staticmethod
+    def _extract_episode_number_from_name(s):
+        """从名字提取集号，失败返回 None。
+        支持：第N集 / N_ / N@ / N- / N. / 开头数字 / N集 / N-1-v01。"""
+        if not s:
+            return None
+        m = re.search(r'第\s*(\d+)\s*集', s)
+        if m:
+            return int(m.group(1))
+        m = re.match(r'^\s*(\d{1,3})\s*(?:[_@\-\.]|集| )', s)
+        if m:
+            return int(m.group(1))
+        m = re.search(r'(\d{1,3})\s*集', s)
+        if m:
+            return int(m.group(1))
+        m = re.match(r'^(\d{1,3})-', s)
+        if m:
+            return int(m.group(1))
+        return None
+
+    def _collect_episode_numbers(self, root, maxdepth=2):
+        """递归收集目录下所有集号（子目录+文件名）。"""
+        eps = set()
+
+        def _walk(path, depth):
+            if depth > maxdepth:
+                return
+            try:
+                items = os.listdir(path)
+            except OSError:
+                return
+            for item in items:
+                ip = os.path.join(path, item)
+                n = self._extract_episode_number_from_name(item)
+                if os.path.isdir(ip):
+                    if n:
+                        eps.add(n)
+                    _walk(ip, depth + 1)
+                elif n:
+                    eps.add(n)
+        _walk(root, 0)
+        return eps
+
+    def _find_material_folder(self, group_path):
+        """在项目目录里定位素材文件夹（视频素材/抽卡素材）。找不到返回 None。"""
+        if not group_path or not os.path.isdir(group_path):
+            return None
+        try:
+            for s in os.listdir(group_path):
+                full = os.path.join(group_path, s)
+                if os.path.isdir(full) and any(k in s for k in self._MATERIAL_FOLDER_KEYWORDS):
+                    return full
+        except OSError:
+            return None
+        return None
+
+    def auto_detect_total_episodes(self, project_name):
+        """自动推断项目总集数：扫描素材文件夹（视频素材/抽卡素材），
+        递归收集集号，取最大集号 = 总集数。返回 int（0 表示无法推断）。
+        优先扫组内路径，若无素材则回退到制作部路径。
+        """
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return 0
+        # 候选路径：组内 > 制作部
+        candidates = []
+        gp = proj.get("group_path", "") or ""
+        if gp:
+            candidates.append(gp)
+        pp = proj.get("production_path", "") or ""
+        if pp and pp not in candidates:
+            candidates.append(pp)
+        for root in candidates:
+            if not os.path.isdir(root):
+                continue
+            mat = self._find_material_folder(root)
+            if not mat:
+                continue
+            eps = self._collect_episode_numbers(mat)
+            if eps:
+                return max(eps)
+        return 0
+
+    def auto_set_total_episodes(self, project_name):
+        """同步后自动推断并填入总集数（仅当当前为 0 时）。返回 (ok, msg, detected)。"""
+        proj = self.db.get_project(project_name)
+        if not proj:
+            return False, "项目不存在", 0
+        if (proj.get("total_episodes") or 0) > 0:
+            return True, "已有集数，无需自动推断", proj.get("total_episodes")
+        detected = self.auto_detect_total_episodes(project_name)
+        if detected > 0:
+            self.db.update_project_status(project_name, total_episodes=detected)
+            logger.info("自动推断总集数: %s -> %d 集", project_name, detected)
+            return True, "已自动推断总集数: %d 集" % detected, detected
+        return False, "未能自动推断总集数（未找到素材文件夹或无法识别集号）", 0
+
     def _robocopy(self, src, dst, exclude_patterns):
         """执行 robocopy 增量镜像同步（带独立 cmd 窗口显示进度）"""
         cmd = ["robocopy", src, dst] + ROBOCOPY_MIR
@@ -427,6 +530,10 @@ class SyncMixin:
             project_name, sync_status="syncing", sync_progress="98% 收尾中...")
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 同步完成后自动设置项目月份（若未设置）：参与当月统计
+        cur_month = (proj.get("project_month") or "").strip()
+        if not cur_month:
+            cur_month = datetime.now().strftime("%Y-%m")
         # 同步完成后, 若无有效 workflow 状态, 自动标记为"分集中"
         cur_status = (proj.get("custom_status") or "").strip()
         workflow_set = {"分集中", "剪辑中", "审核中", "修改中",
@@ -435,14 +542,28 @@ class SyncMixin:
             self.db.update_project_status(
                 project_name, sync_status="synced",
                 sync_progress="", last_synced_at=now,
-                custom_status="分集中")
+                custom_status="分集中", project_month=cur_month)
         else:
             self.db.update_project_status(
                 project_name, sync_status="synced",
-                sync_progress="", last_synced_at=now)
+                sync_progress="", last_synced_at=now,
+                project_month=cur_month)
         self.db.add_sync_log(
             project_name, "同步完成", "production->group",
             status="success", message="所有素材同步完成")
+        # 同步完成后自动推断总集数（若尚未设置），并记入同步日志
+        if not (proj.get("total_episodes") or 0) > 0:
+            try:
+                detected = self.auto_detect_total_episodes(project_name)
+                if detected > 0:
+                    self.db.update_project_status(project_name, total_episodes=detected)
+                    self.db.add_sync_log(
+                        project_name, "自动推断总集数", "auto",
+                        status="info",
+                        message="已从素材文件夹推断总集数: %d 集" % detected)
+                    logger.info("同步后自动推断总集数: %s -> %d 集", project_name, detected)
+            except Exception as e:
+                logger.warning("同步后自动推断总集数失败: %s", e)
         return True, "同步完成"
 
     def get_dest_dir(self, project_name):
@@ -538,8 +659,11 @@ class SyncMixin:
         with self._lock:
             self._output_dir_cache[cache_key] = dirs
             # 写盘持久化，重启后免重扫（只在新增条目时写，避免高频重复写盘）
+            # _last_cache_save_size 记录上次写盘时的条目数，仅在缓存出现新条目时才落盘；
+            # 命中缓存路径不写盘，避免大量项目扫描时高频重复写盘引发 WinError 5 占用冲突
             if len(self._output_dir_cache) > self._last_cache_save_size:
-                self._save_output_dir_cache()
+                if self._save_output_dir_cache():
+                    self._last_cache_save_size = len(self._output_dir_cache)
         return dirs
 
     def _cleanup_partial_dst(self, dst):

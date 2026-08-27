@@ -734,6 +734,99 @@ async function openFenjiFor(name){
   fjUpdateTargetBadge();
 }
 
+// ===== 自动获取总集数：从素材文件夹推断并填入 =====
+async function fjDetectTotal(){
+  const project = $('fjProject').value;
+  if(!project){ toast('请先选择项目','warning'); return; }
+  try{
+    const r = await api('POST', '/api/project/' + encodeURIComponent(project) + '/detect_total_episodes', { fill: true });
+    if(r && r.ok && r.detected){
+      const totalInput = $('fjTotal');
+      if(totalInput){ totalInput.value = r.detected; fjSaveSession(); }
+      toast('✅ ' + (r.message || ('已填入 ' + r.detected + ' 集')), 'success');
+      // 刷新项目下拉框：让项目名后的"(N集)"更新为获取到的集数
+      try{
+        const savedVal = $('fjProject').value;
+        if(Array.isArray(fenjiLight)){
+          const hit = fenjiLight.find(p => p.name === project);
+          if(hit) hit.total_episodes = r.detected;
+        }
+        // 重新拉取项目数据（含最新 total_episodes）并刷新下拉框
+        if(typeof loadFenjiProjects === 'function'){
+          await loadFenjiProjects();
+          // 保留当前选中项
+          if(savedVal) $('fjProject').value = savedVal;
+        } else if(Array.isArray(fenjiLight)){
+          $('fjProject').innerHTML = '<option value="">— 选择项目 —</option>' +
+            fenjiLight.map(p => `<option value="${p.name}">${p.name} (${p.total_episodes||'?'}集)</option>`).join('');
+          if(savedVal) $('fjProject').value = savedVal;
+        }
+      }catch(_){}
+    } else {
+      toast((r && r.message) || '未能自动推断总集数', 'warning');
+    }
+  }catch(e){ toast('自动获取失败: ' + e.message, 'error'); }
+}
+
+// ===== 同步到工作台（一键三合一）：复制结果 → 追加到目标 → 同步到工作台 =====
+async function fjSyncToWorkbench(){
+  const project = $('fjProject').value;
+  if(!project){ toast('请先选择项目','warning'); return; }
+  const assign = buildAssignObj();
+  if(Object.keys(assign).length === 0){ toast('请先分配集数','warning'); return; }
+
+  // 1) 复制结果
+  try{ fjCopyResult(); }catch(_){}
+
+  // 2) 追加到目标（弹交片时间 → 追加 + 打开 Excel；完成后走回调）
+  let appended = false;
+  await new Promise(function(resolve){
+    window._fjAfterAppend = function(proj){
+      appended = true;
+      resolve();
+    };
+    try{
+      fjAppendToTarget();
+      // 若追加是同步完成的（无弹窗），延迟检查回调是否触发
+      setTimeout(function(){
+        if(!appended && window._fjAfterAppend){
+          window._fjAfterAppend = null;
+          resolve();
+        }
+      }, 800);
+    }catch(e){
+      window._fjAfterAppend = null;
+      toast('追加到目标失败: '+e.message,'error');
+      resolve();
+    }
+  });
+
+  // 3) 同步到工作台（保存分集数据到工作台统计）
+  const total = parseInt($('fjTotal').value)||0;
+  try{
+    await api('POST','/api/bulk/import_episodes',{project_name:project,total_episodes:total,assign});
+    await loadProjects();
+    fjMaybeSaveHist();
+  }catch(e){ toast('同步到工作台失败: '+e.message,'error'); return; }
+
+  // 4) 项目状态改为"剪辑中"
+  try{
+    await api('POST','/api/project/'+encodeURIComponent(project)+'/custom_status',{custom_status:'剪辑中'});
+  }catch(_){}
+
+  toast('✅ 复制成功 · 同步成功','success');
+
+  // 5) 跳转项目看板 + 定位卡片 + 高亮动画（复用搜索定位动画）
+  try{
+    if(typeof jumpToProject === 'function'){
+      jumpToProject(project);
+    } else {
+      switchTab('dashboard');
+    }
+  }catch(_){}
+  if(typeof loadProjects === 'function') loadProjects();
+}
+
 // ===== 模板管理 + 导出到 Excel =====
 let fjExportState = {
   templates: [],
@@ -786,7 +879,7 @@ function fjUpdateTplBadge(){
   b.textContent = t ? t : '未选';
 }
 
-// ===== 从 Excel 分集表同步到项目 =====
+// ===== 从 Excel 分集表同步到项目（双向同步） =====
 function fjSyncFromExcel(){
   // 弹出文件选择
   const input = document.createElement('input');
@@ -794,27 +887,69 @@ function fjSyncFromExcel(){
   input.accept = '.xlsx,.xls,.xlsm';
   input.onchange = async function(){
     if(!input.files[0]) return;
-    if(!confirm('将解析所选 Excel 的分集数据并同步到项目（用于工作量统计），继续？')){
+    if(!confirm('将解析所选 Excel 的分集数据并同步到项目（追加/更新，不删除已有分集）。\n如需"精确同步"（同步删除 Excel 里删掉的行），请用旁边的"🔄 精确同步"按钮。\n继续？')){
       return;
     }
     const fd = new FormData();
     fd.append('file', input.files[0]);
+    fd.append('apply_removals', 'false');
     toast('📥 正在解析并同步分集...', 'info');
     try{
       const d = await api('POST', '/api/fenji/sync_from_excel', fd);
       if(d && d.ok){
+        // 展示差异反馈
+        const ds = d.diff_summary || {};
+        let diffTxt = '';
+        if(ds.added || ds.modified || ds.removed){
+          diffTxt = '\n\n📊 本次变更：新增 ' + (ds.added||0) + ' 集，修改 ' + (ds.modified||0) + ' 集，删除 ' + (ds.removed||0) + ' 集';
+        }
         toast('✅ ' + (d.message || '同步完成'), 'success');
-        // 显示同步结果
         const synced = d.synced || [];
         const skipped = d.skipped || [];
         const lines = synced.slice(0, 10).map(function(s){ return '  ✓ ' + s.name + '（' + s.episodes + '集）'; }).join('\n');
-        alert('同步完成：' + synced.length + ' 个项目，' + synced.reduce(function(a,s){return a+s.episodes;},0) + ' 集\n' + lines + (synced.length>10 ? '\n  ...' : '') + (skipped.length ? '\n\n跳过 ' + skipped.length + ' 个（' + skipped.map(function(s){return s.name;}).join(',') + '）' : ''));
+        alert('同步完成：' + synced.length + ' 个项目，' + synced.reduce(function(a,s){return a+s.episodes;},0) + ' 集\n' + lines + (synced.length>10 ? '\n  ...' : '') + diffTxt + (skipped.length ? '\n\n跳过 ' + skipped.length + ' 个（' + skipped.map(function(s){return s.name;}).join(',') + '）' : ''));
         if(typeof loadProjects === 'function') loadProjects();
       } else {
         toast('❌ ' + (d && d.msg || '同步失败'), 'error');
       }
     }catch(e){
       toast('❌ 同步失败: ' + e.message, 'error');
+    }
+  };
+  input.click();
+}
+
+// ===== 从 Excel 精确同步（含删除，双向） =====
+function fjSyncFromExcelExact(){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xlsx,.xls,.xlsm';
+  input.onchange = async function(){
+    if(!input.files[0]) return;
+    if(!confirm('⚠️ 精确同步：将所选 Excel 的分集数据作为该项目的"权威分集"，Excel 里删掉的行会从工作台移除（不可撤销）。\n\n仅针对 Excel 中出现过的项目生效。继续？')){
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    fd.append('apply_removals', 'true');
+    toast('📥 正在精确同步分集（含删除）...', 'info');
+    try{
+      const d = await api('POST', '/api/fenji/sync_from_excel', fd);
+      if(d && d.ok){
+        const ds = d.diff_summary || {};
+        let diffTxt = '\n\n📊 本次变更：新增 ' + (ds.added||0) + ' 集，修改 ' + (ds.modified||0) + ' 集，删除 ' + (ds.removed||0) + ' 集';
+        if(ds.removed){
+          diffTxt += '\n\n🗑️ 已删除的集号：';
+          (d.diff_detail||[]).forEach(function(x){ if(x.removed) diffTxt += '\n  ' + x.name + '：第 ' + (x.removed_eps||[]).join('、') + ' 集'; });
+        }
+        toast('✅ 精确同步完成', 'success');
+        alert('✅ 精确同步完成：' + (d.message||'') + diffTxt);
+        if(typeof loadProjects === 'function') loadProjects();
+      } else {
+        toast('❌ ' + (d && d.msg || '同步失败'), 'error');
+      }
+    }catch(e){
+      toast('❌ 精确同步失败: ' + e.message, 'error');
     }
   };
   input.click();
@@ -1165,6 +1300,14 @@ async function fjDoExport(skipPreview, openExcel){
       toast(saved
         ? `✅ 已追加到 ${saved.split(/[\\\/]/).pop()}，Excel 已打开`
         : '✅ 追加成功', 'success');
+      // 追加完成后回调（供"同步到工作台"流程：跳转看板+高亮+改状态）
+      try{
+        if(window._fjAfterAppend && typeof window._fjAfterAppend === 'function'){
+          const cb = window._fjAfterAppend;
+          window._fjAfterAppend = null;
+          cb(project);
+        }
+      }catch(_){}
     }else{
       fjBuildPreview(assignList, projectPath, timeText);
     }

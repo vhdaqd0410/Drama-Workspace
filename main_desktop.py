@@ -233,7 +233,13 @@ def _build_tray_fallback_image(size=64):
 # 托盘菜单回调
 # ============================================================
 def _show_window():
-    """显示主窗口并置前台"""
+    """显示主窗口并置前台。
+
+    用 pywebview 原生 restore()+show() 即可可靠显示（其内部已做 Show+Activate
+    线程调度）。不叠加过多 Win32 置顶操作——SetWindowPos(TOPMOST)/模拟按键
+    可能干扰窗口状态，反而导致"任务栏有图标但桌面不显示"。仅用 ShowWindow
+    SW_RESTORE 确保非最小化。
+    """
     w = _window_ref[0]
     if w is None:
         return
@@ -241,12 +247,11 @@ def _show_window():
     try:
         w.restore()
         w.show()
-        # 用 Win32 强制前置
+        # 轻量辅助：确保窗口不是最小化状态（避免任务栏有图标但桌面不显示）
         try:
             hwnd = ctypes.windll.user32.FindWindowW(None, APP_TITLE)
             if hwnd:
                 ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
         except Exception:
             pass
         _window_visible[0] = True
@@ -274,11 +279,18 @@ def _hide_window():
         _update_tray_label()
 
 
+# 托盘操作防抖：双击托盘图标会触发 default 菜单项两次（显示又隐藏），
+# 导致用户以为"打不开"。1 秒内合并多次触发，且单击图标总是"显示窗口"。
+_toggle_debounce_ts = [0.0]
+
 def _toggle_window(icon=None, item=None):
-    if _window_visible[0]:
-        _hide_window()
-    else:
-        _show_window()
+    now = time.time()
+    # 防抖：1 秒内的重复触发（双击）只执行一次
+    if now - _toggle_debounce_ts[0] < 1.0:
+        return
+    _toggle_debounce_ts[0] = now
+    # 单击托盘图标总是"显示窗口"（避免双击/误触把已显示的窗口又藏起来）
+    _show_window()
     # 注意：这里是托盘菜单回调（托盘线程内），不要在回调里立刻重建菜单，
     # 否则可能销毁正在显示的菜单。文案刷新交给节流版 _update_tray_label
     #（由 _show_window/_hide_window 的调用方在其他线程触发，1 秒延迟合并）。
@@ -405,9 +417,9 @@ def _do_restart():
 # ============================================================
 def _build_menu(visible=True):
     import pystray
-    # text 用 callable 动态求值，避免手动重建菜单
+    # text 用 callable 动态求值（保留，虽单击已固定为显示，但菜单仍可提示状态）
     toggle_item = pystray.MenuItem(
-        lambda item: "隐藏窗口到托盘" if _window_visible[0] else "显示主窗口",
+        lambda item: "🔍 显示主窗口（单击托盘图标亦可）",
         _toggle_window,
         default=True,
     )
@@ -912,7 +924,10 @@ def _run_server():
                     _host = _h
         except Exception:
             pass
-        waitress.serve(app, host=_host, port=_SERVER_PORT, threads=16)
+        # waitress 线程池：SSE 长连接 + NAS 扫描/同步等耗时操作会占用线程，
+        # 16 线程在长时间运行/多连接时可能被占满导致 HTTP 请求排队无响应。
+        # 提高到 32 并设置超时，避免资源耗尽。
+        waitress.serve(app, host=_host, port=_SERVER_PORT, threads=32)
     except SystemExit:
         pass
     except Exception as e:

@@ -81,6 +81,13 @@ data/fenji_backups/
 data/fenji_targets/
 
 # ===========================
+# 移动端构建产物 (APK)
+# ===========================
+*.apk
+mobile-app/**/build/
+mobile-app/**/release/
+
+# ===========================
 # 融合功能 (features) 运行时产物：数据库备份 + 视频缩略图缓存
 # ===========================
 data/backups/

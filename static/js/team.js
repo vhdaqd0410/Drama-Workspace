@@ -20,15 +20,21 @@ async function loadNasPaths(){
     if(list){
       const roots = d.production_roots || [];
       const labels = d.production_labels || {};
+      const rootsCfg = d.production_roots_config || {};
       if(roots.length === 0){
         list.innerHTML = '<div style="color:#86868b;font-size:12px;padding:4px">暂无制作部路径</div>';
       } else {
         list.innerHTML = roots.map(function(path){
           const label = labels[path] || '';
           const safe = jsq(path);
+          const rd = (rootsCfg[path] && rootsCfg[path].recursive_depth) || 0;
+          const recBadge = rd > 0
+            ? `<span style="font-size:11px;color:#2E7D32;background:#e8f5e9;padding:1px 6px;border-radius:4px" title="递归扫描子文件夹(深度${rd})">🔍递归${rd}</span>`
+            : '';
           return `<div style="display:flex;align-items:center;gap:6px;background:#f8fafc;border:1px solid #e5e8ee;border-radius:6px;padding:6px 8px">
             <span style="flex:1;font-size:12px;font-family:monospace;word-break:break-all">${htm(path)}</span>
             ${label ? `<span style="font-size:11px;color:#666;background:#eef2ff;padding:1px 6px;border-radius:4px">${htm(label)}</span>` : ''}
+            ${recBadge}
             <button class="btn btn-sm danger" onclick="delProdRoot('${safe}')" title="删除">✕</button>
           </div>`;
         }).join('');
@@ -57,12 +63,18 @@ async function saveGroupRoot(){
 async function addProdRoot(){
   const input = document.getElementById('newProdRoot');
   const labelInput = document.getElementById('newProdLabel');
+  const recCheck = document.getElementById('newProdRecursive');
+  const depthInput = document.getElementById('newProdDepth');
   const path = (input.value||'').trim();
   if(!path){ toast('请输入制作部路径','warning'); return; }
+  const body = { type: 'production', path: path, label: (labelInput.value||'').trim() };
+  // 递归扫描：勾选则传深度（默认3）；不勾选传0（只扫第一层）
+  const recursive = recCheck && recCheck.checked;
+  body.recursive_depth = recursive ? parseInt((depthInput&&depthInput.value)||'3', 10) : 0;
   try{
-    const d = await api('POST', '/api/config/paths', { type: 'production', path: path, label: (labelInput.value||'').trim() });
+    const d = await api('POST', '/api/config/paths', body);
     toast(d.message || '已添加', d.ok ? 'success' : 'error');
-    if(d.ok){ input.value=''; labelInput.value=''; loadNasPaths(); loadConfig(); }
+    if(d.ok){ input.value=''; labelInput.value=''; if(recCheck) recCheck.checked=false; loadNasPaths(); loadConfig(); }
   }catch(e){ toast('添加失败: '+e.message,'error'); }
 }
 async function delProdRoot(path){
@@ -249,6 +261,13 @@ async function loadConfig(){
       if(mt) mt.checked = cfg.min_to_tray === '1' || cfg.min_to_tray === true;
       var as = document.getElementById('cfgAutoScan');
       if(as) as.checked = cfg.auto_scan === '1' || cfg.auto_scan === true;
+      // 本地剪辑项目
+      var lr = document.getElementById('cfgLocalRoot');
+      if(lr) lr.value = cfg.local_project_root || '';
+      var lt = document.getElementById('cfgLocalTemplate');
+      if(lt) lt.value = cfg.local_project_template || '';
+      var me = document.getElementById('cfgMyEditor');
+      if(me) me.value = cfg.my_editor_name || '';
     }
   }catch(_){}
   // 加载开机自启状态
@@ -302,13 +321,19 @@ async function saveConfig(){
     suggested_names:$('cfgNames').value.split('\n').map(s=>s.trim()).filter(Boolean)
   };
   try{await api('POST','/api/config',cfg);}catch(e){toast('保存失败: '+e.message,'error');return;}
-  // 保存启动行为到 settings（key-value）
+  // 保存启动行为 + 本地剪辑项目到 settings（key-value）
   try{
     const mt = document.getElementById('cfgMinToTray');
     const as = document.getElementById('cfgAutoScan');
+    const lr = document.getElementById('cfgLocalRoot');
+    const lt = document.getElementById('cfgLocalTemplate');
+    const me = document.getElementById('cfgMyEditor');
     await api('PUT','/api/settings',{
       min_to_tray: mt ? (mt.checked?'1':'0') : '0',
-      auto_scan: as ? (as.checked?'1':'0') : '0'
+      auto_scan: as ? (as.checked?'1':'0') : '0',
+      local_project_root: lr ? (lr.value||'').trim() : '',
+      local_project_template: lt ? (lt.value||'').trim() : '',
+      my_editor_name: me ? (me.value||'').trim() : ''
     });
   }catch(_){}
   toast('设置已保存','success');

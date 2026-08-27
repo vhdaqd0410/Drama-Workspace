@@ -353,7 +353,9 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
 
         opts = {
             'cp_folder': data.get('cp_folder'),
-            'hardsub_folders': data.get('hardsub_folders'),
+            # 兜底：前端可能不传 hardsub_folders（data.get 返回 None），
+            # 若为 None 让 qa_engine 用扫描出的默认值，避免遍历 None 崩溃
+            'hardsub_folders': data.get('hardsub_folders') or [],
             'srt_folder': data.get('srt_folder'),
             'opt_blackframes': bool(data.get('opt_blackframes', True)),
             'opt_hardsubs': bool(data.get('opt_hardsubs', True)),
@@ -991,7 +993,15 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         if not projects_plan:
             return jsonify(ok=False, msg='未解析到任何分集数据'), 400
 
+        # 双向同步：是否应用"Excel 里删掉的行"到工作台（精确同步）。
+        # 默认 False（向后兼容：只追加合并，不删除）；传 true 时做整体差异同步。
+        # 通过 body/form 参数 apply_removals 控制，避免误删累积目标文件里其他来源的集号。
+        form_apply = request.form.get('apply_removals') if hasattr(request, 'form') else None
+        apply_removals = (form_apply or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
         synced, skipped = [], []
+        diff_summary = {'added': 0, 'modified': 0, 'removed': 0}
+        diff_detail = []   # 每个项目：{name, added_n, modified_n, removed_n, removed_eps:[...]}
         for name, plan in projects_plan.items():
             if not plan:
                 skipped.append({'name': name, 'episodes': 0, 'reason': '无分集数据'})
@@ -1009,19 +1019,50 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             if not proj:
                 skipped.append({'name': name, 'episodes': len(plan), 'reason': '未找到对应项目'})
                 continue
+
             existing = db.get_episode_plan(proj['name'])
-            existing.update(plan)
+            # 计算差异（用于反馈 + 精确同步）
+            added = {k: v for k, v in plan.items() if existing.get(k) != v}
+            removed_eps = [k for k in existing if k not in plan] if apply_removals else []
+            # added 里再细分：新增 vs 修改
+            add_new = {k for k in added if k not in existing}
+            add_mod = {k for k in added if k in existing}
+            diff_summary['added'] += len(add_new)
+            diff_summary['modified'] += len(add_mod)
+            diff_summary['removed'] += len(removed_eps)
+            diff_detail.append({
+                'name': proj['name'],
+                'added': len(add_new), 'modified': len(add_mod), 'removed': len(removed_eps),
+                'removed_eps': removed_eps,
+            })
+
+            if apply_removals:
+                # 精确同步：以 Excel 为准整体替换该项目分集
+                existing = dict(plan)
+            else:
+                # 默认：追加合并（Excel 里的值覆盖同名集号，但保留工作台里 Excel 没覆盖的）
+                existing.update(plan)
             db.set_episode_plan(proj['name'], existing)
             total = int(proj.get('total_episodes') or 0)
             if total < len(existing):
                 db.set_episodes(proj['name'], len(existing), len(existing))
             synced.append({'name': proj['name'], 'episodes': len(plan)})
 
+        _added, _mod, _removed = diff_summary['added'], diff_summary['modified'], diff_summary['removed']
+        _msg = '同步完成: {} 个项目，{} 集'.format(len(synced), sum(s['episodes'] for s in synced))
+        if _added or _mod or _removed:
+            _msg += '（新增 {} 集，修改 {} 集'.format(_added, _mod)
+            if _removed:
+                _msg += '，删除 {} 集'.format(_removed)
+            _msg += '）'
         return jsonify({
             'ok': True,
-            'message': '同步完成: {} 个项目，{} 集'.format(len(synced), sum(s['episodes'] for s in synced)),
+            'message': _msg,
             'synced': synced,
             'skipped': skipped,
+            'diff_summary': diff_summary,
+            'diff_detail': diff_detail,
+            'apply_removals': apply_removals,
         })
 
     # ============ 从权威目标文件重建各项目分集工作量 ============
@@ -1255,6 +1296,17 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             try:
                 safe_tgt = _os.path.abspath(target_path)
                 _os.makedirs(_os.path.dirname(safe_tgt), exist_ok=True)
+                # 写前占用检测：若目标文件已存在且正被 Excel/WPS 锁定，
+                # 预先给出明确提示，避免静默覆盖或 write 时才抛晦涩的 PermissionError
+                if _os.path.isfile(safe_tgt):
+                    try:
+                        _probe = open(safe_tgt, 'r+b')
+                        _probe.close()
+                    except PermissionError:
+                        return jsonify(
+                            ok=False,
+                            msg=f'目标文件正被占用，无法写入：{safe_tgt}\n（可能原因：目标表格正被 Excel/WPS 打开，请关闭后重试）',
+                        ), 409
                 with open(safe_tgt, 'wb') as f:
                     f.write(new_bytes)
                 actually_saved = safe_tgt

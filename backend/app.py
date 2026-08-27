@@ -119,7 +119,28 @@ def _auth_gate():
 def _add_security_headers(resp):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    # CORS：允许 Premiere Pro CEP 面板等本机扩展访问 /api/*（带 API key 鉴权）。
+    # 仅对 API 路径放行，且允许自定义请求头（X-API-KEY），供跨源扩展面板调用。
+    if request.path.startswith("/api/"):
+        resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+        resp.headers.setdefault("Access-Control-Allow-Methods",
+                                "GET, POST, PUT, DELETE, OPTIONS")
+        resp.headers.setdefault("Access-Control-Allow-Headers",
+                                "Content-Type, X-API-KEY, X-Requested-With")
+        resp.headers.setdefault("Access-Control-Max-Age", "3600")
     return resp
+
+
+@app.before_request
+def _handle_cors_preflight():
+    """处理 CORS 预检（OPTIONS）：CEP 面板发带 X-API-KEY 的 POST 会触发预检。"""
+    if request.method == "OPTIONS" and request.path.startswith("/api/"):
+        return ("", 204, {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, X-API-KEY, X-Requested-With",
+            "Access-Control-Max-Age": "3600",
+        })
 
 
 def _bg(fn, *args, **kwargs):
@@ -286,7 +307,8 @@ def api_projects_mobile():
     d = full.get_json()
     keep = ["name", "custom_status", "delivery_status", "department", "project_month",
             "total_episodes", "current_episodes", "due_date", "delivered_date",
-            "project_type", "on_group", "has_production_match", "is_completed"]
+            "project_type", "on_group", "has_production_match", "is_completed",
+            "need_sync", "sync_status", "sync_progress"]
     sections = []
     for sec in d.get("sections", []):
         projs = []
@@ -568,6 +590,19 @@ def api_project_open_folder(project_name):
         path, err = sync_engine.get_source_dir(project_name)
     elif which == "dest":
         path, err = sync_engine.get_dest_dir(project_name)
+    elif which == "group_root":
+        # 'group_root' = 强制打开组内NAS项目根目录（不受项目状态影响，用于审核流程等）
+        if proj and proj.get("group_path"):
+            path = proj["group_path"]
+        else:
+            path, err = sync_engine.get_source_dir(project_name)
+    elif which == "group_output":
+        # 'group_output' = 强制打开组内NAS的成片目录（01上映单集版），不受项目状态影响
+        if proj and proj.get("group_path"):
+            output_dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
+            path = output_dirs[0] if output_dirs else proj["group_path"]
+        else:
+            path, err = sync_engine.get_source_dir(project_name)
     elif which == "group" or which == "prod":
         # 'group' = 打开组内NAS项目根目录（即使还没有"01上映单集版"子目录）
         #   - 但如果项目状态是「剪辑中」「审核中」「修改中」，优先打开 01上映单集版
@@ -673,12 +708,37 @@ def api_project_preview_folder(project_name):
         new_name = _re.sub(r'[\\/:*?"<>|]', '_', new_name)
         if not new_name or new_name in (".", ".."):
             return jsonify({"ok": False, "message": "文件夹名称不合法"}), 400
+        # 同名已存在时自动加 -2/-3 后缀（不覆盖原文件夹）
+        # 例如当日修改文件夹已存在 → 0825修改-2
+        def _exists(p):
+            return os.path.isdir(p) or os.path.isdir(sync_engine._to_unc(p))
+        base_name = new_name
+        suffix = 1
+        while _exists(os.path.join(abs_path, new_name)) and suffix <= 50:
+            suffix += 1
+            new_name = "%s-%d" % (base_name, suffix)
         new_path = os.path.join(abs_path, new_name)
+        # UNC 路径（管理员权限下映射盘符无法直接写，用 UNC + cmd mkdir 兜底）
+        unc_path = sync_engine._to_unc(new_path)
+        created = False
         try:
+            # 方案1：直接 Python makedirs（普通权限可用）
             os.makedirs(new_path, exist_ok=True)
-            return jsonify({"ok": True, "message": "已创建 " + new_path, "path": new_path})
-        except Exception as e:
-            return jsonify({"ok": False, "message": "创建失败: " + str(e)}), 500
+            created = os.path.isdir(new_path)
+        except Exception:
+            created = False
+        if not created:
+            # 方案2：os.makedirs 假成功/失败（管理员权限隔离），用 UNC + cmd mkdir 真正创建
+            try:
+                result = subprocess.run(
+                    ["cmd", "/c", "mkdir", unc_path],
+                    capture_output=True, timeout=30)
+                created = os.path.isdir(unc_path) or os.path.isdir(new_path)
+            except Exception:
+                created = False
+        if not created:
+            return jsonify({"ok": False, "message": "创建失败：目录未生成 " + new_path}), 500
+        return jsonify({"ok": True, "message": "已创建 " + new_path, "path": new_path})
 
     # copy（默认）：返回绝对路径
     if not os.path.exists(abs_path):
@@ -694,6 +754,103 @@ def api_project_custom_status(project_name):
     ok, msg = sync_engine.set_custom_status(project_name, status)
     if ok: return jsonify({"ok": True, "message": msg})
     return jsonify({"ok": False, "message": msg}), 400
+
+
+@app.route("/api/project/<path:project_name>/detect_total_episodes", methods=["POST"])
+def api_project_detect_total_episodes(project_name):
+    """自动推断项目总集数：扫描素材文件夹（视频素材/抽卡素材）递归收集集号。
+    可选 body: { fill: true } 表示推断后直接写入 total_episodes。
+    返回 { ok, detected, message, filled }。
+    """
+    data = request.get_json(silent=True) or {}
+    fill = bool(data.get("fill"))
+    proj = sync_engine.db.get_project(project_name)
+    detected = sync_engine.auto_detect_total_episodes(project_name)
+    filled = False
+    if detected > 0 and fill:
+        sync_engine.db.update_project_status(project_name, total_episodes=detected)
+        filled = True
+    if detected > 0:
+        msg = ("已推断总集数 %d 集并已保存" % detected) if filled else ("已推断总集数 %d 集" % detected)
+        return jsonify({"ok": True, "detected": detected, "message": msg, "filled": filled})
+    # 返回明确原因（200 让前端能读取 message）
+    if not proj:
+        reason = "项目不存在"
+    elif not (proj.get("group_path") or "") and not (proj.get("production_path") or ""):
+        reason = "该项目无组内/制作部路径，无法扫描素材"
+    else:
+        reason = "未找到素材文件夹（视频素材/抽卡素材）或无法识别集号"
+    return jsonify({"ok": False, "detected": 0, "message": reason})
+
+
+@app.route("/api/project/<path:project_name>/create_local_project", methods=["POST"])
+def api_create_local_project(project_name):
+    """异步创建本地剪辑项目并拉取素材。立即返回，进度通过
+    GET /api/project/<name>/local_project_progress 查询。
+    """
+    from local_project import create_local_project
+
+    def _progress_cb(stage, done, total):
+        with sync_engine._lock:
+            sync_engine._local_project_tasks[project_name] = {
+                "status": "running", "stage": stage,
+                "done": done, "total": total, "message": "",
+            }
+
+    def _run():
+        try:
+            ok, msg, stats = create_local_project(sync_engine, project_name, progress_cb=_progress_cb)
+            with sync_engine._lock:
+                sync_engine._local_project_tasks[project_name] = {
+                    "status": "done" if ok else "error", "stage": "完成",
+                    "done": 1, "total": 1, "message": msg, "result": stats,
+                }
+        except Exception as e:
+            logger.error("create_local_project failed: %s", e)
+            with sync_engine._lock:
+                sync_engine._local_project_tasks[project_name] = {
+                    "status": "error", "stage": "失败",
+                    "done": 0, "total": 0, "message": "创建失败: " + str(e),
+                }
+
+    # 防止重复提交
+    with sync_engine._lock:
+        cur = sync_engine._local_project_tasks.get(project_name, {})
+        if cur.get("status") == "running":
+            return jsonify({"ok": False, "message": "该项目正在创建本地项目中，请稍候"}), 409
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "已开始创建本地项目"})
+
+
+@app.route("/api/project/<path:project_name>/local_project_progress", methods=["GET"])
+def api_local_project_progress(project_name):
+    """查询本地剪辑项目创建进度。"""
+    with sync_engine._lock:
+        t = dict(sync_engine._local_project_tasks.get(project_name, {}))
+    return jsonify({"ok": True, "task": t})
+
+
+@app.route("/api/project/<path:project_name>/set_episodes", methods=["POST"])
+def api_project_set_episodes(project_name):
+    """设置项目当前/总集数（供 CEP 插件等外部工具更新剪辑进度）。
+    body: { total?: int, current?: int }，缺省字段保持原值。"""
+    data = request.get_json(silent=True) or {}
+    proj = sync_engine.db.get_project(project_name)
+    if not proj:
+        return jsonify({"ok": False, "message": "项目不存在"}), 404
+    total = data.get("total")
+    current = data.get("current")
+    cur_total = int(proj.get("total_episodes") or 0)
+    cur_cur = int(proj.get("current_episodes") or 0)
+    if total is not None:
+        try: cur_total = int(total)
+        except (TypeError, ValueError): pass
+    if current is not None:
+        try: cur_cur = int(current)
+        except (TypeError, ValueError): pass
+    sync_engine.db.set_episodes(project_name, cur_total, cur_cur)
+    return jsonify({"ok": True, "total_episodes": cur_total, "current_episodes": cur_cur})
 
 
 @app.route("/api/project/<path:project_name>/output_dir", methods=["GET", "POST"])
@@ -774,6 +931,7 @@ def api_get_paths():
         "ok": True,
         "production_roots": nas.get("production_roots", []),
         "production_labels": nas.get("production_labels", {}),
+        "production_roots_config": nas.get("production_roots_config", {}),
         "group_root": nas.get("group_root", ""),
         "unc_map": nas.get("unc_map", {}),
     })
@@ -817,9 +975,18 @@ def api_add_path():
         if label:
             labels = nas.setdefault("production_labels", {})
             labels[path] = label
+        # 递归扫描深度：项目在子文件夹时配置（0=不递归，默认3）
+        rd = data.get("recursive_depth")
+        if rd is not None:
+            try:
+                rd = int(rd)
+            except (TypeError, ValueError):
+                rd = 3
+            cfg = nas.setdefault("production_roots_config", {})
+            cfg[path] = {"recursive_depth": max(0, min(rd, 6))}
         save_config()
         reload_sync_engine()
-        logger.info("新增制作部 NAS 路径: %s (标签: %s)", path, label)
+        logger.info("新增制作部 NAS 路径: %s (标签: %s, 递归深度: %s)", path, label, rd)
         return jsonify({"ok": True, "message": "已添加制作部路径: " + path})
 
     elif ptype == "group":
@@ -1351,6 +1518,14 @@ try:
     print("[OK] delivery_sync_service(交付日期定时同步) 已启动")
 except Exception as e:
     print("[WARN] delivery_sync_service 未启动:", e)
+
+# 启动制作部源项目自动扫描（自动发现新建项目）
+try:
+    from project_scan_service import start_scheduler as _start_pscan
+    _start_pscan(sync_engine=sync_engine)
+    print("[OK] project_scan_service(制作部源自动扫描) 已启动")
+except Exception as e:
+    print("[WARN] project_scan_service 未启动:", e)
 
 
 def main():

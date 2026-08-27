@@ -1,5 +1,8 @@
 # 视频工作台 · 开发与口径说明（CONTEXT.md）
 
+> 当前版本 **v3.4.0**（`backend/version.py` 单一来源）。README 的路线图/文件清单/版本徽章应与之保持一致；
+> 若某文件新增/删除/改名，请同步更新 README「项目结构」与本文档「后端路由清单」。
+
 本文件是给开发者/后续维护用的**单一事实来源**：说明架构、关键数据口径、路由约定与代码导航，
 避免后续改动再次出现"口径不一致"或"不知道数据从哪来"的问题。
 
@@ -96,10 +99,15 @@
 ## 6. 前端导航
 
 - **页签**（`switchTab(name)`）：`dashboard`(首页) / `fenji`(分集) / `qa`(质检) / `activity`(动态) / `report`(月度报告) / `editor`(剪辑师) / `nameplate`(人名条) / `settings`(设置)。
-- **新增功能模块**：`static/js/wb-shared.js`（全局共享工具 + `window.WB` 命名空间，最先加载）、`static/js/wb-features.js`（剪辑师视图 `WB.editor` / 离线只读 `WB.offline`）。
-- **新增后端接口**（`backend/schedule_api.py`）：`/api/editor/view`(剪辑师聚合)、`/api/offline/cache`(离线缓存打包)；`/api/projects/episodes_status_batch`(批量集数进度，N+1 优化，在 enhanced_routes.py)。
+- **全局命名空间**：`static/js/wb-shared.js`（`window.WB` 命名空间，最先加载；含**统一转义 `WB.escHtml`**，全站禁止再各自定义 escHtml/htm/jsq，避免三处定义不一致）。`static/js/wb-features.js`（剪辑师视图 `WB.editor` / 离线只读 `WB.offline`）、`static/js/wb-mobile.js`（手机端专属界面）。
+- **分集解析统一**：`static/js/fenji-core.js`（`FenjiCore` 分集工具/去重）+ 后端 `backend/fenji_parser.py`（`parse_assign_line` 三处共用，避免正则漂移）。
+- **新增后端接口**：`backend/schedule_api.py` 提供 `/api/editor/view`(剪辑师聚合)、`/api/offline/cache`(离线缓存打包)；`/api/projects/episodes_status_batch`(批量集数进度，N+1 优化，在 enhanced_routes.py)；`/api/insights/*` 与 `/api/commission/*`（数据洞察/交付日历/提成绩效，见 backend/features.py、commission.py）。
 - **新增 DB 列**：`projects.output_dir_name`(成片目录项目级覆盖)、`projects.delivery_folder`(交付目录项目级覆盖)。
+- **集号识别单源**：`backend/episode_number.py` 是集号提取正则与逻辑的唯一来源，`deliver.py` 与 `preview.py` 均通过 `self._extract_episode_number` 委托它，避免正则漂移。
+- **CEP 插件联动**：`plugins/premiere-cep/` 是 Premiere Pro CEP 插件（读取项目/标记剪辑完成/更新集数）。后端为支持它：`/api/*` 已开放 CORS（`Access-Control-Allow-Origin:*` + OPTIONS 预检，仍走 X-API-KEY 鉴权）；新增 `POST /api/project/<name>/set_episodes`（更新 current/total_episodes，供外部工具调用）。
 - **目录名统一解析**：`backend/output_dir_util.py` 是成片输出目录名 / 交付目录名的唯一解析源，`sync.py` 与 `watcher.py` 均调用它，避免重复漂移。
+- **本地剪辑项目**：`backend/local_project.py` 提供 `create_local_project()`，根据分集分配(`episode_plan`)确定"我"(设置项 `my_editor_name`)负责的集数，在本地项目盘(设置项 `local_project_root`)创建「序号-项目名」文件夹(序号用 `_next_seq` 递增)，复制模板结构(设置项 `local_project_template`)，并**只拉取负责集**的素材(扁平复制到 `01原素材/第N集 剪辑师名/`)。接口 `POST /api/project/<name>/create_local_project` 为异步(后台线程)，进度经 `GET /api/project/<name>/local_project_progress` 轮询。集号识别 `_extract_episode_number` 会**排除结构目录序号**(`NN_结构词` 如 `01_抽卡素材` 不算集号)，避免误拉全部素材。
+- **制作部自动扫描**：`backend/project_scan_service.py` 提供 `start_scheduler()`，daemon 线程每 10 分钟调用 `scan_projects()` 自动发现制作部新建项目(幂等 upsert)，在 app.py 启动时注册。`scan.py` 的 `_looks_like_project` 已修复：编号正则放宽为任意位置 4-6 位数字，且 `_CATEGORY_WORDS` 移除"海外/国内"(避免误伤含"国内版/海外版"的项目名)。
 - **手机远程访问**：后端 `web.host` 已改为 `0.0.0.0`（`backend/config.yaml`），`main_desktop.py` 的 `_run_server` 也从 config 读取 host（默认 0.0.0.0）。通过 **Tailscale 组网**访问（电脑 `100.68.53.62`），不暴露公网。API key 由后端在渲染 `index.html` 时自动注入 `window.__API_KEY__`，手机端无需处理。安卓 WebView 壳 App 源码在 `mobile-app/WorkbenchMobile/`。
 
 ## 7. 隐私与 .gitignore

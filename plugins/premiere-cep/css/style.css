@@ -1,0 +1,42 @@
+/* 视频工作台 · CEP 面板样式 */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Microsoft YaHei", -apple-system, sans-serif;
+  font-size: 13px;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  padding: 12px;
+}
+.app { display: flex; flex-direction: column; gap: 12px; }
+.card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.card-title {
+  font-size: 14px; font-weight: 600; color: #1d1d1f;
+  margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #eee;
+}
+label { display: block; font-size: 12px; color: #86868b; margin-bottom: 8px; }
+input[type="text"], input[type="password"] {
+  width: 100%; padding: 8px 10px; margin-top: 4px;
+  border: 1px solid #d2d2d7; border-radius: 8px; font-size: 13px;
+}
+.row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+button {
+  padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px;
+  background: #fff; font-size: 12px; cursor: pointer; color: #1d1d1f;
+}
+button:hover { background: #f0f0f2; }
+button.primary { background: #0071e3; color: #fff; border-color: #0071e3; }
+button.primary:hover { background: #0077ed; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.status { font-size: 12px; margin-left: 4px; }
+.status.ok { color: #34c759; }
+.status.err { color: #ff3b30; }
+.info-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f2f2f4; }
+.info-row .k { color: #86868b; }
+.info-row .v { font-weight: 600; max-width: 220px; text-align: right; word-break: break-all; }
+.hint { margin-top: 8px; font-size: 12px; color: #86868b; }
+.footer { text-align: center; color: #c7c7cc; font-size: 11px; margin-top: 4px; }

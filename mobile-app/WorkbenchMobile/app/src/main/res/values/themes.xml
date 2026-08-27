@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="Theme.AppCompat.Light">
-        <item name="colorPrimary">#1d1d1f</item>
-        <item name="colorPrimaryDark">#161618</item>
+        <!-- 状态栏/顶栏颜色改为浅色，去掉顶部黑边，与页面背景融合 -->
+        <item name="colorPrimary">#f5f5f7</item>
+        <item name="colorPrimaryDark">#f5f5f7</item>
         <item name="colorAccent">#0071e3</item>
         <item name="android:windowBackground">#f5f5f7</item>
+        <item name="android:statusBarColor">#f5f5f7</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

@@ -23,6 +23,7 @@ class SyncEngine(ScanMixin, SyncMixin, DeliverMixin, PreviewMixin):
         self.special_projects = config.get("special_projects", {}) or {}
         self._output_dir_cache = {}  # 缓存递归查找结果
         self._deliver_tasks = {}      # project_name -> {status, total, current, pct, started_at, message}
+        self._local_project_tasks = {}  # project_name -> {status, stage, done, total, message, result}
         self._lock = threading.RLock()  # 保护上面两个共享字典
         self._dept_labels = config["nas"].get("production_labels", {})
         self._unc_map = config["nas"].get("unc_map", {})
@@ -55,15 +56,29 @@ class SyncEngine(ScanMixin, SyncMixin, DeliverMixin, PreviewMixin):
             self._output_dir_cache = {}
 
     def _save_output_dir_cache(self):
-        """把目录缓存写盘。失败不影响主流程。"""
+        """把目录缓存写盘。返回 True 表示成功。
+
+        用临时文件 + 替换，避免写入中断损坏缓存。文件可能被杀软或并发线程短暂
+        锁定（WinError 5），做一次短暂重试后再放弃，降低偶发失败噪音。
+        """
         try:
             with self._lock:
                 data = dict(self._output_dir_cache)
-            # 用临时文件 + 替换，避免写入中断损坏缓存
             tmp = self._output_dir_cache_file + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False)
-            os.replace(tmp, self._output_dir_cache_file)
+            import time as _t
+            for _attempt in range(2):
+                try:
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False)
+                    os.replace(tmp, self._output_dir_cache_file)
+                    return True
+                except PermissionError:
+                    # 文件被占用，短暂等待后重试一次
+                    _t.sleep(0.15)
+            logger.warning("保存目录缓存失败(重试后仍失败): 文件被占用 %s",
+                           self._output_dir_cache_file)
+            return False
         except Exception as e:
             logger.warning("保存目录缓存失败: %s", e)
+            return False
 

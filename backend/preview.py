@@ -430,14 +430,17 @@ class PreviewMixin:
             rev_folders = self.list_all_revision_folders(project_name)
             rev_abs = None
             if rev_folder_name:
+                # 已进入某个修改文件夹：新建文件夹建在该修改文件夹内
                 for f in rev_folders:
                     if f["name"] == rev_folder_name:
                         rev_abs = f["path"]
                         break
             else:
-                # subpath 为空（修改根目录）：新建文件夹时默认建到最新修改文件夹下
-                if rev_folders:
-                    rev_abs = rev_folders[0]["path"]
+                # subpath 为空（修改预览根目录/上映单集版根）：
+                # 新建文件夹应建在"上映单集版"根目录（与各 MMDD修改 同级），而非修改文件夹内部
+                output_dirs = self._find_output_dirs(group_path, project_name)
+                if output_dirs:
+                    rev_abs = output_dirs[0]
             if rev_abs and folder:
                 return os.path.join(rev_abs, folder)
             return rev_abs

@@ -298,6 +298,20 @@ async function deliverBatch(){
             toast('✅ 批量回传完成', 'success');
             refreshDeliverablesList();
             _showDeliverDoneModal(name);
+            // 审核流程回调：批量回传完成后推进状态（二部项目 待提交审核→审核中 / 修改中→N审中）
+            if(window._afterDeliverBatch){
+              var cb = window._afterDeliverBatch;
+              window._afterDeliverBatch = null;
+              try{
+                if(cb.status === '审核中'){
+                  api('POST','/api/project/'+encodeURIComponent(name)+'/custom_status',{custom_status:'审核中'})
+                    .then(function(){ if(typeof loadProjects==='function') loadProjects(); });
+                } else if(cb.status === 'next_review'){
+                  // 修改回传完成 → 推进到下一轮审核（N审递增）
+                  if(typeof submitRevisionSetStatus === 'function') submitRevisionSetStatus(name);
+                }
+              }catch(_){}
+            }
           }, 500);
         }
       }catch(err){}
