@@ -215,6 +215,9 @@ class ScanMixin:
             logger.error("未配置制作部 NAS 路径 (production_roots)")
             return []
 
+        # 软删除/忽略的项目：扫描时跳过
+        ignored_names = set(self.db.get_ignored_projects())
+
         month_pattern = re.compile(r'^\d{1,2}月$')
 
         all_names = []
@@ -259,6 +262,8 @@ class ScanMixin:
                         continue
                     # 判断是否为项目
                     if _looks_like_project(full, name):
+                        if name in ignored_names:
+                            continue  # 软删除/忽略的项目，扫描时跳过
                         is_special = name in self.special_projects
                         sc = self.special_projects.get(name, {})
                         group_path = os.path.join(self.nas["group_root"], name)
@@ -296,6 +301,7 @@ class ScanMixin:
                 self.db.delete_project(proj["name"])
 
         found = []
+        ignored_names = set(self.db.get_ignored_projects())
         try:
             for name in os.listdir(group_root):
                 full = os.path.join(group_root, name)
@@ -306,6 +312,8 @@ class ScanMixin:
                     continue
                 if month_pattern.match(name):
                     continue
+                if name in ignored_names:
+                    continue  # 软删除/忽略的项目，扫描时跳过
 
                 # 写入数据库：source_root 为空 = group_only 类型
                 self.db.upsert_project(
@@ -385,6 +393,7 @@ class ScanMixin:
 
         # 扫描 O 盘全部项目目录（实时）
         month_pattern = re.compile(r'^\d{1,2}月$')
+        ignored_names = set(self.db.get_ignored_projects())
         if os.path.isdir(group_root):
             for name in os.listdir(group_root):
                 full = os.path.join(group_root, name)
@@ -393,6 +402,8 @@ class ScanMixin:
                 # 跳过模板/占位目录，但保留 00编号_项目 这类项目
                 if _is_template_dir(name) or month_pattern.match(name):
                     continue
+                if name in ignored_names:
+                    continue  # 软删除/忽略的项目，不展示
 
                 # 从数据库获取项目状态（delivery_status 等）
                 db_proj = db_projects.get(name)

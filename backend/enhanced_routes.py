@@ -166,16 +166,46 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
 
     @app.route("/api/project/<path:project_name>", methods=["DELETE"])
     def api_project_delete(project_name):
+        """删除项目。body 可选 { mode: "soft"|"hard" }。
+        - soft（默认）：软移除，删数据库记录 + 加入忽略列表（扫描不再自动重新加入），保留 NAS 文件夹
+        - hard：彻底删除，删数据库记录 + 忽略列表 + 组内 NAS 项目文件夹（不可逆）
+        """
+        data = request.get_json(silent=True) or {}
+        mode = (data.get("mode") or "soft").lower()
+        # 审计：高危删除项目
         try:
-            # 审计：高危删除项目
-            try:
-                db.add_audit_log(project_name, "删除项目", "删除项目记录")
-            except Exception:
-                pass
-            db.delete_project(project_name)
-        except Exception as e:
-            return jsonify({"ok": False, "message": str(e)}), 500
-        return jsonify({"ok": True})
+            db.add_audit_log(project_name, "删除项目",
+                             "软移除" if mode == "soft" else "彻底删除(含NAS文件夹)")
+        except Exception:
+            pass
+
+        deleted_nas = False
+        nas_error = ""
+        if mode == "hard":
+            # 彻底删除：删除组内 NAS 项目文件夹
+            proj = db.get_project(project_name)
+            group_path = (proj.get("group_path") or "") if proj else ""
+            if not group_path:
+                # 回退：从 group_root 拼
+                group_root = sync_engine.nas.get("group_root", "") if sync_engine else ""
+                if group_root:
+                    group_path = _os.path.join(group_root, project_name)
+            if group_path and _os.path.isdir(group_path):
+                import shutil
+                try:
+                    shutil.rmtree(group_path)
+                    deleted_nas = True
+                except Exception as _e:
+                    # NAS 文件夹删除失败（权限/占用/网络盘），记录但继续删数据库记录
+                    nas_error = str(_e)
+
+        # 删除数据库记录 + 加入忽略列表（防止扫描重新加入）
+        # 即使 NAS 删除失败，这里也要成功，保证项目不再统计
+        db.delete_project(project_name)
+        db.add_ignored_project(project_name)
+
+        return jsonify({"ok": True, "deleted_nas": deleted_nas,
+                        "nas_error": nas_error})
 
     # ============================================================
     # 新版 QA 路由（完全照搬独立视频质检工具的功能）

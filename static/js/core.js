@@ -6,7 +6,7 @@ let projects=[], allSections=[], allProjects={}, fenjiLight=[], qaRunning=false,
 
 function $(id){return document.getElementById(id)}
 function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!==undefined)e.innerHTML=html;return e}
-async function api(method,path,body){const opts={method,headers:{}};if(body!==undefined){if(body instanceof FormData){opts.body=body}else{opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body)}}const r=await fetch(API+path,opts);if(!r.ok)throw new Error(r.status+' '+r.statusText);const ct=r.headers.get('content-type')||'';return ct.includes('application/json')?r.json():r.text()}
+async function api(method,path,body){const opts={method,headers:{}};if(body!==undefined){if(body instanceof FormData){opts.body=body}else{opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body)}}const r=await fetch(API+path,opts);const ct=r.headers.get('content-type')||'';if(!r.ok){let msg=r.status+' '+r.statusText;try{const j=await r.json();if(j&&j.message)msg=j.message;}catch(e){}throw new Error(msg)}return ct.includes('application/json')?r.json():r.text()}
 
 // 安全地把任意字符串嵌入 JS 单引号字符串（用于 onclick 属性等）。
 // escHtml/htm 只处理 HTML 实体，浏览器解析 onclick 属性时会先解码实体再交给 JS，
@@ -606,9 +606,11 @@ let _confirmResolve = null;
 function showConfirm(message, title='确认', okText='确定', cancelText='取消'){
   return new Promise((resolve) => {
     _confirmResolve = resolve;
-    document.getElementById('confirmTitle').textContent = title;
-    document.getElementById('confirmMsg').textContent = message;
-    document.getElementById('confirmOkBtn').textContent = okText;
+    const modal = document.querySelector('#confirmModal .modal');
+    // 重建标准确认结构（避免被 chooseDeleteMode 等覆盖后缺元素）
+    modal.innerHTML = '<div class="modal-head"><h3>'+escHtml(title)+'</h3><span class="modal-close" onclick="closeConfirm(false)">×</span></div>'
+      + '<div class="modal-body"><div style="font-size:13px;line-height:1.6;white-space:pre-line;color:var(--text)">'+escHtml(message)+'</div></div>'
+      + '<div class="modal-foot"><button class="btn" onclick="closeConfirm(false)">'+escHtml(cancelText)+'</button><button class="btn btn-primary" onclick="closeConfirm(true)">'+escHtml(okText)+'</button></div>';
     document.getElementById('confirmModal').classList.add('active');
   });
 }

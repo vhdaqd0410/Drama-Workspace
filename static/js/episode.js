@@ -141,6 +141,7 @@ async function openProjectDetail(name){
         ${p.production_path?`<button onclick="openFolder('production','${jsq(p.name)}')" class="secondary">📁 打开制作文件夹</button>`:''}
         <button onclick="closeDeliverablesModal();openFenjiFor('${jsq(p.name)}')" class="secondary">📑 管理分集</button>
         <button onclick="closeDeliverablesModal();qaStartFor('${jsq(p.name)}')" class="secondary">🔍 开始质检</button>
+        <button onclick="deleteProject('${jsq(p.name)}')" class="secondary" style="color:var(--red);border-color:var(--red)" title="删除项目（不再统计集数）">🗑️ 删除项目</button>
       </div>
     `;
     // 加载待办 + 时间轴
@@ -151,6 +152,67 @@ async function openProjectDetail(name){
       <div style="padding:0 20px 20px;text-align:right"><button class="btn" onclick="closeDeliverablesModal()">关闭</button></div>`;
   }
 }
+// ===== 删除项目（软移除 / 彻底删除） =====
+async function deleteProject(name){
+  // 先让用户选择删除方式
+  const mode = await chooseDeleteMode(name);
+  if(!mode) return;
+
+  let confirmMsg, okText;
+  if(mode === 'soft'){
+    confirmMsg = '仅软移除项目「'+name+'」？\n\n· 从软件里移除（不再统计集数/工作量）\n· 组内 NAS 文件夹保留\n· 扫描时不再自动重新加入\n\n（可在需要时恢复）';
+    okText = '软移除';
+  } else {
+    confirmMsg = '⚠️ 彻底删除项目「'+name+'」？\n\n· 删除数据库记录（不再统计）\n· 同时删除组内 NAS 里的项目文件夹\n\n此操作不可逆！请确认已备份所需素材。';
+    okText = '彻底删除';
+  }
+  const ok = await showConfirm(confirmMsg, '🗑️ 删除项目', okText, '取消');
+  if(!ok) return;
+
+  try{
+    const r = await api('DELETE', '/api/project/' + encodeURIComponent(name), { mode });
+    if(r && r.ok){
+      if(mode === 'hard' && !r.deleted_nas){
+        // 数据库已删除，但 NAS 文件夹删除失败（可能权限/文件占用）
+        toast('⚠️ 已从软件移除，但 NAS 文件夹删除失败：' + (r.nas_error || '未知原因'), 'error');
+      } else {
+        toast('✅ 项目已' + (mode==='soft' ? '软移除' : '彻底删除'), 'success');
+      }
+      closeDeliverablesModal();
+      // 刷新列表
+      if(typeof loadProjects === 'function') loadProjects();
+      if(typeof loadFenjiProjects === 'function') loadFenjiProjects();
+    } else {
+      toast('❌ ' + ((r && r.message) || '删除失败'), 'error');
+    }
+  }catch(e){
+    toast('❌ 删除失败: ' + e.message, 'error');
+  }
+}
+
+// 选择删除方式：返回 'soft' / 'hard' / null(取消)
+function chooseDeleteMode(name){
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('confirmModal');
+    const modal = overlay.querySelector('.modal');
+    modal.innerHTML = '<div class="modal-head"><h3>🗑️ 删除项目</h3><span class="modal-close" onclick="document.getElementById(\'confirmModal\').classList.remove(\'active\'); window.__delModeResolve && window.__delModeResolve(null)">×</span></div>'
+      + '<div class="modal-body">'
+      + '<div style="font-size:13px;line-height:1.6;color:var(--text);margin-bottom:14px">选择删除方式：<b>'+name+'</b></div>'
+      + '<div style="display:flex;flex-direction:column;gap:10px">'
+      + '<button class="btn" style="justify-content:flex-start;text-align:left;padding:12px 14px" onclick="closeDeleteMode(\'soft\')">'
+      + '<span>📦 仅软移除</span><br><span style="font-size:11px;color:var(--text-sec);font-weight:400">从软件移除、不再统计集数；保留 NAS 文件夹，可恢复</span></button>'
+      + '<button class="btn" style="justify-content:flex-start;text-align:left;padding:12px 14px;color:var(--red);border-color:var(--red)" onclick="closeDeleteMode(\'hard\')">'
+      + '<span>🗑️ 彻底删除</span><br><span style="font-size:11px;color:var(--text-sec);font-weight:400">同时删除组内 NAS 项目文件夹（不可逆）</span></button>'
+      + '</div></div>';
+    overlay.classList.add('active');
+    window.__delModeResolve = resolve;
+  });
+}
+function closeDeleteMode(mode){
+  document.getElementById('confirmModal').classList.remove('active');
+  if(window.__delModeResolve){ window.__delModeResolve(mode); window.__delModeResolve = null; }
+}
+
 // ===== 待办事项（融合自「项目档案管理器」）=====
 async function loadTodos(name){
   const box=document.getElementById('todoBox');

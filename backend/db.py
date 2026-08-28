@@ -878,6 +878,29 @@ class Database:
         except Exception:
             return {}
 
+    # ==================== 忽略/软删除项目（扫描时跳过） ====================
+
+    def get_ignored_projects(self):
+        """返回被忽略（软删除）的项目名列表。"""
+        raw = self.get_setting("ignored_projects", "[]")
+        try:
+            data = json.loads(raw) if raw else []
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def add_ignored_project(self, name):
+        """把项目加入忽略列表（扫描时跳过）。"""
+        ignored = self.get_ignored_projects()
+        if name not in ignored:
+            ignored.append(name)
+            self.set_setting("ignored_projects", ignored)
+
+    def remove_ignored_project(self, name):
+        """从忽略列表移除（恢复项目）。"""
+        ignored = [n for n in self.get_ignored_projects() if n != name]
+        self.set_setting("ignored_projects", ignored)
+
     # ==================== 项目待办事项 ====================
     def get_project_todos(self, project_name):
         try:

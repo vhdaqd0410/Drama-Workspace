@@ -49,6 +49,16 @@ class TestLocalProject:
         eng.db.update_project_status(name, episode_plan=json.dumps(ep_plan, ensure_ascii=False))
         return proj
 
+    def _mk_roughcut(self, tmp_path, name, editors):
+        """在组内项目里建粗剪文件夹：02_抽卡素材/03_粗剪/集号-剪辑师.mp4（文件形式）。"""
+        proj = os.path.join(str(tmp_path), "group", name)
+        rc = os.path.join(proj, "02_抽卡素材", "03_粗剪")
+        os.makedirs(rc, exist_ok=True)
+        for ed, eps in editors.items():
+            for ep in eps:
+                open(os.path.join(rc, "%d-%s.mp4" % (ep, ed)), "w").close()
+        return rc
+
     def _setup_settings(self, eng, tmp_path, my_editor):
         local_root = os.path.join(str(tmp_path), "local")
         eng.db.set_setting("local_project_root", local_root)
@@ -144,3 +154,22 @@ class TestLocalProject:
         assert "第1集 张三" in names
         assert "第2集 张三" in names
         assert not any("第3集" in n or "第4集" in n for n in names)
+
+    def test_pull_roughcut_files(self, tmp_path):
+        """粗剪文件（03_粗剪/集号-剪辑师.mp4）应正确拉取到 01原素材/第N集。"""
+        from local_project import create_local_project
+        eng = self._engine(tmp_path)
+        self._mk_group_project(tmp_path, eng, "测试项目",
+                               {"张三": [1, 2], "李四": [3, 4, 5, 6]})
+        self._mk_roughcut(tmp_path, "测试项目",
+                          {"张三": [1, 2], "李四": [3, 4, 5, 6]})
+        self._setup_settings(eng, tmp_path, "张三")
+
+        ok, msg, stats = create_local_project(eng, "测试项目")
+        assert ok is True, msg
+        # 只拉我负责的 2 个粗剪文件（第1、2集），不是全部 6 个
+        assert stats["roughcut_copied"] == 2
+        # 粗剪文件在 01原素材/第N集 剪辑师/ 里
+        mat_dir = os.path.join(str(tmp_path), "local", "001-测试项目", "01原素材")
+        assert "1-张三.mp4" in os.listdir(os.path.join(mat_dir, "第1集 张三"))
+        assert "2-张三.mp4" in os.listdir(os.path.join(mat_dir, "第2集 张三"))

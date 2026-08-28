@@ -207,18 +207,25 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
              "script_copied": 0, "template_copied": template_copied,
              "material_dirs": []}
 
-    # 4. 定位素材/粗剪/剧本文件夹（递归查找，含一层以上嵌套）
+    # 4. 定位素材/粗剪/剧本文件夹（递归查找，支持多层嵌套）
     def _find_dirs(root, keywords):
         found = []
-        try:
-            for s in os.listdir(root):
-                full = os.path.join(root, s)
+        def _walk(p, depth=0):
+            if depth > 4:
+                return
+            try:
+                items = os.listdir(p)
+            except OSError:
+                return
+            for s in items:
+                full = os.path.join(p, s)
                 if not os.path.isdir(full):
                     continue
                 if any(k in s for k in keywords):
                     found.append(full)
-        except OSError:
-            pass
+                else:
+                    _walk(full, depth + 1)
+        _walk(root)
         return found
 
     material_dirs = _find_dirs(group_path, _MATERIAL_KEYWORDS)
@@ -252,6 +259,28 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
         _walk(folder)
         return result
 
+    def _collect_episode_files(folder):
+        """收集 folder 下按「集号-剪辑师.扩展名」命名的文件（如 1-张光强.mp4），
+        返回 {集号: (文件路径, 剪辑师名)}。用于粗剪等"每集一个文件"的结构。"""
+        result = {}
+        try:
+            items = os.listdir(folder)
+        except OSError:
+            return result
+        for item in items:
+            full = os.path.join(folder, item)
+            if not os.path.isfile(full):
+                continue
+            if item.startswith('.'):
+                continue
+            # 去掉扩展名后提取集号/剪辑师
+            stem = os.path.splitext(item)[0]
+            ep = _extract_episode_number(stem)
+            if ep is not None and ep in my_ep_set and ep not in result:
+                editor = _extract_editor_from_dirname(stem) or my_editor
+                result[ep] = (full, editor)
+        return result
+
     # 6. 拉取素材：对每个素材目录，找集号文件夹，扁平复制到 01原素材/第N集 剪辑师
     for md in material_dirs:
         ep_dirs = _find_episode_dirs(md)
@@ -266,14 +295,25 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
                 stats["material_dirs"].append("第%d集 %s (%d 文件)" % (ep, editor, n))
             _prog("拉取素材", len(stats["material_dirs"]), len(my_episodes))
 
-    # 7. 拉取粗剪（若存在粗剪文件夹）
+    # 7. 拉取粗剪（全局按集号去重，避免「03_粗剪」与「N-剪辑师/粗剪」子目录重复）
+    # 支持两种结构：文件形式「N-剪辑师.mp4」、文件夹形式「N-剪辑师/xxx」
+    # 粗剪与素材放在一起，统一放入 01原素材/第N集 剪辑师/
+    rough_seen = set()  # 已处理的集号（全局去重）
     for rd in roughcut_dirs:
-        ep_dirs = _find_episode_dirs(rd)
-        for ep in my_episodes:
-            if ep not in ep_dirs:
+        # 文件形式：粗剪目录下直接是「集号-剪辑师.mp4」
+        for ep, (src_file, editor) in _collect_episode_files(rd).items():
+            if ep in rough_seen:
                 continue
-            src_dir, editor = ep_dirs[ep]
-            dst_dir = os.path.join(local_proj_dir, "粗剪", "第%d集 %s" % (ep, editor))
+            rough_seen.add(ep)
+            dst_dir = os.path.join(material_target, "第%d集 %s" % (ep, editor))
+            if _copy_file_robust(src_file, os.path.join(dst_dir, os.path.basename(src_file)), unc_map):
+                stats["roughcut_copied"] += 1
+        # 文件夹形式：粗剪目录下是「集号-剪辑师/xxx」
+        for ep, (src_dir, editor) in _find_episode_dirs(rd).items():
+            if ep in rough_seen:
+                continue
+            rough_seen.add(ep)
+            dst_dir = os.path.join(material_target, "第%d集 %s" % (ep, editor))
             n = _flatten_copy(src_dir, dst_dir, unc_map)
             if n > 0:
                 stats["roughcut_copied"] += n
