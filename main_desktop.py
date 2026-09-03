@@ -897,6 +897,31 @@ def _register_quit_api(flask_app):
         except Exception:
             return '{"ok":true}', 200
 
+    # Premiere CEP 面板跳转定位：先唤回窗口（托盘/最小化时），再广播 SSE jump 事件
+    @flask_app.route("/api/_self/jump", methods=["POST", "GET"])
+    def _api_self_jump():
+        try:
+            from flask import jsonify, request as _req
+            project = (_req.args.get("project") or _req.form.get("project") or "").strip()
+            if not project:
+                return jsonify({"ok": False, "message": "缺少 project 参数"}), 400
+            # 先确保窗口显示（后台/托盘时唤回），否则跳转高亮发生在不可见窗口里
+            try:
+                _show_window()
+            except Exception:
+                pass
+            published = False
+            try:
+                from backend.app import sync_engine
+                if sync_engine:
+                    sync_engine._sse_publish({"type": "jump", "project": project})
+                    published = len(sync_engine._sse_clients) > 0
+            except Exception:
+                pass
+            return jsonify({"ok": True, "project": project, "sse_clients": published})
+        except Exception:
+            return '{"ok":false}', 200
+
 
 # ============================================================
 # Flask + waitress
