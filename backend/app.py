@@ -562,6 +562,23 @@ def api_sse():
                              "X-Accel-Buffering": "no"})
 
 
+@app.route("/api/_self/jump")
+def api_self_jump():
+    """外部扩展（Premiere CEP 面板）请求：让已打开的桌面端跳转并高亮某个项目。
+    通过 SSE 广播 jump 事件，前端收到后调 jumpToProject(name) 定位高亮。
+    用法: GET /api/_self/jump?project=项目名（URL 编码）
+    """
+    from flask import request as _req
+    project = (_req.args.get("project") or "").strip()
+    if not project:
+        return jsonify({"ok": False, "message": "缺少 project 参数"}), 400
+    try:
+        sync_engine._sse_publish({"type": "jump", "project": project})
+        return jsonify({"ok": True, "broadcast": True, "project": project})
+    except Exception as e:
+        return jsonify({"ok": False, "message": "广播失败: %s" % e}), 500
+
+
 @app.route("/api/project/<path:project_name>/source_dir")
 def api_project_source_dir(project_name):
     path, err = sync_engine.get_source_dir(project_name)

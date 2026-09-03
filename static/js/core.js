@@ -87,6 +87,11 @@ function initDesktopSSE(){
         } else if(payload.type==='nas'){
           // NAS 可达性变化 → 显示/隐藏离线横幅
           _handleNasStatus(payload.ok, payload.roots);
+        } else if(payload.type==='jump'){
+          // 外部扩展（Premiere CEP 面板）请求：跳转并高亮某个项目
+          if(payload.project && typeof jumpToProject === 'function'){
+            setTimeout(function(){ jumpToProject(payload.project); }, 150);
+          }
         }
       }catch(_){}
     };
