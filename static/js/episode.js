@@ -135,6 +135,7 @@ async function openProjectDetail(name){
       </div>
       <div class="detail-actions">
         <button onclick="setProjectMonth('${jsq(p.name)}')" class="secondary">📅 设置月份</button>
+        <button onclick="toggleDomestic('${jsq(p.name)}', ${p.is_domestic?1:0})" class="secondary" style="${p.is_domestic?'background:#e8f5e9;color:#2e7d32;border-color:#c8e6c9':''}" title="标记为国内（统计为 AI真人）">${p.is_domestic?'✅ 国内':'🏠 标记国内'}</button>
         <button onclick="setProjectDeliveredDate('${jsq(p.name)}')" class="secondary">🗓 交付日期</button>
         <button onclick="setProjectOwner('${jsq(p.name)}')" class="secondary" title="指派/修改项目负责人（审核流责任到人）">👤 负责人${p.owner?':'+escHtml(p.owner):''}</button>
         ${p.group_path?`<button onclick="openFolder('group','${jsq(p.name)}')" class="secondary">📁 打开组内文件夹</button>`:''}
@@ -302,6 +303,20 @@ function openSmart(name, which){
 }
 
 // 设置/清除项目负责人（功能5，审核流责任到人）
+// 切换项目「非海外剧(国内)」标记
+function toggleDomestic(name, cur){
+  const target = cur ? 0 : 1;
+  api('POST','/api/project/' + encodeURIComponent(name) + '/is_domestic', {is_domestic: target}).then(function(d){
+    if(d && d.ok){
+      toast(target ? '✅ 已标记为国内（统计为 AI真人）' : '已取消国内标记，恢复海外', 'success');
+      // 主面板直接切换：只刷新卡片，不弹详情
+      if(typeof loadProjects === 'function'){ loadProjects(); }
+    } else {
+      toast((d && d.message) || '设置失败', 'error');
+    }
+  }).catch(function(e){ toast('设置失败: '+e.message, 'error'); });
+}
+
 function setProjectOwner(name){
   const cur = prompt('项目负责人姓名（留空清除）：\n' + name, '');
   if(cur === null) return;

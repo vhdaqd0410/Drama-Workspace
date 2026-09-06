@@ -154,3 +154,106 @@ def list_templates(tpl_dir):
         return []
     return [f for f in _os.listdir(tpl_dir)
             if f.lower().endswith(('.xlsx', '.xlsm')) and not f.startswith('~$')]
+
+
+def _iter_project_blocks(ws):
+    """解析工作表里的项目块，返回 [{start_row, end_row, name, path, time, status, assign_rows}]。
+
+    判定规则：第 1 列（A 列）非空的单元格标记一个项目块的起始行；
+    块结束行 = 下一个第 1 列非空行 - 1（或 max_row）。
+    第 3 列（C 列）逐行存 "剪辑师：范围"。
+    """
+    blocks = []
+    cur = None
+    for r in range(1, ws.max_row + 1):
+        val_a = ws.cell(row=r, column=1).value
+        a = (str(val_a).strip() if val_a is not None else '')
+        if a:
+            # 标题行（如"九月份"）不属于项目块：跳过单行且无 C 列内容的行
+            if cur is not None:
+                cur['end_row'] = r - 1
+                blocks.append(cur)
+            cur = {
+                'start_row': r,
+                'end_row': r,
+                'name': a,
+                'path': (str(ws.cell(row=r, column=2).value or '')).strip(),
+                'time': (str(ws.cell(row=r, column=4).value or '')).strip(),
+                'status': (str(ws.cell(row=r, column=5).value or '')).strip(),
+                'assign_rows': [],
+            }
+        if cur is not None:
+            c = ws.cell(row=r, column=3).value
+            if c and str(c).strip():
+                cur['assign_rows'].append(str(c).strip())
+    if cur is not None:
+        cur['end_row'] = ws.max_row
+        blocks.append(cur)
+    # 剔除"标题行"：块内没有任何 assign_rows 且只有 1 行
+    return [b for b in blocks if b['assign_rows'] or (b['end_row'] - b['start_row'] + 1) > 1]
+
+
+def export_upsert(tpl_bytes, project_name, path, assign_list,
+                  time_text='', status_text='已分集'):
+    """upsert 模式：目标文件里同名项目块原地更新，否则追加到末尾。
+
+    返回新文件 bytes，以及 { updated: bool } 标记是更新还是新增。
+    """
+    wb = openpyxl.load_workbook(_io.BytesIO(tpl_bytes))
+    ws = wb[wb.sheetnames[0]]
+
+    blocks = _iter_project_blocks(ws)
+    # 收集标题行内容（row 1 通常是月份标题，保持不动）
+    title_val = ws.cell(row=1, column=1).value
+
+    updated = False
+    for b in blocks:
+        if b['name'] == project_name:
+            b['path'] = path
+            if time_text:
+                b['time'] = time_text
+            b['status'] = status_text
+            b['assign_rows'] = [f"{d['person']}：{d['range']}" for d in assign_list]
+            updated = True
+            break
+    if not updated:
+        blocks.append({
+            'start_row': 0, 'end_row': 0,
+            'name': project_name, 'path': path,
+            'time': time_text, 'status': status_text,
+            'assign_rows': [f"{d['person']}：{d['range']}" for d in assign_list],
+        })
+
+    # 清空数据区（第 2 行起）：先解除所有合并，再删除行
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 2:
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
+    if ws.max_row >= 2:
+        ws.delete_rows(2, ws.max_row - 1)
+
+    # 重写所有项目块（保持原顺序，同名项目已原位更新）
+    start = 2
+    for b in blocks:
+        # 把 "剪辑师：范围" 字符串拆回 dict 列表，复用 _append_project 的合并逻辑
+        alist = []
+        for line in b['assign_rows']:
+            if '：' in line:
+                p, r = line.split('：', 1)
+            elif ':' in line:
+                p, r = line.split(':', 1)
+            else:
+                continue
+            alist.append({'person': p.strip(), 'range': r.strip()})
+        if not alist:
+            alist = [{'person': '', 'range': ''}]
+        end = _append_project(ws, start, b['name'], b['path'], alist, b['time'], b['status'])
+        start = end + 1
+
+    _beautify(ws)
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), updated

@@ -167,6 +167,24 @@ def set_config(config):
 
 set_config(load_config())
 
+def display_role(role):
+    """项目职位栏显示名：组长→组长，一卡→卡前，其余→卡后。"""
+    if role == '剪辑组长':
+        return '组长'
+    if role == '一卡剪辑':
+        return '卡前'
+    return '卡后'
+
+
+def commission_desc(role):
+    """本月提成构成文案（职位栏口径）：组长/卡前/卡后。"""
+    if role == '剪辑组长':
+        return '20元/集，一部提成100元（只能剪前十集）'
+    if role == '一卡剪辑':
+        return '基本量70集/月，超出一集20元/集，缺一集-50元/集'
+    return '基本量120集/月，超出一集20元/集，缺一集-50元/集'
+
+
 def normalize_role(role_str):
     """容错：将用户输入的角色名规范化为标准名"""
     if not role_str:
@@ -198,27 +216,34 @@ def clean(text):
 
 
 def extract_project_id(text):
+    """提取项目 ID：取所有数字串中「最长且不以 0 开头」的那个。
+
+    覆盖 8 月表的实际命名格式：
+      - 524-10544-（海外）...  -> 10544
+      - H0133-10055《...》      -> 10055（H 前缀 + 4 位序列号 + 5 位真 ID）
+      - 1D-4_10377_《...》      -> 10377
+      - 00153_11005_...         -> 11005（跳过前导 0 的 00153）
+    """
     if not text:
         return ''
     text = clean(text)
-    all_4 = re.findall(r'(?<!\d)\d{4}(?!\d)', text)
-    if not all_4:
-        longer = re.findall(r'(?<!\d)\d{4,}(?!\d)', text)
-        return longer[0] if longer else ''
-    if len(all_4) == 1:
-        return all_4[0]
-    good = []
-    for m in all_4:
-        idx = text.find(m)
-        if idx > 0 and text[idx - 1].isalpha():
-            continue
-        if m.startswith('0'):
-            continue
-        good.append(m)
-    if good:
-        return max(good, key=int)
-    non_zero = [m for m in all_4 if not m.startswith('0')]
-    return non_zero[0] if non_zero else all_4[-1]
+    # 所有连续数字串（不限位数），排除前导 0 的（如 0133、00153）
+    cands = [m for m in re.findall(r'\d+', text) if not m.startswith('0')]
+    if not cands:
+        # 全部都是前导 0 的数字串：退回取最长的那个（去掉前导 0 后仍可用）
+        allnums = re.findall(r'\d+', text)
+        return max(allnums, key=lambda x: (len(x), int(x))).lstrip('0') if allnums else ''
+    # 取最长，同长度取数值最大（10434 优先于 10139 等）
+    return max(cands, key=lambda x: (len(x), int(x)))
+
+
+def project_type_for(proj_name):
+    """项目类型：含「国内」→ AI真人，否则 → AI海外真人。"""
+    if not proj_name:
+        return 'AI海外真人'
+    if '国内' in proj_name:
+        return 'AI真人'
+    return 'AI海外真人'
 
 
 def clean_project_name(name):
@@ -400,7 +425,7 @@ def parse_projects(df, default_year=None, overtime_map=None):
                         '身份证姓名': name,
                         '角色': normalize_role(ROLE_MAP[name]),
                         '项目ID': proj_id,
-                        '项目类型': 'AI海外真人',
+                        '项目类型': project_type_for(proj_name),
                         'AI项目名称': proj_name,
                         '开始日期': start_date,
                         '结束日期': end_date,
@@ -432,7 +457,7 @@ def parse_projects(df, default_year=None, overtime_map=None):
                 '身份证姓名': leader_name,
                 '角色': '剪辑组长',
                 '项目ID': pid,
-                '项目类型': 'AI海外真人',
+                '项目类型': project_type_for(proj_name),
                 'AI项目名称': project['AI项目名称'],
                 '开始日期': project['开始日期'],
                 '结束日期': project['结束日期'],
@@ -530,7 +555,7 @@ def compute_commission(records, group_pids):
 
 # ===================== Excel生成 =====================
 
-def generate_excel(records, commission_data, template_path, output_path):
+def generate_excel(records, commission_data, template_path, output_path, auto_open=True):
     print(f"\n📝 正在生成Excel...")
 
     # 复制模板
@@ -614,7 +639,7 @@ def generate_excel(records, commission_data, template_path, output_path):
 
         # C: 职位
         if is_first:
-            ws.cell(ri, 3, r['角色'])
+            ws.cell(ri, 3, display_role(r['角色']))
         ws.cell(ri, 3).font = data_font
         ws.cell(ri, 3).alignment = center_align
 
@@ -726,18 +751,19 @@ def generate_excel(records, commission_data, template_path, output_path):
 
     html_path = generate_html_dashboard(sorted_records, commission_data, output_path)
 
-    # 自动打开文件
-    try:
-        os.startfile(output_path)
-        print(f"📂 已自动打开 Excel")
-    except Exception:
-        pass
-    if html_path:
+    # 自动打开文件（auto_open=False 时由调用方(GUI)统一打开，避免重复打开两份）
+    if auto_open:
         try:
-            os.startfile(html_path)
-            print(f"📂 已自动打开 统计仪表盘")
+            os.startfile(output_path)
+            print(f"📂 已自动打开 Excel")
         except Exception:
             pass
+        if html_path:
+            try:
+                os.startfile(html_path)
+                print(f"📂 已自动打开 统计仪表盘")
+            except Exception:
+                pass
 
     return output_path, html_path
 
@@ -852,37 +878,30 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
         c = ws.cell(start, 15, shortage)
         c.font = data_font; c.alignment = center_align; c.border = full_border
 
-    # P: 任务超额提成金额
-    if role == '剪辑组长':
-        # 组长P列填集数提成（集数×20）
-        episode_money = total_ep * rule.get('每集单价', 20)
-        c = ws.cell(start, 16, episode_money)
-        c.font = data_font; c.alignment = center_align; c.border = full_border
-    else:
-        # 其他人P列填超额
-        if overtime > 0:
-            c = ws.cell(start, 16, overtime)
-            c.font = data_font; c.alignment = center_align; c.border = full_border
-
-    # Q: 提成构成（本月规则变动需标黄）
-    c = ws.cell(start, 17, desc)
-    c.font = Font(name='宋体', size=8, bold=False)
-    c.alignment = center_wrap; c.border = full_border
-
-    # R: 提成合计（写清计算过程：算式=结果）
+    # P: 超额提成（字段对调：此栏改填计算公式）
     if role == '剪辑组长':
         eps_price = rule.get('每集单价', 20)
         proj_price = rule.get('组内每部提成', 100)
-        r_value = f'{total_ep}×{eps_price}+{project_count}×{proj_price}={total_comm}'
+        p_value = f'{total_ep}×{eps_price}+{project_count}×{proj_price}'
     else:
         quota = rule.get('基准集数', 120)
         if total_ep >= quota:
             over_price = rule.get('超额每集', 20)
-            r_value = f'({total_ep}-{quota})×{over_price}={total_comm}'
+            p_value = f'({total_ep}-{quota})×{over_price}'
         else:
             short_price = rule.get('缺集每集扣', 50)
-            r_value = f'-({quota}-{total_ep})×{short_price}={total_comm}'
-    c = ws.cell(start, 18, r_value)
+            p_value = f'-({quota}-{total_ep})×{short_price}'
+    c = ws.cell(start, 16, p_value)
+    c.font = Font(name='宋体', size=8, bold=False)
+    c.alignment = center_wrap; c.border = full_border
+
+    # Q: 提成构成（本月规则变动需标黄；文案按职位口径组长/卡前/卡后）
+    c = ws.cell(start, 17, commission_desc(role))
+    c.font = Font(name='宋体', size=8, bold=False)
+    c.alignment = center_wrap; c.border = full_border
+
+    # R: 提成合计（字段对调：此栏改填纯数字结果）
+    c = ws.cell(start, 18, total_comm)
     c.font = data_font; c.alignment = center_align; c.border = full_border
     # F: 条件格式 —— 提成合计为正标绿、为负标红
     try:
@@ -1359,7 +1378,11 @@ def main():
     print_summary(records, commission_data)
 
     # 生成
-    final_path, html_path = generate_excel(records, commission_data, TEMPLATE_FILE, OUTPUT_FILE)
+    # 被 GUI 调用时（带命令行参数）由 GUI 统一打开；双击运行时自动打开
+    _from_gui = len(sys.argv) >= 2
+    final_path, html_path = generate_excel(
+        records, commission_data, TEMPLATE_FILE, OUTPUT_FILE,
+        auto_open=not _from_gui)
 
     # 输出文件路径供 GUI 读取
     print(f"OUTPUT_EXCEL={final_path}")

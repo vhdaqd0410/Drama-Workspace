@@ -881,11 +881,12 @@ function workloadSort(val){
     if(document.getElementById(id)) renderWorkloadBoard(id);
   });
 }
-async function renderWorkloadBoard(containerId){
+async function renderWorkloadBoard(containerId, month){
   const board = document.getElementById(containerId || 'workloadBoard');
   if(!board) return;
   try{
-    const d = await api('GET', '/api/stats/dashboard');
+    const _m = month || (document.getElementById('reportMonth') ? document.getElementById('reportMonth').value : '');
+    const d = await api('GET', '/api/stats/dashboard' + (_m ? ('?month=' + encodeURIComponent(_m)) : ''));
     if(!d || !d.ok) return;
     const editors = d.editors || [];
     const dept = d.dept_stats || [];
@@ -956,7 +957,7 @@ async function renderWorkloadBoard(containerId){
 
     html += `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <div style="font-weight:700;font-size:14px">👥 剪辑师工作量（本月）</div>
+        <div style="font-weight:700;font-size:14px">👥 剪辑师工作量（${_m || '本月'}）</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:11px;color:#86868b">共 ${summary.total_editors||0} 人 · ${summary.total_assigned||0} 集 · <span style="color:#ff3b30">红=未达</span> · <span style="color:#34c759">绿=达标</span> · <span style="color:#ff9500">橙=卡点</span></span>
           ${sortSelect}
@@ -1298,7 +1299,7 @@ function projectCardHTML(p){
   return`<div class="card">
     <div class="card-stripe ${badge.cls}"></div>
     <div class="card-head">
-      <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${pnameAttr}" data-project-name="${pnameAttr}">${p.name}</span><button class="btn btn-sm ep-search-btn" onclick="searchEpisodeEditor('${jsq(p.name)}')" title="按集号检索该集剪辑师">🔍 查剪辑</button></div>
+      <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${pnameAttr}" data-project-name="${pnameAttr}">${p.name}</span>${(() => { const _dom = p.is_domestic ? 1 : 0; return _dom ? '<span class="dept-badge" onclick="toggleDomestic(\'' + jsq(p.name) + '\',1)" style="background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9;cursor:pointer" title="国内项目（统计为 AI真人），点击取消标记">✅ 国内</span>' : '<span class="dept-badge" onclick="toggleDomestic(\'' + jsq(p.name) + '\',0)" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="海外项目，点击标记为国内（统计为 AI真人）">海外</span>'; })()}<button class="btn btn-sm ep-search-btn" onclick="searchEpisodeEditor('${jsq(p.name)}')" title="按集号检索该集剪辑师">🔍 查剪辑</button></div>
       <div class="card-meta-line">${dept}${month}${(() => {
   const cur = p.custom_status || '';
   const optsHtml = WF_STATUS_OPTIONS.map(o =>

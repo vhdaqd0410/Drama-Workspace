@@ -478,6 +478,11 @@ function teamOpenEdit(id){
           </select>
           <label style="font-size:13px;color:var(--text-sec)">部门</label>
           <input type="text" id="te_dept" value="${m?(m.department||'').replace(/"/g,'&quot;'):''}" placeholder="如：AI漫剧一部 / 海外组" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+          <label style="font-size:13px;color:var(--text-sec)">入职时间</label>
+          <input type="date" id="te_hire" value="${m?(m.hire_date||''):''}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+          <label style="font-size:13px;color:var(--text-sec)">离职时间</label>
+          <input type="date" id="te_resign" value="${m?(m.resign_date||''):''}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+          <div style="grid-column:span 2;font-size:11px;color:var(--text-sec)">💡 填写离职时间后，下次启动软件会自动删除该成员</div>
         </div>
       </div>
       <div class="modal-foot" style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
@@ -494,14 +499,16 @@ async function teamSaveMember(id){
   const role = $('te_role').value;
   const title = $('te_title').value.trim();
   const dept = $('te_dept').value.trim();
+  const hire = ($('te_hire') && $('te_hire').value || '').trim();
+  const resign = ($('te_resign') && $('te_resign').value || '').trim();
   if(!name){ toast('请填写姓名','warning'); return; }
 
   try{
     if(id){
-      await api('PUT', `/api/team/members/${id}`, { name, role, title, department: dept });
+      await api('PUT', `/api/team/members/${id}`, { name, role, title, department: dept, hire_date: hire, resign_date: resign });
       toast(`✅ 已更新 ${name}`, 'success');
     } else {
-      await api('POST', '/api/team/members', { name, role, title, department: dept });
+      await api('POST', '/api/team/members', { name, role, title, department: dept, hire_date: hire, resign_date: resign });
       toast(`✅ 已添加 ${name}`, 'success');
     }
     document.getElementById('teamEditModal').remove();

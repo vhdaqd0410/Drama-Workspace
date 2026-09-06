@@ -15,12 +15,20 @@ let fjSuppressSaveHist = false;
 function fjLoad(k, def){ try{ const s = localStorage.getItem(k); if(s) return JSON.parse(s); } catch(e){} return def; }
 function fjSave(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
 
-async function loadFenjiProjects(){
+async function loadFenjiProjects(targetName){
+  // 问题5：始终合并团队设置里的所有成员到剪辑师列表，避免缺人
+  try{
+    const td = await api('GET','/api/team/members');
+    const names = ((td && td.members) || []).map(function(m){ return (m && m.name) || ''; }).filter(Boolean);
+    names.forEach(function(n){ if(!fjPersons.includes(n)) fjPersons.push(n); });
+    fjSave(FJ_KEY_PERSONS, fjPersons);
+    window._teamNames = names;
+  }catch(_){}
   try{
     const data = await api('GET','/api/projects/light');
     fenjiLight = Array.isArray(data) ? data : (data.projects||[]);
     if(fenjiLight.length > 0){
-      const savedVal = $('fjProject').value;
+      const savedVal = targetName || $('fjProject').value;
       $('fjProject').innerHTML = '<option value="">— 选择项目 —</option>' +
         fenjiLight.map(p => `<option value="${p.name}">${p.name} (${p.total_episodes||'?'}集)</option>`).join('');
       if(savedVal) $('fjProject').value = savedVal;
@@ -38,7 +46,8 @@ async function loadFenjiProjects(){
   fjRenderChips();
   fjRenderHeadTail();
   fjRenderHistSelect();
-  fjRestoreSession();
+  // 问题1：指定了目标项目时跳过 session 恢复，避免 setTimeout 覆盖跳转目标
+  if(!targetName) fjRestoreSession();
   fjRenderTable();
   fjUpdateValidation();
 }

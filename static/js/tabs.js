@@ -121,7 +121,7 @@ async function loadReportTab(){
     <select id="reportMonth" style="padding:8px;border:1px solid #e5e5ea;border-radius:8px">
       ${_monthOptions()}
     </select>
-    <button class="btn btn-sm btn-primary" onclick="_loadReportData()">🔍 查看报告</button>
+    <button class="btn btn-sm btn-primary" onclick="_loadReportData();if(typeof renderWorkloadBoard==='function')renderWorkloadBoard('reportWorkloadBoard')">🔍 查看报告</button>
     <button class="btn btn-sm" id="btnCommission" onclick="showCommissionReport()" style="background:#af52de;color:#fff" title="从分集数据计算本月每人绩效与提成">💰 提成/绩效</button>
     <button class="btn btn-sm" id="btnPersonCards" onclick="showPersonCards()" style="background:#0071e3;color:#fff" title="年度每人工作量卡片与趋势">👥 个人卡片</button>
     <button class="btn btn-sm" onclick="_downloadExcel()" style="background:#34c759;color:#fff">📥 下载 Excel</button>

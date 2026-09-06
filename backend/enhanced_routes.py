@@ -9,7 +9,7 @@ import logging as _logging
 from flask import request, jsonify, send_file, send_from_directory, abort
 import config as _cfg
 from utils import scan_dir
-from fenji_exporter import export_from_template, backup_template, list_templates as _list_templates
+from fenji_exporter import export_from_template, export_upsert, backup_template, list_templates as _list_templates
 
 _logger = _logging.getLogger(__name__)
 
@@ -721,10 +721,14 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         role = data.get("role") or "editor"
         title = data.get("title") or ""
         department = data.get("department") or ""
+        hire_date = data.get("hire_date") or ""
+        resign_date = data.get("resign_date") or ""
         if not name:
             return jsonify({"ok": False, "message": "姓名不能为空"}), 400
         try:
             db.add_member(name=name, role=role, title=title, department=department)
+            if hire_date or resign_date:
+                db.update_member(name, hire_date=hire_date, resign_date=resign_date)
             return jsonify({"ok": True, "message": f"已添加 {name}"})
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
@@ -751,6 +755,10 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                 kwargs["title"] = data["title"] or ""
             if "department" in data:
                 kwargs["department"] = data["department"] or ""
+            if "hire_date" in data:
+                kwargs["hire_date"] = (data.get("hire_date") or "").strip()
+            if "resign_date" in data:
+                kwargs["resign_date"] = (data.get("resign_date") or "").strip()
             if kwargs:
                 db.update_member(old_name, **kwargs)
             return jsonify({"ok": True, "message": "已更新"})
@@ -876,6 +884,16 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return jsonify({"ok": False, "message": "assign 为空"}), 400
         try:
             db.set_episode_plan(project_name, assign)
+            # 问题6：同步分集时一并重算 editor_workload，保证所有统计口径跟随最新分集
+            try:
+                from collections import Counter as _Counter
+                _cnt = _Counter()
+                for _epn, _ed in assign.items():
+                    if _ed and str(_ed).strip():
+                        _cnt[str(_ed).strip()] += 1
+                db.set_editor_workload(project_name, dict(_cnt))
+            except Exception:
+                pass
             if total > 0:
                 p = db.get_project(project_name)
                 cur = int((p or {}).get("current_episodes") or 0)
@@ -1304,16 +1322,41 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         except Exception as e:
             _logger.warning('备份模板失败: %s', e)
 
-        # 3. 追加 + 美化
+        # 2.5 国内标记传导：项目标记了 is_domestic 但名字不含「国内」，写表时追加（国内）
+        _proj_name = (body.get('projectName') or '').strip()
+        _proj_path = (body.get('path') or '').strip()
         try:
-            new_bytes = export_from_template(
-                tpl_bytes,
-                project_name=body.get('projectName', ''),
-                path=body.get('path', ''),
-                assign_list=assign,
-                time_text=body.get('timeText', ''),
-                status_text=body.get('statusText', '已分集'),
-            )
+            _p = db.get_project(_proj_name)
+            if _p and int(_p.get("is_domestic") or 0) == 1:
+                if '国内' not in _proj_name and '国内' not in _proj_path:
+                    # 在项目名尾部追加（国内），让提成工具 project_type_for 正确判为 AI真人
+                    if '（' not in _proj_name and '(' not in _proj_name:
+                        _proj_name = _proj_name + '（国内）'
+                    _proj_path = _proj_path + '（国内）'
+        except Exception:
+            pass
+
+        # 3. 生成结果：有目标文件时用 upsert（同名项目原地更新，否则追加到末尾）
+        updated = False
+        try:
+            if use_target:
+                new_bytes, updated = export_upsert(
+                    tpl_bytes,
+                    project_name=_proj_name,
+                    path=_proj_path,
+                    assign_list=assign,
+                    time_text=body.get('timeText', ''),
+                    status_text=body.get('statusText', '已分集'),
+                )
+            else:
+                new_bytes = export_from_template(
+                    tpl_bytes,
+                    project_name=_proj_name,
+                    path=_proj_path,
+                    assign_list=assign,
+                    time_text=body.get('timeText', ''),
+                    status_text=body.get('statusText', '已分集'),
+                )
         except Exception as e:
             _logger.exception('export_excel 失败')
             return jsonify(ok=False, msg=f'导出失败: {e}'), 500
@@ -1382,6 +1425,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         out_name = _re.sub(r'\.[^.]+$', '', original_name) + '_已分集.xlsx'
         resp = {
             'ok': True,
+            'updated': updated,
             'file_b64': _b64.b64encode(new_bytes).decode('ascii'),
             'fileName': out_name,
             'backup': {'name': backup_name, 'saved': backup_path},

@@ -428,6 +428,7 @@ class ScanMixin:
                     "total_episodes": 0,
                     "current_episodes": 0,
                     "project_month": "",
+                    "is_domestic": 0,
                 }
                 # 从 DB 获取真正的制作部部门名（不要硬编码组内NAS/已完成）
                 _dept = ""
@@ -457,6 +458,7 @@ class ScanMixin:
                     entry["total_episodes"] = db_proj.get("total_episodes", 0) or 0
                     entry["current_episodes"] = db_proj.get("current_episodes", 0) or 0
                     entry["project_month"] = db_proj.get("project_month") or ""
+                    entry["is_domestic"] = int(db_proj.get("is_domestic") or 0)
 
                 group_all.append(entry)
 
@@ -518,6 +520,7 @@ class ScanMixin:
                     "current_episodes": 0,
                     "is_completed": True,
                     "project_month": "",
+                    "is_domestic": 0,
                 }
                 # 从 DB 获取真正的制作部部门名（不要硬编码组内NAS/已完成）
                 _dept = ""
@@ -546,6 +549,7 @@ class ScanMixin:
                     entry["total_episodes"] = db_proj.get("total_episodes", 0) or 0
                     entry["current_episodes"] = db_proj.get("current_episodes", 0) or 0
                     entry["project_month"] = db_proj.get("project_month") or ""
+                    entry["is_domestic"] = int(db_proj.get("is_domestic") or 0)
                     source_dept = db_proj.get("department", "") or ""
                     if source_dept:
                         entry["source_department"] = source_dept

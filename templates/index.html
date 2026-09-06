@@ -1564,7 +1564,7 @@ a{color:var(--blue);text-decoration:none}
             <h2>工具箱</h2>
             <p>集中管理扩展工具，点击卡片展开使用全部功能</p>
             <div class="tb-hero-badges">
-              <span>📄 剧本整理</span><span>💰 提成计算</span><span>✂️ 拆集重命名</span>
+              <span>💰 提成计算</span><span>✂️ 拆集重命名</span>
             </div>
           </div>
         </div>
@@ -1572,41 +1572,6 @@ a{color:var(--blue);text-decoration:none}
 
       <!-- 工具网格 -->
       <div class="tb-grid">
-
-        <!-- 人名条识别 -->
-        <div class="tb-card open" id="tb-nameplate">
-          <div class="tb-card-head" onclick="tbToggle(this)">
-            <div class="tb-card-icon c1">🏷️</div>
-            <div style="flex:1;min-width:0">
-              <div class="tb-card-title">剧本首次出场整理</div>
-              <div class="tb-card-desc">上传 .docx 剧本，自动提取首次出场的人物、场景，生成 Excel（默认全本）</div>
-              <div class="tb-card-tags"><span class="tb-tag">全本解析</span><span class="tb-tag purple">人物/场景</span><span class="tb-tag green">Excel 导出</span></div>
-            </div>
-            <span class="tb-arrow">▼</span>
-          </div>
-          <div class="tb-body"><div class="tb-body-inner">
-            <div class="form-group" style="margin-top:2px">
-              <label>📄 剧本文档（.docx）</label>
-              <input type="file" id="npFile" accept=".docx">
-            </div>
-            <div class="form-group">
-              <label>🔢 解析范围（留空 = 全本，或填集数如 30）</label>
-              <input type="number" id="npEpisodes" value="" min="1" max="2000" placeholder="留空=全本" style="max-width:160px">
-              <small style="display:block;color:var(--text-sec);margin-top:4px">默认解析全本；填数字则只解析前 N 集。</small>
-            </div>
-            <div class="tb-launch-line">
-              <button class="tb-launch" onclick="npParse()">🚀 开始解析</button>
-              <span class="tb-status" id="npStatus"></span>
-            </div>
-            <div style="margin-top:16px;font-weight:600;font-size:13px;color:var(--text)">📂 已生成的解析结果</div>
-            <div id="npFiles" style="font-size:13px;color:var(--text-sec);margin-top:6px">加载中...</div>
-            <div class="tb-note">💡 也可用插件自带界面：双击 <code>plugins/nameplate/start_tool.bat</code>，功能完全保留。</div>
-          </div></div>
-          <div class="tb-card-foot">
-            <span style="font-size:11.5px;color:var(--text-sec)">📄 剧本 · 人物 · 场景</span>
-            <button class="tb-launch" onclick="npToggleBy('tb-nameplate')">展开 / 使用</button>
-          </div>
-        </div>
 
         <!-- 提成工具 -->
         <div class="tb-card" id="tb-commission">

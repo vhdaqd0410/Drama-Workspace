@@ -183,10 +183,12 @@
         html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">';
         editors.forEach(function(ed){
           var pct = ed.episode_count ? Math.round(ed.done_count*100/ed.episode_count) : 0;
+          var miss = ed.episode_count - ed.done_count;
           html += '<div onclick="WB.editor.select(\''+String(ed.name).replace(/'/g,"\\'")+'\')" style="background:#fff;border:1px solid #e5e5ea;border-radius:12px;padding:14px;cursor:pointer">'
             + '<div style="font-size:15px;font-weight:600">👤 '+escHtml(ed.name)+'</div>'
             + '<div style="font-size:12px;color:#86868b;margin-top:6px">'+ed.project_count+' 项目 · '+ed.episode_count+' 集</div>'
-            + '<div style="font-size:12px;margin-top:4px">已完成 <b style="color:#34c759">'+ed.done_count+'</b> 集 ('+pct+'%)</div>'
+            + '<div style="margin-top:8px;background:#f0f0f0;border-radius:6px;height:8px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+(miss===0?'#34c759':'#0071e3')+';border-radius:6px"></div></div>'
+            + '<div style="font-size:12px;margin-top:6px">已完成 <b style="color:#34c759">'+ed.done_count+'</b> 集'+(miss>0?' · 缺 <b style="color:#ff3b30">'+miss+'</b> 集':' · ✓ 全部完成')+'</div>'
             + '</div>';
         });
         html += '</div>';
@@ -228,6 +230,7 @@
           + '<span style="font-size:14px;font-weight:600;flex:1">'+escHtml(p.project)+'</span>'
           + '<span class="badge '+_statusCls(p.status).cls+'" style="font-size:10px">'+escHtml(_statusCls(p.status).text)+'</span>'
           + '<span style="font-size:12px;color:#86868b">'+p.done_count+'/'+p.total_count+' 集</span>'
+          + (p.total_count>p.done_count ? '<span style="font-size:11px;color:#ff3b30">缺 '+(p.total_count-p.done_count)+' 集</span>' : '<span style="font-size:11px;color:#34c759">✓ 完</span>')
           + '<span style="color:#86868b">▾</span></div>'
           + '<div id="ed-det-'+i+'" style="display:none;margin-top:8px;padding-left:8px">'
           + '<div style="font-size:11px;color:#86868b;margin-bottom:4px">负责集号（共 '+p.total_count+' 集）：</div>'

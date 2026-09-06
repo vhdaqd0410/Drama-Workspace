@@ -341,16 +341,18 @@ function fjUpdateValidation(){
   const missing = [];
   for(let i=1;i<=total;i++) if(!covered.has(i)) missing.push(i);
   const dup = assigned.length - covered.size;
+  const extra = assigned.filter(n => n > total);
   const box = $('fjValidation');
   if(total === 0 || Object.keys(fjRanges).length === 0){ box.style.display='none'; return; }
   box.style.display = 'block';
-  if(missing.length === 0 && dup === 0){
+  if(missing.length === 0 && dup === 0 && extra.length === 0){
     box.className = 'validation-box ok';
     box.innerHTML = `✅ 覆盖 ${covered.size}/${total} 集 (100%)，无缺失无重叠`;
   } else {
     box.className = 'validation-box err';
     let msg = `覆盖 ${covered.size}/${total} 集，缺失 ${missing.length} 集`;
     if(dup > 0) msg += `，重叠 ${dup} 处`;
+    if(extra.length > 0) msg += `，超出总集数 ${extra.length} 处（第 ${extra.sort((a,b)=>a-b).slice(0,20).join(',')} 集）`;
     if(missing.length <= 20) msg += ` (缺失: ${missing.join(',')})`;
     box.innerHTML = '❌ ' + msg;
   }
@@ -503,7 +505,11 @@ function fjConfirmSeg(){
     if(a > b){ toast(`段 ${r} 起始大于结束`,'error'); return; }
     for(let i=a;i<=b;i++) all.push(i);
   }
-  if(new Set(all).size !== all.length){ toast('分段之间有重叠','error'); return; }
+  if(new Set(all).size !== all.length){
+    const _seen=new Set(),_dups=[];
+    all.forEach(function(n){ if(_seen.has(n)){ if(_dups.indexOf(n)<0) _dups.push(n); } else { _seen.add(n); } });
+    toast('分段之间有重叠，重复集号: '+_dups.sort(function(a,b){return a-b;}).join(', '),'error'); return;
+  }
   fjRanges[fjSegState.person] = clean.join(',');
   fjCloseSegModal();
   fjRenderTable();
@@ -696,7 +702,7 @@ async function readFromProject(){
     const byEditor={};
     Object.entries(plan).forEach(([ep,name])=>{if(!name)return;if(!byEditor[name])byEditor[name]=[];byEditor[name].push(parseInt(ep))});
     fjRanges = {};
-    fjPersons = [];
+    fjPersons = (window._teamNames && window._teamNames.length ? window._teamNames.slice() : []);
     Object.entries(byEditor).forEach(([name,eps]) => {
       if(!fjPersons.includes(name)) fjPersons.push(name);
       eps.sort((a,b)=>a-b);
@@ -723,13 +729,23 @@ async function syncAssign(){
     toast(`已同步 ${Object.keys(assign).length} 集到 ${project}`,'success');
     await loadProjects();
     fjMaybeSaveHist();
-  }catch(e){toast('同步失败: '+e.message,'error')}
+  }catch(e){ toast('同步失败: '+e.message,'error'); return; }
+  // 问题2：同步后自动把项目状态改为"剪辑中"
+  try{
+    await api('POST','/api/project/'+encodeURIComponent(project)+'/custom_status',{custom_status:'剪辑中'});
+  }catch(_){}
+  // 问题2：跳转项目看板 + 高亮当前项目
+  try{
+    if(typeof jumpToProject === 'function') jumpToProject(project);
+    else switchTab('dashboard');
+  }catch(_){}
+  await loadProjects();
 }
 async function openFenjiFor(name){
   switchTab('fenji');
-  await loadFenjiProjects();
+  await loadFenjiProjects(name);
   $('fjProject').value = name;
-  fjOnProjectChange();
+  try{ await readFromProject(); }catch(_){ fjOnProjectChange(); }
   fjUpdateTplBadge();
   fjUpdateTargetBadge();
 }
@@ -1264,7 +1280,8 @@ async function fjDoExport(skipPreview, openExcel){
   if(pOpt && pOpt.value){
     try{
       const pdata = await api('GET', `/api/project/${encodeURIComponent(pOpt.value)}`);
-      projectPath = pdata.path || project;
+      const _pp = (pdata && pdata.project) ? pdata.project : pdata;
+      projectPath = _pp.group_path || _pp.production_path || _pp.path || project;
     }catch(e){}
   }
 

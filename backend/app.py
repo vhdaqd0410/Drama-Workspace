@@ -53,15 +53,20 @@ _log_level = getattr(logging, _log_cfg.get("level", "INFO"))
 _log_max_mb = _log_cfg.get("max_mb", 10)
 _log_backups = _log_cfg.get("backups", 5)
 
+# 文件日志 Handler 打开失败（如被正在运行的桌面版进程独占）时降级为仅控制台输出，
+# 避免 `import app` 在测试 / 多实例场景下因 PermissionError 崩溃。
+_handlers = [logging.StreamHandler()]
+try:
+    _handlers.append(
+        RotatingFileHandler(
+            _log_file, maxBytes=_log_max_mb * 1024 * 1024,
+            backupCount=_log_backups, encoding="utf-8"))
+except PermissionError:
+    print("[WARN] 日志文件 %s 被占用，降级为仅控制台输出" % _log_file)
 logging.basicConfig(
     level=_log_level,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        RotatingFileHandler(
-            _log_file, maxBytes=_log_max_mb * 1024 * 1024,
-            backupCount=_log_backups, encoding="utf-8"),
-    ])
+    handlers=_handlers)
 
 # 治理日志噪音：waitress.queue 的 "Task queue depth is N" 警告会大量刷屏
 # （负载高时每秒几十条，占满日志）。这类负载提示仅在 DEBUG 排查时有价值，
@@ -853,6 +858,20 @@ def api_project_set_episodes(project_name):
     return jsonify({"ok": True, "total_episodes": cur_total, "current_episodes": cur_cur})
 
 
+@app.route("/api/project/<path:project_name>/is_domestic", methods=["GET", "POST"])
+def api_project_is_domestic(project_name):
+    """获取/设置项目「非海外剧(国内)」标记。1=国内(AI真人)，0=海外(默认 AI海外真人)。"""
+    proj = sync_engine.db.get_project(project_name)
+    if not proj:
+        return jsonify({"ok": False, "message": "项目不存在"}), 404
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        val = 1 if data.get("is_domestic") else 0
+        sync_engine.db.update_project_status(project_name, is_domestic=val)
+        return jsonify({"ok": True, "is_domestic": val})
+    return jsonify({"ok": True, "is_domestic": int(proj.get("is_domestic") or 0)})
+
+
 @app.route("/api/project/<path:project_name>/output_dir", methods=["GET", "POST"])
 def api_project_output_dir(project_name):
     """获取/设置项目单独的成片存放目录名。
@@ -1577,6 +1596,13 @@ def create_app():
         _n = db.prune_logs(keep_days=90)
         if _n:
             print("[OK] 已清理 %d 条过期日志" % _n)
+    except Exception:
+        pass
+    # 启动时清理已离职成员（resign_date 已到当前月的自动删除）
+    try:
+        _removed = db.purge_resigned_members()
+        if _removed:
+            print("[OK] 已自动删除离职成员: %s" % "、".join(_removed))
     except Exception:
         pass
     return app

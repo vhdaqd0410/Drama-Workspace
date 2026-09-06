@@ -282,6 +282,15 @@ class Database:
                 c.execute("ALTER TABLE team_members ADD COLUMN department TEXT DEFAULT ''")
             except Exception:
                 pass
+            # 入职/离职时间（YYYY-MM-DD）。离职日期填写后，启动时自动删除该成员。
+            try:
+                c.execute("ALTER TABLE team_members ADD COLUMN hire_date TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                c.execute("ALTER TABLE team_members ADD COLUMN resign_date TEXT DEFAULT ''")
+            except Exception:
+                pass
             try:
                 c.execute("ALTER TABLE projects ADD COLUMN department TEXT DEFAULT ''")
             except Exception:
@@ -326,6 +335,11 @@ class Database:
             # 排期看板用：项目开始日期（YYYY-MM-DD），可手动微调；空 = 用 created_at 推算
             try:
                 c.execute("ALTER TABLE projects ADD COLUMN start_date TEXT DEFAULT ''")
+            except Exception:
+                pass
+            # 非海外剧标记：1=国内(统计为 AI真人)，0/空=海外(默认 AI海外真人)
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN is_domestic INTEGER DEFAULT 0")
             except Exception:
                 pass
 
@@ -825,6 +839,37 @@ class Database:
             conn.execute(
                 "DELETE FROM team_members WHERE name=?", (name,)
             )
+
+    def purge_resigned_members(self):
+        """删除已填写离职日期且离职时间已到（<= 当前月份）的成员。
+
+        离职日期格式 YYYY-MM 或 YYYY-MM-DD；仅当 resign_date 非空且不晚于当前月
+        才删除（次月自动删除的语义：填了上个月或更早的离职日期即删除）。
+        返回被删除的成员姓名列表。
+        """
+        from datetime import datetime as _dt
+        now = _dt.now()
+        cur_ym = now.strftime("%Y-%m")
+        removed = []
+        try:
+            with self.get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT name, resign_date FROM team_members "
+                    "WHERE resign_date IS NOT NULL AND resign_date != ''"
+                ).fetchall()
+            for name, rd in rows:
+                rd = (rd or "").strip()
+                if not rd:
+                    continue
+                # 统一取 YYYY-MM 前缀比较
+                ym = rd[:7]
+                if ym and ym <= cur_ym:
+                    with self.get_conn() as conn:
+                        conn.execute("DELETE FROM team_members WHERE name=?", (name,))
+                    removed.append(name)
+        except Exception:
+            pass
+        return removed
 
     def update_member(self, name, **kwargs):
         if not kwargs:
