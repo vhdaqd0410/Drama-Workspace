@@ -155,11 +155,12 @@ def _shell_copy_files_batch(src_dir, file_names, dst_dir):
         pythoncom.CoInitialize()
         try:
             shell = Dispatch('Shell.Application')
-            # Namespace 临时容器目录, 拿里面那个同名文件夹 item
-            folder_container = shell.Namespace(container)
-            tmp_folder_item = folder_container.ParseName(dst_name)
-            folder_parent = shell.Namespace(dst_parent)
-            folder_parent.CopyHere(tmp_folder_item, 0x10)
+            # 与同步素材一致：直接复制临时文件夹内的所有文件 items 到目标目录，
+            # flag=0（默认）弹「复制 N 个项目」系统原生进度对话框。
+            folder_tmp = shell.Namespace(tmp_folder)
+            items = folder_tmp.Items()
+            folder_dst = shell.Namespace(dst_dir)
+            folder_dst.CopyHere(items, 0)
             logger.info('Shell.CopyHere 批量已发起: %d 个文件 → %s', len(file_names), dst_dir)
             # 延迟清理: Shell 复制是异步的, 等几秒让它开始 (CopyHere 是 Folder 级别, Shell 会自己处理)
             import threading as _th
