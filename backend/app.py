@@ -1502,6 +1502,13 @@ except ImportError as e:
     print("[WARN] dramatool(拆集工具) 未加载:", e)
 
 try:
+    from jianying_name import register_routes as _register_jianying
+    _register_jianying(app, db)
+    print("[OK] jianying_name(海外人名条) 已注册")
+except ImportError as e:
+    print("[WARN] jianying_name(海外人名条) 未加载:", e)
+
+try:
     from autostart import register_routes as _register_autostart
     _register_autostart(app, db)
     print("[OK] autostart(开机自启) 已注册")

@@ -1564,7 +1564,7 @@ a{color:var(--blue);text-decoration:none}
             <h2>工具箱</h2>
             <p>集中管理扩展工具，点击卡片展开使用全部功能</p>
             <div class="tb-hero-badges">
-              <span>💰 提成计算</span><span>✂️ 拆集重命名</span>
+              <span>🌍 海外人名条</span><span>💰 提成计算</span><span>✂️ 拆集重命名</span>
             </div>
           </div>
         </div>
@@ -1622,6 +1622,30 @@ a{color:var(--blue);text-decoration:none}
           <div class="tb-card-foot">
             <span style="font-size:11.5px;color:var(--text-sec)">✂️ 拆集 · 重命名</span>
             <button class="tb-launch" onclick="npToggleBy('tb-dramatool')">启动工具</button>
+          </div>
+        </div>
+
+        <!-- 海外人名条批量生成 -->
+        <div class="tb-card" id="tb-jianying-name">
+          <div class="tb-card-head" onclick="tbToggle(this)">
+            <div class="tb-card-icon c4">🌍</div>
+            <div style="flex:1;min-width:0">
+              <div class="tb-card-title">海外人名条批量生成</div>
+              <div class="tb-card-desc">在剪映专业版中批量生成海外人名条竖版短视频：逐条替换英文名、导出、归置成片</div>
+              <div class="tb-card-tags"><span class="tb-tag purple">剪映自动化</span><span class="tb-tag">批量替换</span><span class="tb-tag green">自动导出</span></div>
+            </div>
+            <span class="tb-arrow">▼</span>
+          </div>
+          <div class="tb-body"><div class="tb-body-inner">
+            <div class="tb-launch-line">
+              <button class="tb-launch" onclick="jyLaunch()">🚀 启动海外人名条工具</button>
+              <span class="tb-status" id="jyStatus"></span>
+            </div>
+            <div class="tb-note">💡 点击「🚀 启动海外人名条工具」打开独立窗口（保留全部功能）。使用前请先在剪映专业版中打开草稿项目并选中字幕条。</div>
+          </div></div>
+          <div class="tb-card-foot">
+            <span style="font-size:11.5px;color:var(--text-sec)">🌍 剪映 · 人名条 · 批量导出</span>
+            <button class="tb-launch" onclick="npToggleBy('tb-jianying-name')">启动工具</button>
           </div>
         </div>
 
