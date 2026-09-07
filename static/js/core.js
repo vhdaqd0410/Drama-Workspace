@@ -784,15 +784,22 @@ function renderStats(){
   // 优先用后端统一计算的概览统计（口径一致），不存在则本地兜底
   const os = (typeof window._overviewStats !== 'undefined' && window._overviewStats) || null;
   const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
+  // 上月 YYYY-MM
+  let lm = os && os.last_month;
+  if (!lm) {
+    const d0 = new Date(); d0.setDate(1); d0.setMonth(d0.getMonth()-1);
+    lm = d0.getFullYear() + '-' + String(d0.getMonth()+1).padStart(2,'0');
+  }
 
-  let total, thisMonth, thisMonthDone, inProd;
+  let total, thisMonth, thisMonthDone, inProd, lastMonthLeft;
   if (os && typeof os.total === 'number') {
     total = os.total;
     thisMonth = os.this_month;
     thisMonthDone = os.this_month_done;
     inProd = os.producing;
-  } else {
-    // 本地兜底计算（口径：制作中含分集中等所有进行中状态）
+    lastMonthLeft = (typeof os.last_month_left === 'number') ? os.last_month_left : null;
+  }
+  if (lastMonthLeft === null) {
     const list = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
     total = list.length;
     const activeList = list.filter(p => {
@@ -805,13 +812,16 @@ function renderStats(){
     thisMonth = monthList.length;
     thisMonthDone = monthList.filter(p => String(p.custom_status || '').trim() === '已完成').length;
     inProd = monthList.filter(p => { const s = String(p.custom_status || '').trim(); return !!s && s !== '已完成'; }).length;
+    const lastMonthList = activeList.filter(p => p.project_month === lm);
+    lastMonthLeft = lastMonthList.filter(p => { const s = String(p.custom_status || '').trim(); return !!s && s !== '已完成'; }).length;
   }
 
   $('statsRow').innerHTML=`
     <div class="stat-card" onclick="$('globalSearch').value='';$('filterStatus').value='';$('filterDept').value='';$('filterMonth').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon blue">📁</div><div><div class="stat-num">${total}</div><div class="stat-label">总项目</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fff3cd;color:#856404">📅</div><div><div class="stat-num">${thisMonth}</div><div class="stat-label">本月项目</div></div></div>
     <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='已完成';renderDashboard()" style="cursor:pointer"><div class="stat-icon green">✅</div><div><div class="stat-num">${thisMonthDone}</div><div class="stat-label">本月已完成</div></div></div>
-    <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';$('globalSearch').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>`;
+    <div class="stat-card" onclick="$('filterMonth').value='${nowMonth}';$('filterStatus').value='';$('globalSearch').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon orange">🎬</div><div><div class="stat-num">${inProd}</div><div class="stat-label">制作中</div></div></div>
+    <div class="stat-card" onclick="$('filterMonth').value='${lm}';$('filterStatus').value='';$('globalSearch').value='';renderDashboard()" style="cursor:pointer"><div class="stat-icon" style="background:#fbe9e7;color:#c62828">⏳</div><div><div class="stat-num">${lastMonthLeft}</div><div class="stat-label">上月遗留未交</div></div></div>`;
   renderOverviewCharts();
 }
 

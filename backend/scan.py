@@ -29,11 +29,24 @@ def compute_overview_stats(production, group_all, group_completed, now_month=Non
     - 本月项目：本月(project_month==now_month)且有制作痕迹的项目
     - 本月已完成：本月项目里状态为已完成
     - 制作中：本月项目里处于制作中状态（非空且非已完成）
+    - 上月遗留未交：上月(project_month==上个月)且至今仍未完成的项目
     恒等式：本月项目 = 本月已完成 + 制作中
     """
     import time as _t
     if now_month is None:
         now_month = datetime.now().strftime("%Y-%m")
+
+    # 上月 = now_month 减一个月
+    try:
+        y, m = now_month.split("-")
+        y = int(y); m = int(m)
+        if m == 1:
+            prev_y, prev_m = y - 1, 12
+        else:
+            prev_y, prev_m = y, m - 1
+        last_month = "%04d-%02d" % (prev_y, prev_m)
+    except Exception:
+        last_month = ""
 
     # 跨分组去重（按项目名，优先保留信息更全的记录）
     seen = {}
@@ -60,6 +73,14 @@ def compute_overview_stats(production, group_all, group_completed, now_month=Non
                           if str(p.get("custom_status") or "").strip() == "已完成")
     producing = sum(1 for p in month_projects if _is_producing(p))
 
+    # 上月遗留未交：上月挂账、至今仍未完成（不含已完成）
+    last_month_left = sum(
+        1 for p in all_projects
+        if (p.get("project_month") or "") == last_month
+        and _is_active_project(p)
+        and str(p.get("custom_status") or "").strip() != "已完成"
+    )
+
     # 恒等式校验：本月项目 = 本月已完成 + 制作中
     # （制作中含所有进行中状态，故恒成立）
 
@@ -68,7 +89,9 @@ def compute_overview_stats(production, group_all, group_completed, now_month=Non
         "this_month": this_month,
         "this_month_done": this_month_done,
         "producing": producing,
+        "last_month_left": last_month_left,
         "month": now_month,
+        "last_month": last_month,
     }
 
 
