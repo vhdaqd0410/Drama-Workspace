@@ -179,6 +179,46 @@
     } catch (e) { alert('更新失败: ' + e.message); }
   }
 
+  // ---------- 导入素材到素材箱 ----------
+  async function importMaterials() {
+    if (!state.wbProject) { await findInWorkbench(); }
+    if (!state.wbProject) return;
+    var name = state.wbProject.name;
+    var st = $('importStatus');
+    setStatus(st, '获取素材列表...', true);
+    try {
+      var d = await wbFetch('/api/project/' + encodeURIComponent(name) + '/local_materials');
+      var files = (d && d.files) || [];
+      if (!files.length) {
+        setStatus(st, '⚠️ 本地项目无素材文件', false);
+        alert('该项目的本地剪辑项目还没有素材文件（可能尚未创建本地项目）。');
+        return;
+      }
+      setStatus(st, '导入 ' + files.length + ' 个文件...', true);
+      if (!csInterface) {
+        // 浏览器调试：模拟
+        setStatus(st, '✅ 模拟导入 ' + files.length + ' 个文件', true);
+        return;
+      }
+      var pathsJson = JSON.stringify(files);
+      csInterface.evalScript('__workbenchDispatch("importToBin", ' + JSON.stringify(pathsJson) + ')', function (res) {
+        try {
+          var r = JSON.parse(res || '{}');
+          if (r.ok) {
+            setStatus(st, '✅ 已导入 ' + r.imported + ' 个文件' + (r.failed ? ('，失败 ' + r.failed) : ''), true);
+          } else {
+            setStatus(st, '❌ 导入失败', false);
+            alert('导入失败: ' + ((r.errors && r.errors[0]) || '未知'));
+          }
+        } catch (e) {
+          setStatus(st, '❌ 解析失败', false);
+        }
+      });
+    } catch (e) {
+      setStatus(st, '❌ ' + e.message, false);
+    }
+  }
+
   // ---------- 初始化 ----------
   function init() {
     loadConfig();
@@ -187,6 +227,7 @@
     $('btnFind').addEventListener('click', findInWorkbench);
     $('btnMarkDone').addEventListener('click', markDone);
     $('btnSyncEp').addEventListener('click', syncEpisodes);
+    $('btnImport').addEventListener('click', importMaterials);
     // 自动读取 Premiere 项目
     readPremiereProject();
   }

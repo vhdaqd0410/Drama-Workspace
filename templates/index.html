@@ -1505,7 +1505,9 @@ a{color:var(--blue);text-decoration:none}
       <div class="form-group"><label>本地项目盘根目录</label><input type="text" id="cfgLocalRoot" placeholder="例如 D:\剪辑项目（本地项目文件夹都建在这里）"></div>
       <div class="form-group"><label>项目模板文件夹</label><input type="text" id="cfgLocalTemplate" placeholder="例如 D:\项目模板（可选，复制其结构到新项目）"></div>
       <div class="form-group"><label>我的剪辑师名</label><input type="text" id="cfgMyEditor" placeholder="例如 张大军（用于匹配分集分配里我负责的集数）"></div>
-      <div style="font-size:11px;color:var(--text-sec);margin-top:6px">💡 选择项目后点「📁 创建本地项目」，会在本地项目盘创建同名项目文件夹，复制模板结构，并拉取你负责集数的抽卡素材/粗剪 + 整个剧本文件夹。</div>
+      <div class="form-group"><label>PR 模板工程文件</label><input type="text" id="cfgPrTemplate" placeholder="例如 F:\AI--模版.prproj（留空用默认）"></div>
+      <div class="form-group"><label>PR 可执行文件</label><input type="text" id="cfgPrExe" placeholder="例如 C:\Program Files\Adobe\Adobe Premiere Pro 2025\Adobe Premiere Pro.exe（留空自动探测）"></div>
+      <div style="font-size:11px;color:var(--text-sec);margin-top:6px">💡 选择项目后点「📁 创建本地项目」，会在本地项目盘创建同名项目文件夹，复制模板结构，拉取你负责集数的抽卡素材/粗剪（扁平放入 01原素材），剧本文件扁平放入「剧本」文件夹，并复制 PR 模板工程改名后用 PR 打开。</div>
     </div>
     <div class="panel settings-section"><h3>⚡ 快捷键设置</h3>
       <div class="form-group">

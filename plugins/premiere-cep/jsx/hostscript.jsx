@@ -60,11 +60,46 @@ function getProjectInfo() {
     }
 }
 
+// 把一批文件导入当前 PR 项目的素材箱（Project panel）。
+// paths: 绝对路径数组（JSON 字符串）。返回导入成功/失败统计。
+// 注意：app.project.importFiles() 是 PR 官方 ExtendScript API，会真正写入项目。
+function importToBin(pathsJson) {
+    var out = { ok: false, imported: 0, failed: 0, errors: [] };
+    try {
+        var paths = JSON.parse(pathsJson);
+        if (!paths || !paths.length) { out.errors.push("路径列表为空"); return _jsonStr(out); }
+        var pr = app.project;
+        if (!pr) { out.errors.push("未打开任何项目"); return _jsonStr(out); }
+        var i;
+        for (i = 0; i < paths.length; i++) {
+            try {
+                // importFiles 接受文件路径数组，返回是否成功（各 PR 版本略有差异）
+                var f = new File(paths[i]);
+                if (!f.exists) { out.failed++; out.errors.push("文件不存在: " + paths[i]); continue; }
+                var okImport = app.project.importFiles([paths[i]]);
+                // importFiles 可能返回 true/false 或 undefined；据文件存在性 + 无异常判断成功
+                out.imported++;
+            } catch (e) {
+                out.failed++;
+                out.errors.push(String(e));
+            }
+        }
+        out.ok = out.imported > 0;
+        return _jsonStr(out);
+    } catch (e) {
+        out.errors.push("导入异常: " + String(e));
+        return _jsonStr(out);
+    }
+}
+
 // 供 evalScript 分发的统一入口：window.__workbenchDispatch(name)
 // 在 CEP 面板中通过 csInterface.evalScript('__workbenchDispatch("getProjectInfo")') 调用
-function __workbenchDispatch(name) {
+function __workbenchDispatch(name, arg) {
     if (name === "getProjectInfo") {
         return getProjectInfo();
+    }
+    if (name === "importToBin") {
+        return importToBin(arg);
     }
     return _jsonStr({ error: "未知命令: " + name });
 }

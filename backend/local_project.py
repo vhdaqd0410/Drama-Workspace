@@ -117,6 +117,19 @@ def _copy_file_robust(src, dst, unc_map=None):
         return False
 
 
+def _find_pr_exe():
+    """探测 Premiere Pro 可执行文件，优先 2025（用户指定用 PR2025）。"""
+    candidates = [
+        r"C:\Program Files\Adobe\Adobe Premiere Pro 2025\Adobe Premiere Pro.exe",
+        r"C:\Program Files\Adobe\Adobe Premiere Pro 2026\Adobe Premiere Pro.exe",
+        r"C:\Program Files\Adobe\Adobe Premiere Pro 2021\Adobe Premiere Pro.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return ""
+
+
 def _flatten_copy(src_dir, dst_dir, unc_map=None):
     """把 src_dir 下所有文件扁平复制到 dst_dir（保留子目录里的文件，但去掉中间层级）。"""
     count = 0
@@ -205,7 +218,9 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
     unc_map = sync_engine._unc_map
     stats = {"episodes": my_episodes, "material_copied": 0, "roughcut_copied": 0,
              "script_copied": 0, "template_copied": template_copied,
+             "pr_copied": False, "pr_opened": False,
              "material_dirs": []}
+    prproj_dst = ""
 
     # 4. 定位素材/粗剪/剧本文件夹（递归查找，支持多层嵌套）
     def _find_dirs(root, keywords):
@@ -318,22 +333,48 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
             if n > 0:
                 stats["roughcut_copied"] += n
 
-    # 8. 拉取整个剧本文件夹
+    # 8. 拉取剧本文件（扁平化：只放文件到「剧本」文件夹，不保留源目录层级）
+    script_target = os.path.join(local_proj_dir, "剧本")
+    os.makedirs(script_target, exist_ok=True)
     for sd in script_dirs:
-        dst = os.path.join(local_proj_dir, "剧本", os.path.basename(sd))
-        ok, err = _copy_tree_robust(sd, dst, unc_map)
-        if ok:
-            stats["script_copied"] += 1
+        n = _flatten_copy(sd, script_target, unc_map)
+        if n > 0:
+            stats["script_copied"] += n
+
+    # 9. 创建工程文件文件夹 + 复制 PR 模板 + 改名 + 用 PR2025 打开
+    pr_template = db.get_setting("pr_template_path", "").strip()
+    if not pr_template:
+        pr_template = r"F:\AI--模版.prproj"
+    if pr_template and os.path.isfile(pr_template):
+        eng_dir = os.path.join(local_proj_dir, "工程文件")
+        os.makedirs(eng_dir, exist_ok=True)
+        prproj_name = local_dir_name + ".prproj"
+        prproj_dst = os.path.join(eng_dir, prproj_name)
+        if _copy_file_robust(pr_template, prproj_dst, unc_map):
+            stats["pr_copied"] = True
+            pr_exe = db.get_setting("pr_exe_path", "").strip() or _find_pr_exe()
+            if pr_exe and os.path.isfile(pr_exe):
+                try:
+                    subprocess.Popen([pr_exe, prproj_dst])
+                    stats["pr_opened"] = True
+                    logger.info("已用 PR 打开工程: %s", prproj_dst)
+                except Exception as e:
+                    logger.warning("打开 PR 工程失败: %s", e)
 
     _prog("完成", len(my_episodes), len(my_episodes))
 
     detail_lines = "、".join(stats["material_dirs"]) if stats["material_dirs"] else "无"
+    _pr_note = ""
+    if stats.get("pr_copied"):
+        _pr_note = "\n工程文件：已复制 PR 模板并改名" + ("，已用 PR 打开" if stats.get("pr_opened") else "")
     msg = ("已创建本地项目：%s\n负责集数：%s\n"
-           "拉取素材：%s\n剧本 %d 个%s"
+           "拉取素材：%s\n剧本 %d 个%s%s"
            % (local_proj_dir, ",".join(map(str, my_episodes)),
               detail_lines, stats["script_copied"],
-              "，模板已复制" if template_copied else ""))
+              "，模板已复制" if template_copied else "", _pr_note))
     stats["seq"] = seq
     stats["local_dir_name"] = local_dir_name
     stats["local_proj_dir"] = local_proj_dir
+    stats["material_target"] = material_target
+    stats["prproj_path"] = prproj_dst
     return True, msg, stats

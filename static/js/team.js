@@ -268,6 +268,10 @@ async function loadConfig(){
       if(lt) lt.value = cfg.local_project_template || '';
       var me = document.getElementById('cfgMyEditor');
       if(me) me.value = cfg.my_editor_name || '';
+      var pt = document.getElementById('cfgPrTemplate');
+      if(pt) pt.value = cfg.pr_template_path || '';
+      var pe = document.getElementById('cfgPrExe');
+      if(pe) pe.value = cfg.pr_exe_path || '';
     }
   }catch(_){}
   // 加载开机自启状态
@@ -328,12 +332,16 @@ async function saveConfig(){
     const lr = document.getElementById('cfgLocalRoot');
     const lt = document.getElementById('cfgLocalTemplate');
     const me = document.getElementById('cfgMyEditor');
+    const pt = document.getElementById('cfgPrTemplate');
+    const pe = document.getElementById('cfgPrExe');
     await api('PUT','/api/settings',{
       min_to_tray: mt ? (mt.checked?'1':'0') : '0',
       auto_scan: as ? (as.checked?'1':'0') : '0',
       local_project_root: lr ? (lr.value||'').trim() : '',
       local_project_template: lt ? (lt.value||'').trim() : '',
-      my_editor_name: me ? (me.value||'').trim() : ''
+      my_editor_name: me ? (me.value||'').trim() : '',
+      pr_template_path: pt ? (pt.value||'').trim() : '',
+      pr_exe_path: pe ? (pe.value||'').trim() : ''
     });
   }catch(_){}
   toast('设置已保存','success');
