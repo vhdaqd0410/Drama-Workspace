@@ -588,6 +588,14 @@ class ScanMixin:
                         pass
                 group_completed.append(entry)
 
+        # 给已完成项目补制作部路径：从 DB 读（production 桶已过滤完成项目）
+        for gc in group_completed:
+            _dproj = db_projects.get(gc["name"])
+            if _dproj and _dproj.get("production_path"):
+                gc["production_path"] = _dproj.get("production_path", "") or ""
+                if gc.get("department") == "已完成" or not gc.get("department"):
+                    gc["department"] = _dproj.get("department", "") or gc.get("department", "")
+
         group_completed.sort(key=lambda x: _natural_key(x["name"]))
 
         # 给待交付 / 已完成项目附加交付统计

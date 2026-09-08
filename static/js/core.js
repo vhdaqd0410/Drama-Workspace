@@ -1287,11 +1287,14 @@ function projectCardHTML(p){
   } else if (hasProd) {
     openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','prod')">📁 打开项目</button>`;
   }
-  if (hasProd && (p.project_type === 'production' || p.has_production_match)) {
-    let which = 'prod';
-    if (status === '修改中') which = 'dest_revision';
-    else if (status === '剪辑中' || status === '审核中') which = 'dest';
-    openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','${which}')">🏢 制作部</button>`;
+  const _isDone2 = status === '已完成';
+  // 制作部按钮：非已完成项目打开制作部项目根，已完成项目打开制作部的 000交付
+  if (hasProd && (p.project_type === 'production' || p.has_production_match || _isDone2)) {
+    let which2 = 'prod';
+    if (_isDone2) which2 = 'prod_delivery';
+    else if (status === '修改中') which2 = 'dest_revision';
+    else if (status === '剪辑中' || status === '审核中') which2 = 'dest';
+    openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','${which2}')">🏢 制作部</button>`;
   }
   openBtns += `<button class="btn btn-sm" onclick="toggleEpisodesPanel('${pname}', this)">📺 分集</button>`;
   openBtns += `<button class="btn btn-sm" onclick="refreshProjectStatus('${pname}', this)" title="扫描目录刷新进度">🔄 刷新</button>`;
