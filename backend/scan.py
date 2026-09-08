@@ -576,6 +576,16 @@ class ScanMixin:
                     source_dept = db_proj.get("department", "") or ""
                     if source_dept:
                         entry["source_department"] = source_dept
+                    # 关键修复：手动拖入 00已完成 的项目，DB 的 group_path 可能还是旧路径
+                    # （旧目录已被移走不存在），回写为磁盘实际位置，保证"组内NAS/已完成"按钮能打开
+                    try:
+                        old_gp = (db_proj.get("group_path") or "").rstrip("\\/")
+                        new_gp = full.rstrip("\\/")
+                        if old_gp and old_gp != new_gp:
+                            self.db.update_project_status(name, group_path=full)
+                            logger.info("已完成项目 group_path 已同步: %s -> %s", name, full)
+                    except Exception:
+                        pass
                 group_completed.append(entry)
 
         group_completed.sort(key=lambda x: _natural_key(x["name"]))

@@ -581,6 +581,30 @@ def api_project_dest_dir(project_name):
     return jsonify({"ok": False, "message": err or "不存在"}), 404
 
 
+def _resolve_completed_dir(project_name):
+    """在组内NAS的 00已完成 目录下查找项目实际位置（项目被手动/自动移入归档后旧路径失效时用）。"""
+    try:
+        group_root = config.get("nas", {}).get("group_root", "")
+        if not group_root:
+            return ""
+        completed_root = os.path.join(group_root, "00已完成")
+        if not os.path.isdir(completed_root):
+            return ""
+        # 精确匹配项目名
+        cand = os.path.join(completed_root, project_name)
+        if os.path.isdir(cand):
+            return cand
+        # 匹配去除序号前缀（磁盘上可能是 "xxx-项目名"）
+        for nm in os.listdir(completed_root):
+            if nm == project_name or nm.endswith(project_name) or project_name.endswith(nm):
+                p = os.path.join(completed_root, nm)
+                if os.path.isdir(p):
+                    return p
+        return ""
+    except Exception:
+        return ""
+
+
 @app.route("/api/project/<path:project_name>/open_folder", methods=["POST"])
 def api_project_open_folder(project_name):
     data = request.get_json(silent=True) or {}
@@ -599,13 +623,27 @@ def api_project_open_folder(project_name):
         # 'group_root' = 强制打开组内NAS项目根目录（不受项目状态影响，用于审核流程等）
         if proj and proj.get("group_path"):
             path = proj["group_path"]
+            if not os.path.isdir(path):
+                # 已完成项目被移入 00已完成 后旧路径不存在，试从完成目录找实际位置
+                _cp = _resolve_completed_dir(project_name)
+                if _cp:
+                    path = _cp
         else:
             path, err = sync_engine.get_source_dir(project_name)
     elif which == "group_output":
         # 'group_output' = 强制打开组内NAS的成片目录（01上映单集版），不受项目状态影响
         if proj and proj.get("group_path"):
-            output_dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
-            path = output_dirs[0] if output_dirs else proj["group_path"]
+            if os.path.isdir(proj["group_path"]):
+                output_dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
+                path = output_dirs[0] if output_dirs else proj["group_path"]
+            else:
+                # 已完成项目移入 00已完成 后旧路径失效，从完成目录重新定位
+                _cp = _resolve_completed_dir(project_name)
+                if _cp:
+                    _od = sync_engine._find_output_dirs(_cp, project_name)
+                    path = _od[0] if _od else _cp
+                else:
+                    path = proj["group_path"]
         else:
             path, err = sync_engine.get_source_dir(project_name)
     elif which == "group" or which == "prod":
@@ -615,8 +653,12 @@ def api_project_open_folder(project_name):
         if which == "group":
             if proj and proj.get("group_path"):
                 custom_status = proj.get("custom_status", "") or ""
-                # 剪辑中/审核中/修改中 → 优先打开 01上映单集版（成片所在目录）
-                if custom_status in ("剪辑中", "审核中", "修改中"):
+                if not os.path.isdir(proj["group_path"]):
+                    # 已完成移入 00已完成 后旧路径失效，从完成目录重定位
+                    _cp = _resolve_completed_dir(project_name)
+                    path = _cp or proj["group_path"]
+                elif custom_status in ("剪辑中", "审核中", "修改中"):
+                    # 剪辑中/审核中/修改中 → 优先打开 01上映单集版（成片所在目录）
                     output_dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
                     if output_dirs:
                         path = output_dirs[0]
@@ -653,9 +695,22 @@ def api_project_open_folder(project_name):
         else:
             path = src
     elif which == "group_output":
+        # 已完成项目优先打开 000交付 目录
         if proj and proj.get("group_path"):
-            dirs = sync_engine._find_output_dirs(proj["group_path"], project_name)
-            path = dirs[0] if dirs else proj["group_path"]
+            _base = proj["group_path"]
+            if not os.path.isdir(_base):
+                _base = _resolve_completed_dir(project_name) or _base
+            _status = proj.get("custom_status", "") or ""
+            if _status == "已完成" and os.path.isdir(_base):
+                _deliv = os.path.join(_base, "000交付")
+                if os.path.isdir(_deliv):
+                    path = _deliv
+                else:
+                    dirs = sync_engine._find_output_dirs(_base, project_name)
+                    path = dirs[0] if dirs else _base
+            else:
+                dirs = sync_engine._find_output_dirs(_base, project_name)
+                path = dirs[0] if dirs else _base
         else:
             path, err = sync_engine.get_source_dir(project_name)
     else:
