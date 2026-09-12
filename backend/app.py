@@ -116,6 +116,31 @@ if not _API_SECRET:
 _PUBLIC_ROUTES = {"/", "/health", "/api/health", "/api/status", "/favicon.ico"}
 _PUBLIC_PREFIXES = ("/static/", "/api/_self/", "/api/preview/", "/api/thumbnail/", "/api/thumbnail", "/api/frame/", "/api/file_stream/", "/api/sse")
 
+
+# ========= 组员端身份（member token）=========
+# 与主端 _API_SECRET 并存：主端密钥=组长权限，team_members.token=组员权限。
+import member_auth as _member_auth
+
+
+def _request_credential():
+    """取请求凭据：优先请求头，其次 query 参数 key（兼容 fetch/图片请求）。"""
+    return (request.headers.get(_member_auth.AUTH_HEADER, "")
+            or request.args.get("key", "")).strip()
+
+
+def _current_role():
+    """返回 (role, member)：('lead',None) / ('member',dict) / (None,None)。"""
+    return _member_auth.role_of(db, _API_SECRET, _request_credential())
+
+
+def _is_member_request():
+    """当前请求是否来自组员端。"""
+    try:
+        return _current_role()[0] == "member"
+    except Exception:
+        return False
+
+
 @app.before_request
 def _auth_gate():
     path = request.path
@@ -124,10 +149,13 @@ def _auth_gate():
     # 页面本身放行（index.html 直接访问）
     if request.endpoint == "index":
         return None
-    # API 请求校验 header 或 query param（兼容 fetch）
-    provided = request.headers.get("X-API-KEY", "") or request.args.get("key", "")
-    if provided != _API_SECRET:
-        return jsonify({"ok": False, "message": "Unauthorized"}), 401
+    # API 鉴权：主端密钥 或 组员令牌，二者之一通过即可
+    cred = _request_credential()
+    if cred == _API_SECRET:
+        return None
+    if _member_auth.member_from_token(db, cred):
+        return None
+    return jsonify({"ok": False, "message": "unauthorized"}), 401
 
 @app.after_request
 def _add_security_headers(resp):
@@ -219,6 +247,9 @@ def api_projects():
         enriched = {'production': [], 'group_all': [], 'group_completed': []}
 
     production = enriched.get('production', [])
+    # 组员端：服务端过滤，只保留组内项目，隐藏其他制作部项目
+    if _is_member_request():
+        production = []
     group_all = enriched.get('group_all', [])
     group_completed = enriched.get('group_completed', [])
 
@@ -1694,6 +1725,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+try:
+    from collab import register_routes as _register_collab
+    _register_collab(app, db, sync_engine=sync_engine)
+    print("[OK] collab(组员协作/打勾/进度/通知) 已注册")
+except ImportError as e:
+    print("[WARN] collab(组员协作) 未加载:", e)
 
 
 def create_app():
