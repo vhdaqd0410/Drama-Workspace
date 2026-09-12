@@ -580,6 +580,20 @@ function renderActions(p){
   const btns=[];
   const has = function(zh){ return s.indexOf(zh) >= 0; };
   const pname = jsq(p.name);
+  // ★ 组员端：动作按钮精简，只保留必要操作
+  if(window.Collab && window.Collab.isMember && window.Collab.isMember()){
+    const _out=[];
+    if(p.group_path || p.on_group!==false){
+      _out.push(['📁 组内NAS',`openSmart('${pname}','group_output')`,'']);
+    }
+    _out.push(['📺 分集',`openEpisodesMember('${pname}')`,'']);
+    _out.push(['🔄 刷新',`refreshProjectStatus('${pname}', this)`,'']);
+    if(p.on_group!==false){
+      _out.push(['📁 创建本地项目',`createLocalProject('${pname}')`,'']);
+    }
+    return _out.map(([label,fn,cls,extra])=>
+      `<button class="btn btn-sm ${cls||''}" ${extra||''} onclick="${fn}">${label}</button>`).join('');
+  }
   // 属性值转义（HTML 属性上下文，区别于 onclick 内的 JS 字符串）
   const pnameAttr = String(p.name||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   // 关键判断：项目在组NAS存在吗？
@@ -846,6 +860,11 @@ function renderStats(){
 function renderOverviewCharts(){
   const wrap = $('overviewCharts');
   if(!wrap) return;
+  // 组员端不显示「部门分布/工作流状态分布」概览卡片
+  if(window.Collab && window.Collab.isMember && window.Collab.isMember()){
+    wrap.innerHTML = '';
+    return;
+  }
   const allList = (typeof projects !== 'undefined' && Array.isArray(projects)) ? projects : [];
   const nowMonth = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0');
   // 只统计当月项目（project_month == 当前月）
@@ -1290,9 +1309,14 @@ function projectCardHTML(p){
   // 空壳项目（无状态+未交付+0集）强制不显示月份，即使有脏数据
   const _s = String(p.custom_status||'').trim(), _d = String(p.delivery_status||'').trim(), _t = Number(p.total_episodes||0);
   const _isShell = !_s && (!_d || _d==='pending') && _t===0;
-  const month = (!_isShell && p.project_month)
-    ? `<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#fff3cd;color:#856404;border:1px solid #ffe08a;cursor:pointer" title="点击修改月份">📅 ${p.project_month}</span>`
-    : (_isShell ? '' : `<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="点击设置月份">📅 未设月份</span>`);
+  const _memView = !!(window.Collab && window.Collab.isMember && window.Collab.isMember());
+  const month = _memView
+    ? (p.project_month ? `<span class="dept-badge" style="background:#fff3cd;color:#856404;border:1px solid #ffe08a">📅 ${p.project_month}</span>` : '')
+    : ((!_isShell && p.project_month)
+      ? `<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#fff3cd;color:#856404;border:1px solid #ffe08a;cursor:pointer" title="点击修改月份">📅 ${p.project_month}</span>`
+      : (_isShell ? '' : `<span class="dept-badge" onclick="setProjectMonth('${pname}')" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="点击设置月份">📅 未设月份</span>`));
+  // 组员端：打开类按钮统一由 renderActions 提供，这里不再生成（避免重复）
+  const _memForOpen = !!(window.Collab && window.Collab.isMember && window.Collab.isMember());
   let openBtns = '';
   const isGroup = p.project_type === 'group' || p.source_path;
   const hasGroup = !!p.group_path;
@@ -1306,32 +1330,50 @@ function projectCardHTML(p){
   }
   const _isDone2 = status === '已完成';
   // 制作部按钮：非已完成项目打开制作部项目根，已完成项目打开制作部的 000交付
-  if (hasProd && (p.project_type === 'production' || p.has_production_match || _isDone2)) {
+  const _isMemberCard = !!(window.Collab && window.Collab.isMember && window.Collab.isMember());
+  if (!_isMemberCard && hasProd && (p.project_type === 'production' || p.has_production_match || _isDone2)) {
     let which2 = 'prod';
     if (_isDone2) which2 = 'prod_delivery';
     else if (status === '修改中') which2 = 'dest_revision';
     else if (status === '剪辑中' || status === '审核中') which2 = 'dest';
     openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','${which2}')">🏢 制作部</button>`;
   }
-  openBtns += `<button class="btn btn-sm" onclick="toggleEpisodesPanel('${pname}', this)">📺 分集</button>`;
-  openBtns += `<button class="btn btn-sm" onclick="refreshProjectStatus('${pname}', this)" title="扫描目录刷新进度">🔄 刷新</button>`;
+  // 组员端：分集/刷新按钮由 renderActions 统一提供，此处不再重复渲染
+  if(!(window.Collab && window.Collab.isMember && window.Collab.isMember())){
+    openBtns += `<button class="btn btn-sm" onclick="toggleEpisodesPanel('${pname}', this)">📺 分集</button>`;
+    openBtns += `<button class="btn btn-sm" onclick="refreshProjectStatus('${pname}', this)" title="扫描目录刷新进度">🔄 刷新</button>`;
+  }
 
   if (status === '修改中') {
 
   }
 
-  const epPanel = `<div class="card-episodes-panel" id="ep-panel-${safeId}"></div>`;
-  const epSummaryBox = `<div class="ep-missing-summary" data-ep-summary="${pnameAttr}"></div>`;
+  // 组员端：不渲染「缺集明细」面板（按钮已精简，扫描也跳过）
+  const epPanel = _memForOpen ? '' : `<div class="card-episodes-panel" id="ep-panel-${safeId}"></div>`;
+  const epSummaryBox = _memForOpen ? '' : `<div class="ep-missing-summary" data-ep-summary="${pnameAttr}"></div>`;
 
+  if (_memForOpen) openBtns = '';   // 组员端：清空，避免与 renderActions 重复
   const bulkChk = window._bulkMode
     ? `<input type="checkbox" class="bulk-card-chk" data-pname="${pnameAttr}" onchange="updateBulkBar()" title="选择此项目">`
     : '';
   return`<div class="card">
     <div class="card-stripe ${badge.cls}"></div>
     <div class="card-head">
-      <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${pnameAttr}" data-project-name="${pnameAttr}">${p.name}</span>${(() => { const _dom = p.is_domestic ? 1 : 0; return _dom ? '<span class="dept-badge" onclick="toggleDomestic(\'' + jsq(p.name) + '\',1)" style="background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9;cursor:pointer" title="国内项目（统计为 AI真人），点击取消标记">✅ 国内</span>' : '<span class="dept-badge" onclick="toggleDomestic(\'' + jsq(p.name) + '\',0)" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="海外项目，点击标记为国内（统计为 AI真人）">海外</span>'; })()}<button class="btn btn-sm ep-search-btn" onclick="searchEpisodeEditor('${jsq(p.name)}')" title="按集号检索该集剪辑师">🔍 查剪辑</button></div>
+      <div class="card-title-line">${bulkChk}<span class="card-title-name" title="${pnameAttr}" data-project-name="${pnameAttr}">${p.name}</span>${(() => {
+        const _mem = !!(window.Collab && window.Collab.isMember && window.Collab.isMember());
+        if(_mem) return '';
+        const _dom = p.is_domestic ? 1 : 0;
+        return _dom
+          ? '<span class="dept-badge" onclick="toggleDomestic(\'' + jsq(p.name) + '\',1)" style="background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9;cursor:pointer" title="国内项目（统计为 AI真人），点击取消标记">✅ 国内</span>'
+          : '<span class="dept-badge" onclick="toggleDomestic(\'' + jsq(p.name) + '\',0)" style="background:#f0f0f5;color:#999;border:1px dashed #ccc;cursor:pointer" title="海外项目，点击标记为国内（统计为 AI真人）">海外</span>';
+      })()}${(window.Collab && window.Collab.isMember && window.Collab.isMember()) ? '' : `<button class="btn btn-sm ep-search-btn" onclick="searchEpisodeEditor('${jsq(p.name)}')" title="按集号检索该集剪辑师">🔍 查剪辑</button>`}</div>
       <div class="card-meta-line">${dept}${month}${(() => {
   const cur = p.custom_status || '';
+  // 组员端：状态只读展示，不可修改
+  if(window.Collab && window.Collab.isMember && window.Collab.isMember()){
+    const disp = (typeof statusDisplay === 'function') ? statusDisplay(p) : cur;
+    return `<span class="badge ${badge.cls}" style="cursor:default">${badge.text || '未设置'}</span>`;
+  }
   const optsHtml = WF_STATUS_OPTIONS.map(o =>
     `<option value="${o.v}" ${o.v===cur?'selected':''}>${o.label}</option>`
   ).join('');
@@ -1343,16 +1385,68 @@ function projectCardHTML(p){
     ${progressHTML}
     ${epSummaryBox}
     ${epPanel}
+    ${(window.Collab && window.Collab.isMember && window.Collab.isMember()) ? '' : `
     <div class="status-rows">
       <div class="status-row"><span class="sr-label">素材同步</span>${m}</div>
       <div class="status-row"><span class="sr-label">成片交付</span>${d}</div>
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
-    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${pname}')">📌 待办 <span class="ctodo-count"></span></div>
+    <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${pname}')">📌 待办 <span class="ctodo-count"></span></div>`}
     ${(window.Collab ? window.Collab.checkBarHTML(p) : '')}
-    <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
+    ${(window.Collab && window.Collab.isMember && window.Collab.isMember()) ? '' : `<div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>`}
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
   </div>`;
+}
+
+// ===== 组员端：查看分集（只读，不含「粘贴分集」）=====
+function openEpisodesMember(projectName){
+  var p = null;
+  try{
+    var flat = window.__projectsCache || [];
+    p = flat.find(function(x){ return x.name === projectName; }) || null;
+  }catch(_){ p = null; }
+  var doRender = function(proj){
+    var plan = (proj && (proj.episode_plan || proj.episodes_plan)) || {};
+    // 后端返回的 episode_plan 可能是 JSON 字符串，需先解析
+    if(typeof plan === 'string'){
+      try{ plan = JSON.parse(plan || '{}'); }catch(_){ plan = {}; }
+    }
+    if(!plan || typeof plan !== 'object'){ plan = {}; }
+    var rows = Object.keys(plan).map(function(k){
+      return { ep: parseInt(k,10), ed: plan[k] };
+    }).filter(function(x){ return x.ed && !isNaN(x.ep); });
+    rows.sort(function(a,b){ return a.ep - b.ep; });
+    var mine = (window._collabName || '');
+    var html = rows.map(function(x){
+      var hit = (String(x.ed).trim() === String(mine).trim());
+      return '<div style="display:flex;justify-content:space-between;padding:6px 10px;border-bottom:1px solid #f2f2f5;font-size:13px;'
+        + (hit ? 'background:#eaf7ee;font-weight:600' : '') + '">'
+        + '<span>第 ' + x.ep + ' 集</span><span style="color:' + (hit ? '#2e7d32' : '#86868b') + '">'
+        + escHtml(x.ed) + (hit ? ' ← 你负责' : '') + '</span></div>';
+    }).join('');
+    if(!html) html = '<div style="padding:20px;text-align:center;color:#86868b">尚未分配分集</div>';
+    var mineCount = rows.filter(function(x){ return String(x.ed).trim() === String(mine).trim(); }).length;
+
+    var ov = document.createElement('div');
+    ov.className = 'modal-overlay active';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center';
+    ov.onclick = function(e){ if(e.target === ov) ov.remove(); };
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;width:420px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.25)">'
+      + '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">'
+      + '<b style="font-size:15px">📺 分集 · ' + escHtml(projectName) + '</b>'
+      + '<span style="cursor:pointer;color:#86868b;font-size:18px" onclick="this.closest(\'.modal-overlay\').remove()">×</span></div>'
+      + '<div style="padding:10px 18px;background:#f7f8fb;font-size:12px;color:#666;border-bottom:1px solid #eee">'
+      + '共 ' + rows.length + ' 集' + (mine ? '，其中你负责 <b style="color:#2e7d32">' + mineCount + '</b> 集' : '') + '</div>'
+      + '<div style="overflow-y:auto;flex:1">' + html + '</div>'
+      + '</div>';
+    document.body.appendChild(ov);
+  };
+  if(p){ doRender(p); return; }
+  api('GET','/api/projects').then(function(d){
+    var flat = (d.production||[]).concat(d.group_all||[]);
+    window.__projectsCache = flat;
+    doRender(flat.find(function(x){ return x.name === projectName; }) || null);
+  }).catch(function(){ doRender(null); });
 }
 
 // ===== 项目卡片：按集号快速检索该集剪辑师 =====

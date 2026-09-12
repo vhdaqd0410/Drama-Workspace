@@ -827,6 +827,8 @@ let _episodeScanned = new Set();   // 已扫描/已排队的项目名
 let _episodeBusy = 0;
 let _episodeScanQueued = false;
 async function loadInitialEpisodeSummary(){
+  // 组员端不做全量集数扫描（不需要逐项目扫 NAS，页面更快）
+  if(window.Collab && window.Collab.isMember && window.Collab.isMember()) return;
   const targets = new Set();
   if (allSections) {
     for (const sec of allSections) {
