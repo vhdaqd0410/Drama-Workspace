@@ -119,8 +119,8 @@ async function onStatusChange(pname, sel){
       if(target) target.custom_status = newStatus;
       (allSections||[]).forEach(sec => (sec.projects||[]).forEach(p => { if(p.name===pname) p.custom_status=newStatus; }));
       renderDashboard();
-      // 状态变为"待提交审核"：自动进入审核流程（二部批量回传 / 其他部门打开成片目录+分秒帧）
-      if(newStatus === '待提交审核' && typeof submitReview === 'function'){
+      // 状态变为"待审核"：自动进入审核流程（二部批量回传 / 其他部门打开成片目录+分秒帧）
+      if(newStatus === '待审核' && typeof submitReview === 'function'){
         setTimeout(function(){ submitReview(pname); }, 300);
       }
     }else{
@@ -134,7 +134,7 @@ async function onStatusChange(pname, sel){
     sel.title = '点击修改项目状态';
   }
 }
-async function updateStatus(name,status){try{await api('POST',`/api/project/${encodeURIComponent(name)}/custom_status`,{custom_status:status});toast(`已更新 ${name} → ${status}`,'success');window._lastStatusChanged = name;await loadProjects();if(status==='待提交审核'&&typeof submitReview==='function')submitReview(name)}catch(e){toast('更新失败: '+e.message,'error')}}
+async function updateStatus(name,status){try{await api('POST',`/api/project/${encodeURIComponent(name)}/custom_status`,{custom_status:status});toast(`已更新 ${name} → ${status}`,'success');window._lastStatusChanged = name;await loadProjects();if(status==='待审核'&&typeof submitReview==='function')submitReview(name)}catch(e){toast('更新失败: '+e.message,'error')}}
 async function syncMaterial(name){
     // 先检查项目是否已经在组盘（用户可能手动复制了）
   try {

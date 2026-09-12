@@ -213,9 +213,9 @@ function closeEditCompleteDialog(btn, overlayEl){
 async function confirmEditComplete(name, btn){
   var overlayEl = btn && btn.closest ? btn.closest('.modal-overlay') : null;
   try{
-    // 新流程：成片检测完成后进入"待提交审核"（再由部门流程转入审核中）
-    await api('POST', '/api/project/' + encodeURIComponent(name) + '/custom_status', { custom_status: '待提交审核' });
-    toast('✅ ' + name + ' 已进入待提交审核', 'success');
+    // 新流程：成片检测完成后进入"待审核"（再由流程转入审核中）
+    await api('POST', '/api/project/' + encodeURIComponent(name) + '/custom_status', { custom_status: '待审核' });
+    toast('✅ ' + name + ' 已进入待审核', 'success');
   }catch(e){
     toast('操作失败: '+e.message, 'error');
   }finally{
@@ -460,28 +460,47 @@ function jumpToProject(name){
 }
 
 /* ============ Dashboard ============ */
+// 状态归一化：旧状态名 -> 精简后 9 状态（与后端 normalize_status 保持一致）
+function normalizeStatus(s){
+  const t = String(s||'').trim();
+  if(!t) return '';
+  if(t === '待提交审核') return '待审核';
+  if(t === '交付中') return '待交付';
+  if(/^[二三四五六七八九十]审中$/.test(t)) return '审核中';
+  return t;
+}
+// 展示名：审核中带轮次（如「审核中·第2轮」）
+function statusDisplay(p){
+  const base = normalizeStatus((p && p.custom_status) || '');
+  if(!base) return '';
+  if(base === '审核中'){
+    const rnd = Number((p && p.review_round) || 0);
+    if(rnd > 1) return '审核中·第' + rnd + '轮';
+  }
+  return base;
+}
 function getStepIndex(status){
+  const s = normalizeStatus(status);
   const map={
     fenji:0, 分集:0, 分集中:0,
     jianji:1, 剪辑:1, 剪辑中:1,
-    tixshenhe:2, 待提交审核:2, 待提交:2,
-    shenhe:3, 审核:3, 审核中:3, 二审中:3, 三审中:3, 四审中:3, 五审中:3,
+    tixshenhe:2, 待审核:2, 待提交审核:2, 待提交:2,
+    shenhe:3, 审核:3, 审核中:3,
     xiugai:4, 修改:4, 修改中:4,
-    jiaofu:5, 交付:5, 交付中:5, 待交付:5,
+    jiaofu:5, 交付:5, 待交付:5,
     zhijian:6, 质检:6, 待质检:6, 质检中:6,
     wancheng:7, 完成:7, 已完成:7
   };
-  if(!status)return -1;
-  const key=String(status).trim();
+  if(!s)return -1;
+  const key=s.trim();
   if(map[key]!==undefined)return map[key];
   const lk=key.toLowerCase();
   if(map[lk]!==undefined)return map[lk];
   // 包含匹配
   if(key.includes('分集'))return 0;
   if(key.includes('剪辑'))return 1;
-  if(key.includes('待提交'))return 2;
-  if(key.includes('审中'))return 3;   // 审核中 / N审中
-  if(key.includes('审核'))return 3;
+  if(key.includes('待审核') || key.includes('待提交'))return 2;
+  if(key.includes('审核') || key.includes('审中'))return 3;
   if(key.includes('修改'))return 4;
   if(key.includes('交付'))return 5;
   if(key.includes('质检'))return 6;
@@ -492,10 +511,9 @@ const WF_STATUS_OPTIONS = [
   {v:'', label:'— 未设置 —', cls:'default'},
   {v:'分集中', label:'📋 分集中', cls:'fenji'},
   {v:'剪辑中', label:'✂️ 剪辑中', cls:'jianji'},
-  {v:'待提交审核', label:'📤 待提交审核', cls:'daijiaofu'},
+  {v:'待审核', label:'📤 待审核', cls:'daijiaofu'},
   {v:'审核中', label:'👀 审核中', cls:'shenhe'},
   {v:'修改中', label:'✏️ 修改中', cls:'xiugai'},
-  {v:'交付中', label:'📦 交付中', cls:'jiaofu'},
   {v:'待交付', label:'📦 待交付', cls:'daijiaofu'},
   {v:'待质检', label:'🔍 待质检', cls:'zhijian'},
   {v:'质检中', label:'🔍 质检中', cls:'zhijian'},
@@ -503,7 +521,8 @@ const WF_STATUS_OPTIONS = [
 ];
 function getBadge(status){
   if(!status)return{cls:'default',text:'未设置'};
-  const s=String(status);
+  const s=normalizeStatus(status);
+  if(!s)return{cls:'default',text:'未设置'};
   for(const opt of WF_STATUS_OPTIONS){
     if(opt.v && s===opt.v)return{cls:opt.cls, text:opt.label};
   }
@@ -545,7 +564,7 @@ function assignSummaryHTML(proj){
   }).join(' | ');
 }
 function renderActions(p){
-  const s=String(p.custom_status||'');
+  const s=normalizeStatus(p.custom_status||'');
   const btns=[];
   const has = function(zh){ return s.indexOf(zh) >= 0; };
   const pname = jsq(p.name);
@@ -570,11 +589,11 @@ function renderActions(p){
       btns.push(['📋 继续分集',`openFenjiFor('${pname}')`,'btn-primary']);
       btns.push(['⚡ 同步到工作台',`goFenjiSync('${pname}')`,'btn-primary']);
     }
-    // —— 待提交审核：进入审核流程 ——
-    else if(has('待提交审核')||has('待提交')){
+    // —— 待审核：进入审核 ——
+    else if(has('待审核')||has('待提交')){
       btns.push(['📤 进入审核',`submitReview('${pname}')`,'btn-primary']);
     }
-    // —— 剪辑中 / 审核中 / N审中 ——
+    // —— 剪辑中 / 审核中（含旧 N审中）——
     if(has('剪辑中')){ /* 剪辑中：显示进度由卡片其他部分呈现 */ }
     if(has('审核中')||has('审中'))btns.push(['✏️ 标记修改',`updateStatus('${pname}','修改中')`,'']);
     // —— 修改中：修改完毕（提交下一轮审核）+ 终审完毕（进入待交付） ——
@@ -584,9 +603,9 @@ function renderActions(p){
     }
     // —— 待质检 / 质检中 ——
     if(has('待质检')||has('质检中'))btns.push(['🔍 开始质检',`qaStartFor('${pname}')`,'btn-primary']);
-    // —— 已交付 / 交付中 / 待交付 ——
-    if(has('已交付')||has('交付中')||has('待交付'))btns.push(['📦 初版交付',`updateStatus('${pname}','待质检')`,'btn-primary']);
-    if(has('已交付')||has('待交付'))btns.push(['🔍 去质检',`qaStartFor('${pname}')`,'']);
+    // —— 已完成 / 待交付 ——
+    if(has('已完成')||has('待交付'))btns.push(['📦 初版交付',`updateStatus('${pname}','待质检')`,'btn-primary']);
+    if(has('已完成')||has('待交付'))btns.push(['🔍 去质检',`qaStartFor('${pname}')`,'']);
     // 同步按钮：仅当组NAS还没有这个项目 或 sync_status=pending 时显示
     if(needSync)btns.push(['📦 同步素材',`syncMaterial('${pname}')`,'btn-primary']);
   }
@@ -753,24 +772,10 @@ function submitRevision(name){
     toast('✅ 修改上传成功，项目进入下一轮审核','success');
   }
 }
-// 计算下一轮审核状态并更新
+// 计算下一轮审核状态并更新（轮次由后端统一维护，前端只需提交「审核中」）
 function submitRevisionSetStatus(name){
-  const p = (window.allProjects && window.allProjects.group_all || []).find(x => x.name === name);
-  const cur = p ? (p.custom_status || '') : '';
-  // 前端计算下一审核轮次：修改中→审核中(第1次)；N审中→N+1审中
-  let next;
-  if(cur.indexOf('修改中') >= 0){
-    next = '审核中';
-  } else {
-    // 已在审核中/N审中，取当前审核数+1
-    const m = cur.match(/^([二三四五六七八九十])审中$/);
-    const cn = ['零','一','二','三','四','五','六','七','八','九','十'];
-    if(m){
-      const idx = cn.indexOf(m[1]);
-      next = (idx >= 0 && idx < cn.length-1) ? cn[idx+1]+'审中' : '审核中';
-    } else next = '审核中';
-  }
-  updateStatus(name, next);
+  // 后端 set_custom_status 会在「修改中 → 审核中」时自动 +1 轮次并清理上轮打勾
+  updateStatus(name, '审核中');
 }
 
 // ===== 终审完毕：所有审核通过，直接进入待交付（自动创建 000交付） =====
@@ -842,7 +847,7 @@ function renderOverviewCharts(){
   const deptMax = deptArr[0] ? deptArr[0][1] : 1;
 
   // 工作流状态分布（含未设置）
-  const statusOrder = ['分集中','剪辑中','审核中','修改中','待交付','交付中','待质检','质检中','已完成'];
+  const statusOrder = ['分集中','剪辑中','待审核','审核中','修改中','待交付','待质检','质检中','已完成'];
   const statusCount = {};
   list.forEach(p=>{ const s=(p.custom_status||'').trim()||'未设置'; statusCount[s]=(statusCount[s]||0)+1; });
   const statusArr = statusOrder.filter(s=>statusCount[s]).map(s=>[s,statusCount[s]])
@@ -851,8 +856,8 @@ function renderOverviewCharts(){
   const statusMax = statusArr[0] ? statusArr[0][1] : 1;
 
   const statusColor = {
-    '分集中':'#8e44ad','剪辑中':'#2980b9','审核中':'#16a085','修改中':'#e67e22',
-    '待交付':'#d35400','交付中':'#c0392b','待质检':'#f39c12','质检中':'#9b59b6',
+    '分集中':'#8e44ad','剪辑中':'#2980b9','待审核':'#0ea5e9','审核中':'#16a085','修改中':'#e67e22',
+    '待交付':'#d35400','待质检':'#f39c12','质检中':'#9b59b6',
     '已完成':'#27ae60','未设置':'#bdc3c7'
   };
 
@@ -1229,10 +1234,10 @@ function getDeptStyle(dept){
 }
 
 function projectCardHTML(p){
-  const badge=getBadge(p.custom_status);
-  const _st=p.custom_status||'';
-  const _hasEdit=_st==='剪辑中'||_st==='审核中'||_st==='修改中'||_st==='待质检'||_st==='质检中'||_st==='待交付'||_st==='交付中';
-  const _hasDeliver=_st==='审核中'||_st==='修改中'||_st==='待质检'||_st==='质检中'||_st==='待交付'||_st==='交付中'||_st==='已交付'||_st==='已完成';
+  const badge=getBadge(normalizeStatus(p.custom_status));
+  const _st=normalizeStatus(p.custom_status);
+  const _hasEdit=_st==='剪辑中'||_st==='审核中'||_st==='修改中'||_st==='待质检'||_st==='质检中'||_st==='待交付';
+  const _hasDeliver=_st==='审核中'||_st==='修改中'||_st==='待质检'||_st==='质检中'||_st==='待交付'||_st==='已完成';
   const m=p.material_sync===true?'<span class="sr-val">✅ 已同步</span>':p.material_sync===false?'<span class="sr-val">⏳ 待同步</span>':_hasEdit?'<span class="sr-val">✅ 已同步</span>':'<span class="sr-val">—</span>';
   const d=p.delivered===true?'<span class="sr-val">✅ 已交付</span>':p.delivered===false?'<span class="sr-val">⏳ 待交付</span>':_hasDeliver?'<span class="sr-val">✅ 已交付</span>':'<span class="sr-val">—</span>';
   const qa=qaBadgeHTML(p.qa_status);
@@ -1921,7 +1926,7 @@ async function _bulkSetMonthGo(namesStr){
 async function bulkSetStatus(){
   const names = getBulkSelected();
   if(!names.length){ toast('请先选择项目','warning'); return; }
-  const STATUS_OPTS = ['分集中','剪辑中','审核中','修改中','交付中','待质检','质检中','已完成','已交付'];
+  const STATUS_OPTS = ['分集中','剪辑中','待审核','审核中','修改中','待交付','待质检','质检中','已完成'];
   const html = `<div class="modal-overlay" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="width:320px">
       <div class="modal-head">🏷️ 批量设置状态 (${names.length} 个项目)</div>

@@ -176,13 +176,13 @@ class TestQAWorkflow:
         monkeypatch.setattr(qa_mod, "db", tmp_db)
         return engine
 
-    def test_pass_goes_pending(self, engine, tmp_db, monkeypatch):
-        """质检全部通过 → 进入交付中（新流程：质检通过并回传 → 交付中）。"""
+    def test_pass_goes_completed(self, engine, tmp_db, monkeypatch):
+        """质检全部通过 → 已完成（精简后 9 状态：质检通过即终点）。"""
         name = self._mk_project(engine, "通过项目", status="待质检")
         qa = self._qa_engine_with_db(tmp_db, monkeypatch)
         qa._auto_advance_workflow(name, passed=10, failed=0)
         p = tmp_db.get_project(name)
-        assert p["custom_status"] == "交付中"
+        assert p["custom_status"] == "已完成"
 
     def test_fail_goes_revising(self, engine, tmp_db, monkeypatch):
         name = self._mk_project(engine, "失败项目", status="质检中")

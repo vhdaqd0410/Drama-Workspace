@@ -665,6 +665,34 @@ class DeliverMixin:
             message="已移入 00已完成")
         return True, "项目已移入 00已完成"
 
+    # ==================== 工作流状态定义（单源） ====================
+    # 精简后的 9 个业务状态。旧状态（待提交审核/交付中/N审中）保留只读兼容：
+    #   待提交审核  -> 待审核
+    #   交付中      -> 已废弃（回传进度用 sync_progress 表达）
+    #   二审中/三审中... -> 审核中 + review_round 轮次
+    WF_STATUSES = ["分集中", "剪辑中", "待审核", "审核中", "修改中",
+                   "待交付", "待质检", "质检中", "已完成"]
+
+    # 旧状态名 -> 新状态名（读取兼容映射）
+    LEGACY_STATUS_MAP = {
+        "待提交审核": "待审核",
+        "交付中": "待交付",
+    }
+
+    def normalize_status(self, status):
+        """把旧状态名归一化到精简后的 9 状态。
+        N审中（二审中/三审中/...）统一归为「审核中」（轮次由 review_round 字段承载）。
+        未知状态原样返回，避免误吞第三方写入。
+        """
+        s = str(status or "").strip()
+        if not s:
+            return ""
+        if s in self.LEGACY_STATUS_MAP:
+            return self.LEGACY_STATUS_MAP[s]
+        if self._is_review_status(s):
+            return "审核中"
+        return s
+
     def set_custom_status(self, project_name, status):
         """设置项目的自定义状态。
 
@@ -672,22 +700,49 @@ class DeliverMixin:
         - 设为"修改中"时，在01上映单集版目录中新建以日期命名的文件夹（如0810修改）。
         - 设为"待交付"时，自动将交付文件夹模板复制到项目根目录。
         - 设为"已完成"时，自动将组内NAS项目移动到 00已完成 子目录。
-        审核循环：支持"审核中 → 修改中 → 二审中 → 修改中 → 三审中..."动态递增，
-        状态名含"N审中"（二审/三审/四审...），由 _next_review_status 自动推进。
+        审核循环：状态统一为「审核中」，轮次用 projects.review_round 记录。
+        「修改中 → 审核中」时轮次 +1，并清零上一轮的修改打勾。
         """
-        # 基础状态 + 动态"N审中"（二审/三审/四审...）
-        base_statuses = ["", "分集中", "剪辑中", "待提交审核", "审核中", "修改中",
-                         "交付中", "待交付", "待质检", "质检中", "已完成"]
-        if status not in base_statuses and not self._is_review_status(status):
-            return False, "无效的状态: " + str(status)
+        raw = str(status or "").strip()
+        # 入库前归一化：旧状态自动转新状态（保证库里只有 9 种状态）
+        status = self.normalize_status(raw)
+        if status not in self.WF_STATUSES:
+            return False, "无效的状态: " + str(raw)
 
         proj = self.db.get_project(project_name)
         if not proj:
             return False, "项目不存在"
 
         old_status = proj.get("custom_status", "")
+        old_norm = self.normalize_status(old_status)
+
+        # 审核轮次维护：
+        #   首次进入审核中（旧值非审核中）→ review_round = max(1, 当前值)
+        #   修改中 → 审核中（下一轮）→ review_round += 1
+        new_round = int(proj.get("review_round") or 0)
+        round_bump = False
+        if status == "审核中":
+            if old_norm == "修改中":
+                new_round = max(1, new_round) + 1
+                round_bump = True
+            elif old_norm != "审核中":
+                new_round = max(1, new_round)
+
         self.db.update_project_status(project_name, custom_status=status)
-        logger.info("项目状态变更: %s %s -> %s", project_name, old_status, status)
+        if status == "审核中" and new_round != int(proj.get("review_round") or 0):
+            try:
+                self.db.update_project_status(project_name, review_round=new_round)
+            except Exception as e:
+                logger.warning("写入 review_round 失败: %s", e)
+        logger.info("项目状态变更: %s %s -> %s%s", project_name, old_status or "未设置",
+                    status, (" (第%d轮)" % new_round) if status == "审核中" else "")
+
+        # 轮次推进：清掉上一轮的修改打勾，避免旧勾残留到新一轮
+        if round_bump:
+            try:
+                self.db.clear_checks(project_name, "revise")
+            except Exception as e:
+                logger.warning("轮次推进清理打勾失败: %s", e)
 
         # 状态变更写入审计日志（供项目时间线展示）
         try:
@@ -733,27 +788,40 @@ class DeliverMixin:
         return True, "状态已更新为: " + status
 
     def _is_review_status(self, status):
-        """判断状态是否为"N审中"（二审/三审/四审...）。"""
+        """判断状态是否为旧的"N审中"（二审/三审/四审...）。
+
+        仅用于读取历史数据兼容；新写入统一为「审核中」+ review_round。
+        """
         s = str(status or "").strip()
         # 匹配 "X审中"（X为中文数字：二/三/四/五/六/七/八/九/十）
         return bool(re.match(r'^[二三四五六七八九十]审中$', s))
 
     def _next_review_status(self, old_status):
-        """根据当前状态推进到下一审核轮次。
-        审核中(第1次) 修改后 → 二审中；二审中 修改后 → 三审中；以此类推。"""
-        cn_num = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
-        s = str(old_status or "").strip()
-        if s == "审核中" or s == "待提交审核":
-            return "二审中"
-        if s == "修改中":
-            return "审核中"  # 修改中提交 → 若首次则审核中（由调用方判断）
-        # 解析当前是第几审
-        m = re.match(r'^([一二三四五六七八九十])审中$', s)
-        if m:
-            idx = cn_num.index(m.group(1))
-            if idx < len(cn_num) - 1:
-                return cn_num[idx + 1] + "审中"
+        """向后兼容：根据当前状态推进到下一审核轮次的状态名。
+
+        新流程下状态恒为「审核中」，轮次由 review_round 字段承载，
+        本方法仅保留给旧调用点，统一返回「审核中」。
+        """
         return "审核中"
+
+    def get_review_round(self, project_name):
+        """读取项目当前审核轮次（至少 1）。"""
+        proj = self.db.get_project(project_name) or {}
+        try:
+            return max(1, int(proj.get("review_round") or 0))
+        except Exception:
+            return 1
+
+    def status_display(self, project_name, status=None):
+        """返回状态的展示名：审核中会带上轮次，如「审核中·第2轮」。"""
+        proj = self.db.get_project(project_name) or {}
+        s = self.normalize_status(status if status is not None
+                                  else proj.get("custom_status"))
+        if s == "审核中":
+            rnd = self.get_review_round(project_name)
+            if rnd > 1:
+                return "审核中·第%d轮" % rnd
+        return s
 
     def _create_revision_folder(self, project_name):
         """在项目的01上映单集版目录中新建以日期命名的修改文件夹（如0810修改）。

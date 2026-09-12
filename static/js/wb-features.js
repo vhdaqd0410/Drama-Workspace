@@ -253,13 +253,14 @@
   function _workflowOrder(status){
     var s = String(status||'').trim();
     if(!s) return -1;
-    var map = { '分集':0,'分集中':0, '剪辑':1,'剪辑中':1, '审核':2,'审核中':2,
-                '修改':3,'修改中':3, '交付':4,'交付中':4,'待交付':4,
+    var map = { '分集':0,'分集中':0, '剪辑':1,'剪辑中':1, '审核':2,'审核中':2,'待审核':2,
+                '修改':3,'修改中':3, '交付':4,'待交付':4,
                 '质检':5,'待质检':5,'质检中':5, '完成':6,'已完成':6 };
     if(map[s] !== undefined) return map[s];
     if(s.indexOf('分集')>=0) return 0;
     if(s.indexOf('剪辑')>=0) return 1;
-    if(s.indexOf('审核')>=0) return 2;
+    if(s.indexOf('待审核')>=0 || s.indexOf('待提交')>=0) return 2;
+    if(s.indexOf('审核')>=0 || s.indexOf('审中')>=0) return 2;
     if(s.indexOf('修改')>=0) return 3;
     if(s.indexOf('交付')>=0) return 4;
     if(s.indexOf('质检')>=0) return 5;

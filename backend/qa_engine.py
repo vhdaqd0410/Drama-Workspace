@@ -750,8 +750,8 @@ class QAEngine:
 
     def _auto_advance_workflow(self, project_name, passed, failed):
         """质检完成后自动推进项目工作流状态：
-        - 全部通过(failed==0) → 流转到"交付中"（交付文件就绪，进入交付回传环节）
-        - 有失败(failed>0)   → 流转到"修改中"（需修复后重新质检）
+        - 全部通过(failed==0) → "已完成"（精简后 9 状态：质检通过即终点）
+        - 有失败(failed>0)   → "修改中"（需修复后重新质检）
         """
         try:
             proj = db.get_project(project_name)
@@ -761,7 +761,7 @@ class QAEngine:
             # 只在"质检中/待质检"状态推进，避免覆盖用户手动设置的其他状态
             if cur not in ("质检中", "待质检"):
                 return
-            target = "交付中" if failed == 0 else "修改中"
+            target = "已完成" if failed == 0 else "修改中"
             db.update_project_status(
                 project_name, custom_status=target,
                 sync_progress="质检%s，自动流转到%s" % ("通过" if failed == 0 else "未通过", target))

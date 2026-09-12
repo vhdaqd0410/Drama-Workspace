@@ -30,6 +30,15 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     config = yaml.safe_load(f)
 
+# ========= 开发/测试安全模式（dev.safe_mode）=========
+# 为 true 时：不启动任何会写 NAS / 改生产数据的后台服务
+# （成片监听自动回传、数据库定时备份、交付日期同步、制作部扫描、NAS 健康检查）。
+# 生产环境无此键或为 false，行为与之前完全一致（零影响）。
+# 用途：在独立开发目录跑第二实例时，杜绝误写生产 NAS。
+_SAFE_MODE = bool((config.get("dev") or {}).get("safe_mode", False))
+if _SAFE_MODE:
+    print("[SAFE] 已启用开发安全模式：跳过所有后台写服务（监听/备份/同步/扫描）")
+
 
 def save_config():
     """将当前 config 字典写回 config.yaml"""
@@ -1623,25 +1632,34 @@ except ImportError as e:
 
 # 启动数据库每日自动备份
 try:
-    from backup_service import start_scheduler as _start_backup
-    _start_backup()
-    print("[OK] backup_service(数据库自动备份) 已启动")
+    if _SAFE_MODE:
+        print("[SAFE] 跳过：backup_service(数据库自动备份)")
+    else:
+        from backup_service import start_scheduler as _start_backup
+        _start_backup()
+        print("[OK] backup_service(数据库自动备份) 已启动")
 except Exception as e:
     print("[WARN] backup_service 未启动:", e)
 
 # 启动交付日期定时同步（从分集目标表格自动补录交付日期）
 try:
-    from delivery_sync_service import start_scheduler as _start_dsync
-    _start_dsync()
-    print("[OK] delivery_sync_service(交付日期定时同步) 已启动")
+    if _SAFE_MODE:
+        print("[SAFE] 跳过：delivery_sync_service(交付日期定时同步)")
+    else:
+        from delivery_sync_service import start_scheduler as _start_dsync
+        _start_dsync()
+        print("[OK] delivery_sync_service(交付日期定时同步) 已启动")
 except Exception as e:
     print("[WARN] delivery_sync_service 未启动:", e)
 
 # 启动制作部源项目自动扫描（自动发现新建项目）
 try:
-    from project_scan_service import start_scheduler as _start_pscan
-    _start_pscan(sync_engine=sync_engine)
-    print("[OK] project_scan_service(制作部源自动扫描) 已启动")
+    if _SAFE_MODE:
+        print("[SAFE] 跳过：project_scan_service(制作部源自动扫描)")
+    else:
+        from project_scan_service import start_scheduler as _start_pscan
+        _start_pscan(sync_engine=sync_engine)
+        print("[OK] project_scan_service(制作部源自动扫描) 已启动")
 except Exception as e:
     print("[WARN] project_scan_service 未启动:", e)
 
@@ -1681,15 +1699,18 @@ if __name__ == "__main__":
 def create_app():
     # 启动成片目录监听（桌面版走 create_app 也会生效；Web 版 main() 里也会调 start，
     # 已由 Watcher.start 的幂等保护避免重复启动）
-    try:
-        threading.Thread(target=watcher.start, daemon=True).start()
-    except Exception:
-        pass
-    # 启动 NAS 健康检查（SSE 推送断线/恢复提示）
-    try:
-        sync_engine.start_nas_health_check()
-    except Exception:
-        pass
+    if _SAFE_MODE:
+        print("[SAFE] 跳过：成片目录监听 + NAS 健康检查")
+    else:
+        try:
+            threading.Thread(target=watcher.start, daemon=True).start()
+        except Exception:
+            pass
+        # 启动 NAS 健康检查（SSE 推送断线/恢复提示）
+        try:
+            sync_engine.start_nas_health_check()
+        except Exception:
+            pass
     # 清理超过 90 天的日志表（delivery_logs/sync_logs/audit_logs），防 DB 无限膨胀
     try:
         _n = db.prune_logs(keep_days=90)

@@ -266,6 +266,50 @@ class Database:
                 username TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )""")
+
+            # ---- 组员协作：阶段打勾（项目 × 人 × 阶段 × 轮次）----
+            # phase: cut(剪辑完成) / revise(修改完成) / deliver(交付完成)
+            # 一个 (项目,人,阶段,轮次) 只保留一条，重复打勾为 upsert 覆盖。
+            c.execute("""CREATE TABLE IF NOT EXISTS project_checks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                editor TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                round INTEGER DEFAULT 1,
+                done INTEGER DEFAULT 0,
+                note TEXT DEFAULT '',
+                updated_by TEXT DEFAULT '',
+                updated_at TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(project_name, editor, phase, round)
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_checks_proj ON project_checks(project_name)")
+
+            # ---- 组员协作：每轮修改的范围（组长选中的要改集数）----
+            c.execute("""CREATE TABLE IF NOT EXISTS revision_scope (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                round INTEGER NOT NULL,
+                episodes TEXT DEFAULT '[]',
+                note TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(project_name, round)
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_revscope_proj ON revision_scope(project_name)")
+
+            # ---- 组员协作：协作通知（组员动作 → 组长可见的待办提示）----
+            # kind: check_done(打勾齐) / check_one(单人打勾) / marked(标记已修改)
+            c.execute("""CREATE TABLE IF NOT EXISTS collab_notices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                kind TEXT DEFAULT '',
+                phase TEXT DEFAULT '',
+                round INTEGER DEFAULT 1,
+                actor TEXT DEFAULT '',
+                detail TEXT DEFAULT '',
+                acked INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_collab_acked ON collab_notices(acked)")
             c.execute("CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_logs(project_name)")
 
             # Migration: add columns if missing
@@ -340,6 +384,22 @@ class Database:
             # 非海外剧标记：1=国内(统计为 AI真人)，0/空=海外(默认 AI海外真人)
             try:
                 c.execute("ALTER TABLE projects ADD COLUMN is_domestic INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            # 审核轮次：替代旧的「二/三/四审中」状态。1=首轮，每次「修改中→审核中」+1。
+            # 用于修改轮次的打勾隔离：每轮单独记录，避免上一轮勾选残留。
+            try:
+                c.execute("ALTER TABLE projects ADD COLUMN review_round INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            # 组员端身份令牌（仅 member 账号使用；lead 不需要）
+            try:
+                c.execute("ALTER TABLE team_members ADD COLUMN token TEXT DEFAULT ''")
+            except Exception:
+                pass
+            # 组员端角色：lead(组长/主端) | member(组员)
+            try:
+                c.execute("ALTER TABLE team_members ADD COLUMN client_role TEXT DEFAULT 'lead'")
             except Exception:
                 pass
 
@@ -1015,6 +1075,187 @@ class Database:
     def delete_project_todo(self, todo_id):
         with self.get_conn() as conn:
             conn.execute("DELETE FROM project_todos WHERE id=?", (todo_id,))
+
+    # ==================== 组员协作：阶段打勾 ====================
+
+    def get_project_checks(self, project_name, phase=None, round_no=None):
+        """读取某项目的打勾记录。可按阶段/轮次过滤。"""
+        try:
+            with self.get_conn() as conn:
+                sql = "SELECT * FROM project_checks WHERE project_name=?"
+                args = [project_name]
+                if phase:
+                    sql += " AND phase=?"
+                    args.append(phase)
+                if round_no is not None:
+                    sql += " AND round=?"
+                    args.append(int(round_no))
+                sql += " ORDER BY phase, editor"
+                return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        except Exception:
+            logger.warning("读取打勾记录失败", exc_info=True)
+            return []
+
+    def set_project_check(self, project_name, editor, phase, round_no=1,
+                          done=1, note='', updated_by=''):
+        """写入/更新一条打勾记录（upsert，同 (项目,人,阶段,轮次) 唯一）。"""
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO project_checks
+                     (project_name, editor, phase, round, done, note, updated_by, updated_at)
+                   VALUES (?,?,?,?,?,?,?, datetime('now','localtime'))
+                   ON CONFLICT(project_name, editor, phase, round) DO UPDATE SET
+                     done=excluded.done,
+                     note=excluded.note,
+                     updated_by=excluded.updated_by,
+                     updated_at=datetime('now','localtime')""",
+                (project_name, str(editor), str(phase), int(round_no),
+                 1 if done else 0, str(note or ''), str(updated_by or '')))
+        return True
+
+    def count_checks(self, project_name, phase, round_no=None, done_only=True):
+        """统计某项目某阶段的打勾数量。"""
+        try:
+            with self.get_conn() as conn:
+                sql = ("SELECT COUNT(*) FROM project_checks "
+                       "WHERE project_name=? AND phase=?")
+                args = [project_name, phase]
+                if done_only:
+                    sql += " AND done=1"
+                if round_no is not None:
+                    sql += " AND round=?"
+                    args.append(int(round_no))
+                return int(conn.execute(sql, args).fetchone()[0])
+        except Exception:
+            return 0
+
+    def clear_checks(self, project_name, phase, round_no=None):
+        """清除打勾记录（用于轮次推进时重打）。"""
+        with self.get_conn() as conn:
+            if round_no is None:
+                conn.execute(
+                    "DELETE FROM project_checks WHERE project_name=? AND phase=?",
+                    (project_name, phase))
+            else:
+                conn.execute(
+                    "DELETE FROM project_checks WHERE project_name=? AND phase=? AND round=?",
+                    (project_name, phase, int(round_no)))
+
+    # ==================== 组员协作：修改范围 ====================
+
+    def set_revision_scope(self, project_name, round_no, episodes, note=''):
+        """记录某轮修改选中的集数（episodes 为列表）。"""
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO revision_scope(project_name, round, episodes, note)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT(project_name, round) DO UPDATE SET
+                     episodes=excluded.episodes, note=excluded.note""",
+                (project_name, int(round_no),
+                 json.dumps(list(episodes or []), ensure_ascii=False), str(note or '')))
+        return True
+
+    def get_revision_scope(self, project_name, round_no):
+        """读取某轮修改选中的集数，返回 (episodes_list, note)。"""
+        try:
+            with self.get_conn() as conn:
+                row = conn.execute(
+                    "SELECT episodes, note FROM revision_scope "
+                    "WHERE project_name=? AND round=?",
+                    (project_name, int(round_no))).fetchone()
+            if not row:
+                return [], ''
+            eps = row[0] or '[]'
+            try:
+                eps = json.loads(eps)
+            except Exception:
+                eps = []
+            return list(eps), (row[1] or '')
+        except Exception:
+            return [], ''
+
+    # ==================== 组员协作：协作通知 ====================
+
+    def add_collab_notice(self, project_name, kind, phase='', round_no=1,
+                          actor='', detail=''):
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO collab_notices
+                     (project_name, kind, phase, round, actor, detail)
+                   VALUES (?,?,?,?,?,?)""",
+                (project_name, str(kind), str(phase), int(round_no),
+                 str(actor or ''), str(detail or '')))
+            return cur.lastrowid
+
+    def list_collab_notices(self, include_acked=False, limit=100):
+        try:
+            with self.get_conn() as conn:
+                sql = "SELECT * FROM collab_notices"
+                if not include_acked:
+                    sql += " WHERE acked=0"
+                sql += " ORDER BY id DESC LIMIT ?"
+                return [dict(r) for r in conn.execute(sql, (int(limit),)).fetchall()]
+        except Exception:
+            return []
+
+    def ack_collab_notice(self, notice_id=None, project_name=None, kind=None):
+        """标记协作通知已处理。可传 id，或按项目+类型批处理。"""
+        with self.get_conn() as conn:
+            if notice_id is not None:
+                conn.execute("UPDATE collab_notices SET acked=1 WHERE id=?",
+                             (int(notice_id),))
+                return
+            sql = "UPDATE collab_notices SET acked=1 WHERE acked=0"
+            args = []
+            if project_name:
+                sql += " AND project_name=?"
+                args.append(project_name)
+            if kind:
+                sql += " AND kind=?"
+                args.append(kind)
+            conn.execute(sql, args)
+
+    def count_unacked_notices(self):
+        try:
+            with self.get_conn() as conn:
+                return int(conn.execute(
+                    "SELECT COUNT(*) FROM collab_notices WHERE acked=0").fetchone()[0])
+        except Exception:
+            return 0
+
+    # ==================== 组员协作：身份令牌 ====================
+
+    def get_member_by_token(self, token):
+        """按令牌查组员（组员端鉴权用）。"""
+        t = str(token or '').strip()
+        if not t:
+            return None
+        try:
+            with self.get_conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM team_members WHERE token=? AND token<>''",
+                    (t,)).fetchone()
+            return dict(row) if row else None
+        except Exception:
+            return None
+
+    def list_members_ext(self):
+        """列出成员（含 token / client_role，供设置页管理）。"""
+        try:
+            with self.get_conn() as conn:
+                return [dict(r) for r in conn.execute(
+                    "SELECT * FROM team_members ORDER BY client_role, name").fetchall()]
+        except Exception:
+            return []
+
+    def set_member_token(self, name, token, client_role=None):
+        """设置成员的组员端令牌（及角色）。"""
+        with self.get_conn() as conn:
+            conn.execute("UPDATE team_members SET token=? WHERE name=?",
+                         (str(token or ''), name))
+            if client_role:
+                conn.execute("UPDATE team_members SET client_role=? WHERE name=?",
+                             (str(client_role), name))
 
     # ==================== 审计日志 ====================
     def add_audit_log(self, project_name, action, detail="", username=""):

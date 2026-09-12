@@ -498,7 +498,7 @@
       st = String(st||'');
       if(!st) return { bg:'#f2f3f5', fg:'#86868b', text:'未设置' };
       if(st.indexOf('完成')>=0) return { bg:'#d1f4e0', fg:'#1d8f4c', text:st };
-      if(st.indexOf('待提交')>=0) return { bg:'#e8f2fd', fg:'#0071e3', text:st };   // 待提交审核
+      if(st.indexOf('待审核')>=0 || st.indexOf('待提交')>=0) return { bg:'#e8f2fd', fg:'#0071e3', text:st };
       if(st.indexOf('质检')>=0) return { bg:'#e8f2fd', fg:'#0071e3', text:st };
       if(st.indexOf('交付')>=0) return { bg:'#fff3cd', fg:'#856404', text:st };
       if(st.indexOf('修改')>=0) return { bg:'#ffe8d9', fg:'#c2410c', text:st };
@@ -547,7 +547,7 @@
           // 状态
           + '<div class="m-section"><h4>项目状态</h4>'
           + '<select class="m-status-select" id="m-status-select">'
-          + ['','分集中','剪辑中','待提交审核','审核中','修改中','二审中','三审中','交付中','待交付','待质检','质检中','已完成'].map(function(s){
+          + ['','分集中','剪辑中','待审核','审核中','修改中','待交付','待质检','质检中','已完成'].map(function(s){
               return '<option value="'+s+'"'+(st===s?' selected':'')+'>'+(s||'未设置')+'</option>';
             }).join('')
           + '</select></div>'
@@ -973,17 +973,8 @@
       toast('✅ 终审完毕，项目进入待交付，已创建 000交付','success');
     },
 
-    // 计算下一轮审核状态
+    // 计算下一轮审核状态（轮次由后端维护，前端统一提交「审核中」）
     _nextReviewStatus: function(name){
-      var p = this._findProject(name);
-      var cur = p ? (p.custom_status||'') : '';
-      var cn = ['零','一','二','三','四','五','六','七','八','九','十'];
-      if(cur.indexOf('修改中') >= 0) return '审核中';
-      var m = String(cur||'').match(/^([二三四五六七八九十])审中$/);
-      if(m){
-        var idx = cn.indexOf(m[1]);
-        return (idx >= 0 && idx < cn.length-1) ? cn[idx+1]+'审中' : '审核中';
-      }
       return '审核中';
     },
 
@@ -2304,7 +2295,7 @@
     if(!s) return -1;
     if(s.indexOf('分集')>=0) return 0;
     if(s.indexOf('剪辑')>=0) return 1;
-    if(s.indexOf('待提交')>=0) return 2;
+    if(s.indexOf('待审核')>=0 || s.indexOf('待提交')>=0) return 2;
     if(s.indexOf('审中')>=0 || s.indexOf('审核')>=0) return 3;   // 审核中 / N审中
     if(s.indexOf('修改')>=0) return 4;
     if(s.indexOf('交付')>=0) return 5;
