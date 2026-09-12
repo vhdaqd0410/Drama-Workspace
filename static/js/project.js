@@ -83,6 +83,12 @@ async function loadProjects(){
       }catch(e2){}
     }
     updateDepartmentFilter();
+    // 组员协作：拉取打勾摘要（卡片直出打勾按钮用）
+    if(window.Collab && window.Collab.isMember && window.Collab.isMember()){
+      try{ await window.Collab.loadSummary(true); }catch(_){}
+    } else if(window.Collab){
+      try{ await window.Collab.loadSummary(false); }catch(_){}
+    }
     renderDashboard();
     updateLightLists();
     // 预填查剪辑缓存（searchEpisodeEditor 复用，避免每次点击都重复请求 /api/projects）

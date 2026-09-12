@@ -38,7 +38,12 @@ document.addEventListener('DOMContentLoaded',async ()=>{
       addAssignRow('张大强','1-10');addAssignRow('李小明','11-20');addAssignRow('王芳','21-40');addAssignRow('赵磊','41-60');addAssignRow('陈思','61-80');
     }catch(e){;}
 
-    // 3. 加载项目数据 — 用 try/catch 包裹每步
+    // 3. 先确定身份（组员/组长），再加载项目数据 —— 保证卡片能按身份渲染打勾
+    try{
+      if(window.Collab){ await window.Collab.initRole(); }
+    }catch(e){ console.warn('collab role init failed', e); }
+
+    // 4. 加载项目数据 — 用 try/catch 包裹每步
     try{
       await loadProjects();
     }catch(e){

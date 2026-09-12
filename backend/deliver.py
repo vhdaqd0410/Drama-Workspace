@@ -716,31 +716,29 @@ class DeliverMixin:
         old_status = proj.get("custom_status", "")
         old_norm = self.normalize_status(old_status)
 
-        # 审核轮次维护：
-        #   首次进入审核中（旧值非审核中）→ review_round = max(1, 当前值)
-        #   修改中 → 审核中（下一轮）→ review_round += 1
+        # 审核轮次维护（round = 第几轮修改）：
+        #   进入「修改中」→ round += 1（开始新一轮修改），并清空该轮旧勾
+        #   进入「审核中」→ round 不变（读同一轮，组长才能看到刚完成的修改勾）
+        #   其余状态    → 不动
         new_round = int(proj.get("review_round") or 0)
         round_bump = False
-        if status == "审核中":
-            if old_norm == "修改中":
-                new_round = max(1, new_round) + 1
-                round_bump = True
-            elif old_norm != "审核中":
-                new_round = max(1, new_round)
+        if status == "修改中" and old_norm != "修改中":
+            new_round = max(0, new_round) + 1
+            round_bump = True
 
         self.db.update_project_status(project_name, custom_status=status)
-        if status == "审核中" and new_round != int(proj.get("review_round") or 0):
+        if new_round != int(proj.get("review_round") or 0):
             try:
                 self.db.update_project_status(project_name, review_round=new_round)
             except Exception as e:
                 logger.warning("写入 review_round 失败: %s", e)
         logger.info("项目状态变更: %s %s -> %s%s", project_name, old_status or "未设置",
-                    status, (" (第%d轮)" % new_round) if status == "审核中" else "")
+                    status, (" (第%d轮修改)" % new_round) if round_bump else "")
 
-        # 轮次推进：清掉上一轮的修改打勾，避免旧勾残留到新一轮
+        # 新一轮修改：清掉该轮的修改打勾（正常为空，防脏数据残留）
         if round_bump:
             try:
-                self.db.clear_checks(project_name, "revise")
+                self.db.clear_checks(project_name, "revise", round_no=new_round)
             except Exception as e:
                 logger.warning("轮次推进清理打勾失败: %s", e)
 
@@ -805,22 +803,22 @@ class DeliverMixin:
         return "审核中"
 
     def get_review_round(self, project_name):
-        """读取项目当前审核轮次（至少 1）。"""
+        """读取项目当前修改轮次（0=尚未修改过，>=1=第几轮修改）。"""
         proj = self.db.get_project(project_name) or {}
         try:
-            return max(1, int(proj.get("review_round") or 0))
+            return max(0, int(proj.get("review_round") or 0))
         except Exception:
-            return 1
+            return 0
 
     def status_display(self, project_name, status=None):
-        """返回状态的展示名：审核中会带上轮次，如「审核中·第2轮」。"""
+        """返回展示名：有修改轮次时带上，如「审核中·第2轮修改」。"""
         proj = self.db.get_project(project_name) or {}
         s = self.normalize_status(status if status is not None
                                   else proj.get("custom_status"))
-        if s == "审核中":
+        if s in ("审核中", "修改中"):
             rnd = self.get_review_round(project_name)
-            if rnd > 1:
-                return "审核中·第%d轮" % rnd
+            if rnd >= 1:
+                return "%s·第%d轮修改" % (s, rnd)
         return s
 
     def _create_revision_folder(self, project_name):

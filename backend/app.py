@@ -154,6 +154,14 @@ def _auth_gate():
     if cred == _API_SECRET:
         return None
     if _member_auth.member_from_token(db, cred):
+        # 组员令牌：再走一道权限闸门（服务端强制，UI 隐藏不算数）
+        try:
+            from role_guard import member_denied
+            denied, reason = member_denied(request.method, path)
+            if denied:
+                return jsonify({"ok": False, "message": reason}), 403
+        except ImportError:
+            pass
         return None
     return jsonify({"ok": False, "message": "unauthorized"}), 401
 
@@ -205,12 +213,15 @@ def no_cache(response):
 def index():
     # 前端通过 /api/projects 异步加载数据（project.js loadProjects），
     # 这里不再做昂贵的 NAS 预扫描（boot_data 死代码，index.html 未引用）。
+    #
+    # 组员访问：?mt=<组员令牌> 进入组员视角（只注入组员令牌，不泄露主端密钥）。
+    inject_key = _API_SECRET
+    mt = (request.args.get("mt") or "").strip()
+    if mt and _member_auth.member_from_token(db, mt):
+        inject_key = mt
     return render_template('index.html',
-                           api_key=_API_SECRET,
+                           api_key=inject_key,
                            is_desktop=_os.environ.get('DRAMA_DESKTOP') == '1')
-
-
-
 
 def _get_db_info_for_list(db_inst, project_name):
     try:
@@ -1229,7 +1240,9 @@ def api_projects_light():
         enriched = sync_engine.get_projects_enriched()
         result = []
         seen = set()
-        for bucket in ("production", "group_all"):
+        # 组员端：不返回制作部项目
+        buckets = ("group_all",) if _is_member_request() else ("production", "group_all")
+        for bucket in buckets:
             for proj in enriched.get(bucket, []):
                 name = proj.get("name", "")
                 if not name or name in seen:

@@ -456,6 +456,7 @@ function jumpToProject(name){
   if(name==='qa'){ loadQAProjects(); if(typeof loadQASummary==='function') loadQASummary(); }
   if(name==='nameplate' && typeof loadNameplateTab==='function'){ loadNameplateTab(); }
   if(name==='risk' && typeof loadRiskCenter==='function'){ loadRiskCenter(); }
+  if(name==='collab' && window.Collab){ window.Collab.renderProgressInto(document.getElementById('collabContent')); }
   if(name==='settings')loadConfig();
 }
 
@@ -1337,6 +1338,7 @@ function projectCardHTML(p){
       <div class="status-row"><span class="sr-label">视频质检</span>${qa}</div>
     </div>
     <div class="card-todo" id="ctodo-trigger-${pname.replace(/[^a-zA-Z0-9_]/g,'_')}" onclick="cardToggleTodo('${pname}')">📌 待办 <span class="ctodo-count"></span></div>
+    ${(window.Collab ? window.Collab.checkBarHTML(p) : '')}
     <div class="assign-summary">👥 ${assignSummaryHTML(p)}</div>
     <div class="card-actions"><div class="card-open-group">${openBtns}</div>${renderActions(p)}</div>
   </div>`;

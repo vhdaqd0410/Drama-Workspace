@@ -54,7 +54,47 @@ def _episode_plan(proj):
 
 
 def _phase_of_status(status):
-    return STATUS_PHASE.get(str(status or "").strip(), "cut")
+    """状态 -> 阶段；无对应阶段返回 None。"""
+    return STATUS_PHASE.get(str(status or "").strip())
+
+
+def _round_for(phase, proj, db):
+    """各阶段使用的轮次。
+
+    cut / deliver: 恒为 1（一次性动作）
+    revise       : 项目当前修改轮次（round=0 视为第 1 轮）
+    """
+    if phase == "revise":
+        try:
+            return max(1, int(proj.get("review_round") or 0))
+        except Exception:
+            return 1
+    return 1
+
+
+def _phase_active(phase, status, proj, db, round_no):
+    """该阶段当前是否真的需要关注（决定卡片是否显示打勾条）。
+
+    cut     : 剪辑中 / 待审核
+    revise  : 修改中，或（审核中 且 本轮已有修改范围/打勾记录）
+    deliver : 待交付 / 待质检 / 已完成
+    """
+    s = str(status or "").strip()
+    if phase == "cut":
+        return s in ("剪辑中", "待审核")
+    if phase == "deliver":
+        return s in ("待交付", "待质检", "已完成")
+    if phase == "revise":
+        if s == "修改中":
+            return True
+        if s == "审核中":
+            # 本轮有修改范围或已有打勾，才算「修改已提交待复核」
+            eps, _n = db.get_revision_scope(proj.get("name"), round_no)
+            if eps:
+                return True
+            return db.count_checks(proj.get("name"), "revise", round_no) > 0
+        return False
+    return False
 
 
 def _all_editors(proj):
@@ -133,15 +173,22 @@ def register_routes(app, db, sync_engine=None, api_secret=None):
         proj = db.get_project(project)
         if not proj:
             return jsonify({"ok": False, "message": "项目不存在"}), 404
-        rnd = max(1, int(proj.get("review_round") or 0))
-        cur_phase = _phase_of_status(proj.get("custom_status"))
+        status = proj.get("custom_status") or ""
+        cur_phase = _phase_of_status(status)
+        rnd = _round_for(cur_phase or "cut", proj, db)
+        phases = {}
+        for p in PHASES:
+            prnd = _round_for(p, proj, db)
+            st = _phase_state(db, proj, p, prnd)
+            st["active"] = _phase_active(p, status, proj, db, prnd)
+            phases[p] = st
         return jsonify({
             "ok": True,
             "project": project,
-            "status": proj.get("custom_status") or "",
+            "status": status,
             "current_phase": cur_phase,
             "review_round": rnd,
-            "phases": {p: _phase_state(db, proj, p, rnd) for p in PHASES},
+            "phases": phases,
         })
 
     @app.route("/api/collab/check", methods=["POST"])
@@ -164,7 +211,7 @@ def register_routes(app, db, sync_engine=None, api_secret=None):
         if phase not in PHASES:
             return jsonify({"ok": False, "message": "无效阶段: %s" % phase}), 400
 
-        rnd = max(1, int(proj.get("review_round") or 0))
+        rnd = _round_for(phase, proj, db)
         # 组员：强制以自己的名义打勾（防冒名）
         editor = (data.get("editor") or "").strip() if role == "lead" else my_name
         if not editor:
@@ -210,6 +257,63 @@ def register_routes(app, db, sync_engine=None, api_secret=None):
 
         return jsonify({"ok": True, "state": state, "notice": notice})
 
+    # ---------- 批量摘要（项目卡片直出打勾用） ----------
+
+    @app.route("/api/collab/summary", methods=["GET"])
+    def collab_summary():
+        """返回「进行中项目的打勾摘要」，供项目卡片直接渲染打勾按钮。
+
+        只统计有 custom_status 且有分集分配的项目（通常十几个），避免全量扫描。
+        组员视角：额外返回 mine 字段（自己是否在应参与名单、是否已打勾），
+                  并且只返回与自己相关的项目。
+        """
+        role, my_name = _identity(_secret(), db)
+        if role is None:
+            return jsonify({"ok": False, "message": "未认证"}), 401
+        try:
+            projs = db.get_all_projects() or []
+        except Exception as e:
+            logger.warning("读取项目失败: %s", e)
+            projs = []
+
+        out = {}
+        for p in projs:
+            status = str(p.get("custom_status") or "").strip()
+            if not status or status == "已完成":
+                continue
+            plan = _episode_plan(p)
+            if not plan:
+                continue
+            phase = _phase_of_status(status)
+            rnd = _round_for(phase or "cut", p, db)
+            if not _phase_active(phase, status, p, db, rnd):
+                continue
+            st = _phase_state(db, p, phase, rnd)
+            if not st["expected"]:
+                continue
+            if role == "member" and my_name not in st["expected"]:
+                continue    # 组员只看与自己相关的项目
+            item = {
+                "phase": phase,
+                "phase_label": st["phase_label"],
+                "expected": st["expected"],
+                "done": st["done"],
+                "missing": st["missing"],
+                "all_done": st["all_done"],
+                "round": rnd,
+                "status": status,
+            }
+            if role == "member":
+                item["mine"] = {
+                    "in_scope": my_name in st["expected"],
+                    "done": my_name in st["done"],
+                    "name": my_name,
+                }
+            out[p.get("name")] = item
+
+        return jsonify({"ok": True, "role": role, "projects": out,
+                        "count": len(out)})
+
     # ---------- 进度矩阵（组长） ----------
 
     @app.route("/api/collab/progress", methods=["GET"])
@@ -227,8 +331,10 @@ def register_routes(app, db, sync_engine=None, api_secret=None):
             status = str(p.get("custom_status") or "").strip()
             if not status or status == "已完成":
                 continue
-            rnd = max(1, int(p.get("review_round") or 0))
             phase = _phase_of_status(status)
+            rnd = _round_for(phase or "cut", p, db)
+            if not _phase_active(phase, status, p, db, rnd):
+                continue    # 当前阶段无需关注（如审核中且无修改记录）
             st = _phase_state(db, p, phase, rnd)
             if not st["expected"]:
                 continue    # 没分配人的项目不展示

@@ -89,6 +89,34 @@ a{color:var(--blue);text-decoration:none}
 .assign-summary{font-size:12px;color:var(--text-sec);background:#fafafa;padding:8px 10px;border-radius:8px;margin:10px 0;line-height:1.6}
 .card-todo{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#856404;background:#fff8e1;border:1px solid #ffe08a;border-radius:8px;padding:4px 9px;margin:0 0 8px;cursor:pointer;transition:background .15s}
 .card-todo:hover{background:#fff3cd}
+/* ===== 组员协作：卡片打勾条 ===== */
+.collab-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;background:#f7f8fb;border:1px solid var(--border,#e5e5ea);border-radius:8px;padding:7px 10px;margin:0 0 8px}
+.collab-bar.all-done{background:#eaf7ee;border-color:#bfe3ca}
+.collab-bar.partial{background:#fffaf0;border-color:#ffe2b3}
+.collab-btn{font-size:12px;font-weight:600;border-radius:8px;padding:6px 12px;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:inherit}
+.collab-btn.todo{background:#0071e3;color:#fff;border-color:#0071e3}
+.collab-btn.todo:hover{background:#0062c4}
+.collab-btn.done{background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7}
+.collab-btn.done:hover{background:#d7eeda}
+.collab-btn:disabled{opacity:.6;cursor:default}
+.collab-progress{font-weight:600;color:var(--text-sec);white-space:nowrap}
+.collab-phases{display:inline-flex;align-items:center;gap:3px}
+.collab-dot{display:inline-block;font-size:10px;padding:2px 6px;border-radius:6px;background:#eef0f4;color:#9aa0aa;white-space:nowrap}
+.collab-dot.active{background:#0071e3;color:#fff;font-weight:700}
+.collab-arrow{color:#c8ccd4;font-size:11px;margin:0 1px}
+.collab-missing{color:#c2410c;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+.collab-chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;margin:2px 3px 2px 0;white-space:nowrap}
+.collab-chip.ok{background:#e8f5e9;color:#2e7d32}
+.collab-chip.no{background:#fff3cd;color:#856404}
+.collab-matrix{background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:4px 10px}
+.collab-matrix table th{white-space:nowrap}
+.collab-matrix table td:nth-child(1){max-width:340px}
+.collab-matrix table td:nth-child(2),
+.collab-matrix table td:nth-child(3){white-space:nowrap}
+.collab-stat-label{font-size:13px;color:var(--text-sec);white-space:nowrap}
+.collab-stat-num{font-size:26px;font-weight:700;margin-top:4px;line-height:1.1}
+/* 组员端：隐藏组长专属面板 */
+.tab-panel.collab-hidden{display:none !important}
 /* ===== 待办模态框（居中）===== */
 .todo-modal-overlay{position:fixed;inset:0;background:rgba(15,15,20,.5);display:flex;align-items:center;justify-content:center;z-index:var(--z-modal);backdrop-filter:blur(2px);animation:overlayFade .2s var(--ease)}
 .todo-modal{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:520px;max-width:94vw;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;animation:modalPop .22s var(--ease)}
@@ -1093,6 +1121,7 @@ a{color:var(--blue);text-decoration:none}
   <div class="tab" data-tab="report" onclick="switchTab('report');loadReportTab()">📊 月度报告</div>
   <div class="tab" data-tab="editor" onclick="switchTab('editor');if(window.WB&&WB.editor)WB.editor.load()">✂️ 剪辑师</div>
   <div class="tab" data-tab="risk" onclick="switchTab('risk');loadRiskCenter()">⚠️ 风险预警</div>
+  <div class="tab" data-tab="collab" onclick="switchTab('collab')">🤝 协作</div>
   <div class="tab" data-tab="nameplate" onclick="switchTab('nameplate');loadNameplateTab()">🧰 工具箱</div>
   <div class="tab" data-tab="settings" onclick="switchTab('settings')">⚙️ 设置</div>
 </div>
@@ -1442,6 +1471,11 @@ a{color:var(--blue);text-decoration:none}
       <div style="text-align:center;padding:60px;color:#86868b">⏳ 加载风险预警...</div>
     </div>
   </div>
+  <div class="tab-panel" id="tab-collab">
+    <div id="collabContent">
+      <div style="text-align:center;padding:60px;color:#86868b">⏳ 加载协作进度...</div>
+    </div>
+  </div>
   <div class="tab-panel" id="tab-settings">
   <div class="settings-grid">
     <div class="panel settings-section"><h3>🏢 NAS 路径</h3>
@@ -1785,6 +1819,7 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/data-center.js?v=20260819e"></script>
 <script src="/static/js/notifications.js?v=20260819d"></script>
 <script src="/static/js/risk.js?v=20260823risk"></script>
+<script src="/static/js/collab.js?v=20260912a"></script>
 <script src="/static/js/app.js?v=20260815p"></script>
 <script>
 window.__IS_DESKTOP__ = {{ 'true' if is_desktop else 'false' }};
