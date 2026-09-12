@@ -117,3 +117,8 @@ plugins/commission/*.xlsx
 plugins/commission/*_仪表盘.html
 plugins/commission/*_分集.txt
 plugins/commission/overtime.json
+
+# 组员助手本机配置（含令牌，不得提交）
+member-agent/member_config.json
+member-agent/_*.log
+member-agent/__pycache__/
