@@ -1696,6 +1696,16 @@ try:
 except Exception as e:
     print("[WARN] delivery_sync_service 未启动:", e)
 
+# 启动主端地址发布（写组内 NAS，供组员端自动检测）
+try:
+    if _SAFE_MODE:
+        print("[SAFE] 跳过：endpoint_publisher(主端地址发布)")
+    else:
+        from endpoint_publisher import start_publisher as _start_pub
+        _start_pub(config)
+except Exception as e:
+    print("[WARN] endpoint_publisher 未启动:", e)
+
 # 启动制作部源项目自动扫描（自动发现新建项目）
 try:
     if _SAFE_MODE:
