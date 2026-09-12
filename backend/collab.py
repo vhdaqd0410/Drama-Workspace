@@ -238,6 +238,10 @@ def register_routes(app, db, sync_engine=None, api_secret=None):
                         "type": "collab", "project": project,
                         "phase": phase, "round": rnd, "status": "all_done",
                     })
+                    # 桌面版：任务栏闪烁 + 原生通知（非桌面版自动跳过）
+                    sync_engine._notify_desktop(
+                        "🎉 %s 已全部完成" % PHASE_LABEL.get(phase, phase),
+                        "%s（%d 人）" % (project, len(state["expected"])))
                 except Exception:
                     pass
         else:

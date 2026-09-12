@@ -79,6 +79,17 @@ function initDesktopSSE(){
             toast('❌ '+payload.project+' 回传失败','error');
           }
           _scheduleSseRefresh();
+        } else if(payload.type==='collab'){
+          // 组员协作事件：打勾齐 -> 前端提示 + 刷新卡片/通知
+          const _pl = {cut:'剪辑完成',revise:'修改完成',deliver:'交付完成'}[payload.phase] || '阶段';
+          if(payload.status==='all_done'){
+            toast('🎉 '+payload.project+' '+_pl+' 已全部完成','success');
+            try{ if(typeof notifRefresh==='function') notifRefresh(); }catch(_){}
+          } else if(payload.status==='one'){
+            toast('✅ '+payload.project+': '+((payload.editor||'')+' 完成'+_pl),'info');
+          }
+          try{ if(window.Collab) window.Collab.invalidate(); }catch(_){}
+          _scheduleSseRefresh(1200);
         } else if(payload.type==='search'){
           // 全局搜索热键按下 → 打开搜索框
           if(typeof openSearchModal === 'function'){

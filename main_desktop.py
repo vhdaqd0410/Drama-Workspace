@@ -811,6 +811,71 @@ def _run_tray():
 
 
 # ============================================================
+# 协作通知：长连 SSE，组员打勾齐了立即弹托盘气泡（事件驱动）
+# ============================================================
+def _run_collab_sse_listener():
+    """订阅 /api/sse，收到 collab/all_done 立即弹托盘通知。
+
+    相比 _run_tray_notifier 的 10 分钟轮询，这里是「秒级」触达。
+    断线自动重连。
+    """
+    import json as _j
+    import urllib.request
+
+    url = f"http://127.0.0.1:{_SERVER_PORT}/api/sse"
+    while True:
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+            with urllib.request.urlopen(req, timeout=None) as resp:
+                print("[collab-sse] 已连接")
+                data_buf = []
+                for raw in resp:
+                    line = raw.decode("utf-8", "ignore").rstrip("\r\n")
+                    if line.startswith("data:"):
+                        data_buf.append(line[5:].strip())
+                    elif line == "":
+                        if not data_buf:
+                            continue
+                        payload = "\n".join(data_buf)
+                        data_buf = []
+                        try:
+                            evt = _j.loads(payload)
+                        except Exception:
+                            continue
+                        _handle_collab_event(evt)
+        except Exception as e:
+            print(f"[collab-sse] 连接中断，2 秒后重连: {e}")
+        time.sleep(2)
+
+
+def _handle_collab_event(evt):
+    """处理协作事件：打勾齐 -> 托盘气泡。"""
+    try:
+        if not isinstance(evt, dict):
+            return
+        if evt.get("type") != "collab":
+            return
+        if evt.get("status") != "all_done":
+            return
+        tray = _tray_ref[0]
+        if tray is None:
+            print("[collab-sse] 托盘未就绪，跳过通知")
+            return
+        phase_label = {"cut": "剪辑完成", "revise": "修改完成",
+                       "deliver": "交付完成"}.get(evt.get("phase"), "阶段")
+        project = evt.get("project") or ""
+        rnd = evt.get("round") or 1
+        rnd_txt = ("（第%d轮修改）" % rnd) if (evt.get("phase") == "revise" and rnd > 1) else ""
+        title = "🎉 " + phase_label + " 已全部完成"
+        body = project + rnd_txt
+        print(f"[collab-sse] 弹通知: {title} — {body}")
+        with _tray_lock:
+            tray.notify(body, APP_TITLE + " · " + title)
+    except Exception as e:
+        print(f"[collab-sse] 处理事件失败: {e}")
+
+
+# ============================================================
 # 托盘通知：定期拉取 /api/notifications，交付提醒变化时弹气泡
 # ============================================================
 def _run_tray_notifier():
@@ -994,6 +1059,13 @@ def _main():
         print("📣 托盘交付提醒已启动")
     except Exception as e:
         print(f"[tray] 交付提醒启动失败: {e}")
+
+    # 3.45 协作通知：SSE 长连，打勾齐立即弹气泡
+    try:
+        threading.Thread(target=_run_collab_sse_listener, daemon=True).start()
+        print("🤝 协作通知监听已启动")
+    except Exception as e:
+        print(f"[collab-sse] 协作通知监听启动失败: {e}")
 
     # 3.5 全局热键（唤回窗口，实际组合见线程日志）
     try:

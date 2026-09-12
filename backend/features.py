@@ -1115,6 +1115,34 @@ def register_routes(app, db):
              "items": [{"id": t.get("id"), "text": t.get("text")} for t in items]}
             for pname, items in todo_by_project.items()
         ]
+        # 协作通知：组员打勾齐等事件（仅组长可见）
+        collab_notices = []
+        _is_member = False
+        try:
+            from app import _is_member_request
+            _is_member = _is_member_request()
+        except Exception:
+            pass
+        if not _is_member:
+            try:
+                rows = db.list_collab_notices(include_acked=False, limit=50) or []
+            except Exception:
+                rows = []
+            _label = {"cut": "剪辑完成", "revise": "修改完成", "deliver": "交付完成"}
+            for r in rows:
+                collab_notices.append({
+                    "id": r.get("id"),
+                    "project": r.get("project_name") or "",
+                    "kind": r.get("kind") or "",
+                    "phase": r.get("phase") or "",
+                    "phase_label": _label.get(r.get("phase"), r.get("phase") or ""),
+                    "round": r.get("round") or 1,
+                    "actor": r.get("actor") or "",
+                    "detail": r.get("detail") or "",
+                    "created_at": r.get("created_at") or "",
+                    "is_all_done": (r.get("kind") == "check_done"),
+                })
+
         overdue.sort(key=lambda x: x.get("date", ""))
         upcoming.sort(key=lambda x: x.get("date", ""))
         return jsonify({
@@ -1124,7 +1152,9 @@ def register_routes(app, db):
             "today_deliver": today_deliver,
             "upcoming": upcoming,
             "todos": todo_reminders,
-            "count": len(overdue) + len(today_deliver) + len(upcoming) + len(todo_reminders),
+            "collab": collab_notices,
+            "count": (len(overdue) + len(today_deliver) + len(upcoming)
+                      + len(todo_reminders) + len(collab_notices)),
         })
 
     # ==================== 视频缩略图（ffmpeg）====================

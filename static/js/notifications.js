@@ -30,7 +30,7 @@ function updateNotifBadge(){
   const b = document.getElementById('notifBadge');
   if(!b) return;
   const d = window._notifData || {};
-  const n = (d.overdue||[]).length + (d.today_deliver||[]).length + (d.upcoming||[]).length + (d.todos||[]).length;
+  const n = (d.overdue||[]).length + (d.today_deliver||[]).length + (d.upcoming||[]).length + (d.todos||[]).length + (d.collab||[]).length;
   if(n > 0){ b.style.display = 'inline-block'; b.textContent = n > 99 ? '99+' : n; }
   else b.style.display = 'none';
 }
@@ -91,6 +91,21 @@ function renderNotifBody(body){
       return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#555;padding:2px 0"><input type="checkbox" onchange="notifTodoDone(\''+proj+'\','+it.id+',this.checked)"><span>'+escHtml(it.text)+'</span></div>';
     }).join('');
     return notifRow('<b>'+escHtml(t.project)+'</b> <span style="font-size:11px;color:#86868b">('+t.count+' 条待办)</span>'+items);
+  });
+  // 协作通知（组长）：组员打勾齐 / 单人打勾
+  const collabAll = (d.collab||[]).filter(function(c){ return c.is_all_done; });
+  const collabOne = (d.collab||[]).filter(function(c){ return !c.is_all_done; });
+  html += notifGroup('🎉 待处理：全员已完成', '#34c759', collabAll, function(c){
+    const rnd = (c.phase === 'revise' && c.round > 1) ? '（第'+c.round+'轮修改）' : '';
+    return notifRow('<b>'+escHtml(c.project)+'</b> <span style="color:#2e7d32;font-size:11px;margin-left:6px">'+escHtml(c.phase_label)+rnd+'</span>'
+      + '<div style="font-size:11px;color:#86868b;margin-top:3px">'+escHtml(c.detail||'')+'</div>', c.project,
+      '<button class="btn btn-sm" onclick="collabNoticeAck('+c.id+',\''+jsq(c.project||'')+'\')">✅ 我知道了</button>');
+  });
+  html += notifGroup('🤝 组员打勾动态', '#0071e3', collabOne, function(c){
+    const rnd = (c.phase === 'revise' && c.round > 1) ? '（第'+c.round+'轮）' : '';
+    return notifRow('<b>'+escHtml(c.project)+'</b> <span style="font-size:11px;color:#86868b;margin-left:6px">'+escHtml(c.phase_label)+rnd+'</span>'
+      + '<div style="font-size:11px;color:#86868b;margin-top:3px">'+escHtml(c.detail||'')+'</div>', c.project,
+      '<button class="btn btn-sm" onclick="collabNoticeAck('+c.id+',\''+jsq(c.project||'')+'\')">🙈 忽略</button>');
   });
   if(!html) html = '<div style="color:#86868b;text-align:center;padding:40px 0">🎉 暂无提醒</div>';
   else html += '<div style="margin-top:16px"><button class="btn" style="width:100%" onclick="openTaskBoard()">🗂️ 打开任务中心</button></div>';
@@ -158,6 +173,19 @@ function notifTodoDone(project, id, done){
   api('PUT', p, { done: !!done }).then(function(r){
     if(r && r.ok){ toast(done?'✅ 已完成待办':'↩️ 已恢复待办','success'); notifRefresh(); }
     else toast('操作失败','error');
+  }).catch(function(e){ toast('操作失败: '+e.message,'error'); });
+}
+// 协作通知：确认/忽略（组长）
+function collabNoticeAck(id, project){
+  api('POST','/api/collab/notice_ack',{ id: id }).then(function(r){
+    if(r && r.ok){
+      toast('✅ 已处理','success');
+      if(project && typeof window.Collab !== 'undefined'){
+        try{ window.Collab.invalidate(); }catch(_){}
+      }
+      notifRefresh();
+      if(typeof loadProjects === 'function') loadProjects();
+    } else toast('操作失败','error');
   }).catch(function(e){ toast('操作失败: '+e.message,'error'); });
 }
 // 刷新通知面板 + 角标
