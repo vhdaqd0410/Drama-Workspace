@@ -214,37 +214,21 @@ def index():
     # 前端通过 /api/projects 异步加载数据（project.js loadProjects），
     # 这里不再做昂贵的 NAS 预扫描（boot_data 死代码，index.html 未引用）。
     #
-    # 组员访问：?mt=<组员令牌> 进入组员视角（只注入组员令牌，不泄露主端密钥）。
+    # 身份注入优先级：
+    #   1) 请求头携带有效组员令牌（本地助手反代时会带上）-> 注入组员令牌
+    #   2) ?mt=<组员令牌>  -> 注入组员令牌
+    #   3) 其余            -> 注入主端密钥（组长视角）
     inject_key = _API_SECRET
-    mt = (request.args.get("mt") or "").strip()
-    if mt and _member_auth.member_from_token(db, mt):
-        inject_key = mt
+    _cred = _request_credential()
+    if _cred and _cred != _API_SECRET and _member_auth.member_from_token(db, _cred):
+        inject_key = _cred
+    else:
+        _mt = (request.args.get("mt") or "").strip()
+        if _mt and _member_auth.member_from_token(db, _mt):
+            inject_key = _mt
     return render_template('index.html',
                            api_key=inject_key,
                            is_desktop=_os.environ.get('DRAMA_DESKTOP') == '1')
-
-def _get_db_info_for_list(db_inst, project_name):
-    try:
-        p = db_inst.get_project(project_name)
-    except Exception:
-        p = None
-    if not p:
-        return "", "", 0, 0, None
-    cs = p.get("custom_status") or ""
-    ds = p.get("delivery_status") or ""
-    te = p.get("total_episodes") or 0
-    ce = p.get("current_episodes") or 0
-    qa = None
-    try:
-        qr = db_inst.list_qa_runs_for_project(project_name, limit=1)
-        if qr and qr[0].get("status") == "done":
-            r = qr[0]
-            if r.get("failed", 0) > 0: qa = "fail"
-            elif r.get("warnings", 0) > 0: qa = "warning"
-            elif r.get("total", 0) > 0: qa = "pass"
-    except Exception:
-        pass
-    return cs, ds, te, ce, qa
 
 
 @app.route('/api/projects', methods=['GET'])

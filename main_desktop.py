@@ -23,6 +23,30 @@ sys.path.insert(0, os.path.join(BASE_DIR, "backend"))
 import version as _version
 APP_TITLE = _version.APP_TITLE
 
+# ========= 运行端口：从 config.yaml 读（支持 dev 同机并行运行）=========
+# 生产端（config 里 8089）行为与之前完全一致；
+# dev 端（config 里 8090）自动使用独立端口，避免与生产端抢锁/抢窗口。
+def _resolve_port(default=8089):
+    try:
+        import yaml as _y
+        _p = os.path.join(BASE_DIR, "backend", "config.yaml")
+        if os.path.isfile(_p):
+            with open(_p, "r", encoding="utf-8") as _f:
+                _c = _y.safe_load(_f) or {}
+            _v = (_c.get("web", {}) or {}).get("port")
+            if _v:
+                return int(_v)
+    except Exception:
+        pass
+    return default
+
+
+_SERVER_PORT = _resolve_port()
+# 默认端口沿用原锁名/标题（生产零变化）；非默认端口追加后缀以隔离
+_IS_DEFAULT_PORT = (_SERVER_PORT == 8089)
+_TITLE_SUFFIX = "" if _IS_DEFAULT_PORT else " [dev:%d]" % _SERVER_PORT
+APP_TITLE = _version.APP_TITLE + _TITLE_SUFFIX
+
 # 桌面版标记
 os.environ["DRAMA_DESKTOP"] = "1"
 os.environ["DRAMA_DESKTOP_CAN_COM"] = "1"
@@ -113,8 +137,8 @@ def _port_alive(port):
     except Exception:
         return False
 
-_MUTEX_NAME = "DramaWorkspace.SingleInstance.Mutex"
-_SERVER_PORT = 8089
+_MUTEX_NAME = "DramaWorkspace.SingleInstance.Mutex" + (
+    "" if _IS_DEFAULT_PORT else ".%d" % _SERVER_PORT)
 _mutex = None
 try:
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _MUTEX_NAME)
