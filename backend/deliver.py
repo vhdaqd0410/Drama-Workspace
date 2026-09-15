@@ -1663,6 +1663,18 @@ class DeliverMixin:
             ]
         }
         """
+        # 短 TTL 缓存：episodes_status 每次实时扫 NAS（_collect_video_filenames），
+        # 批量面板刷新频繁调用会把 waitress 线程池占满导致"掉线"。25s 内同项目直接命中。
+        try:
+            _cached = getattr(self, "_episode_status_cache", None)
+            if _cached is not None and project_name in _cached:
+                _ts, _res = _cached[project_name]
+                ttl = getattr(self, "_episode_status_ttl", 25.0)
+                if time.time() - _ts < ttl:
+                    return _res
+        except Exception:
+            pass
+
         proj = self.db.get_project(project_name)
         if not proj:
             return {"ok": False, "message": "项目不存在"}
@@ -1706,7 +1718,7 @@ class DeliverMixin:
             for ep in missing
         ]
 
-        return {
+        result = {
             "ok": True,
             "project_name": project_name,
             "total": total,
@@ -1717,6 +1729,19 @@ class DeliverMixin:
             "editor_plan": editor_plan,
             "editor_missing": editor_missing,
         }
+        # 写入短时缓存（与 _delivery_stats_cache 同款淘汰策略，限制 500 条防无界增长）
+        try:
+            if not hasattr(self, "_episode_status_cache") or self._episode_status_cache is None:
+                self._episode_status_cache = {}
+            _cached = self._episode_status_cache
+            if len(_cached) >= 500:
+                _sorted = sorted(_cached.items(), key=lambda kv: kv[1][0])
+                for _k, _v in _sorted[:len(_sorted) // 2]:
+                    _cached.pop(_k, None)
+            _cached[project_name] = (time.time(), result)
+        except Exception:
+            pass
+        return result
 
     def list_all_revision_folders(self, project_name):
         """列出项目01上映单集版目录中所有修改文件夹（MMDD修改格式）。

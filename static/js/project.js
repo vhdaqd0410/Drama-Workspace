@@ -146,48 +146,63 @@ async function syncMaterial(name){
     }
   } catch(e) {}
 if(!confirm(`确认要将 "${name}" 从制作部NAS同步到组内NAS吗？\n（首次同步可能耗时较长）`))return;
+  // 防重：同一项目已有轮询在跑则不重复启动
+  window._syncPolling = window._syncPolling || {};
+  if(window._syncPolling[name]){ toast('该项目正在同步中...','info'); return; }
   toast(`正在同步: ${name}...`,'info');
+  window._syncPolling[name] = true;
   try{
     const r = await api('POST', `/api/sync/${encodeURIComponent(name)}`);
     if(r.ok){
       toast('同步已启动，请关注进度','success');
       await loadProjects();
       const syncProgId = 'sync-prog-' + name.replace(/[^a-zA-Z0-9_]/g,'_');
-      const poll = setInterval(async () => {
+      // 修复：改串行递归 setTimeout（上一轮跑完才排下一轮），避免 setInterval+async 回调并发导致重复弹窗/重复跳转
+      let _syncDone = false;
+      const _syncStart = Date.now();
+      const _pollOnce = async () => {
+        if(_syncDone) return;
         try {
           const d = await api('GET', '/api/projects');
+          if(_syncDone) return;
           const flat = (d.production || []).concat(d.group_all || []);
           const target = flat.find(x => x.name === name);
-          if(!target) return;
-
-          // 实时更新进度条
-          const sp = target.sync_progress || '';
-          const m = sp.match(/^(\d+)%\s*(.*)$/);
-          const pct = m ? parseInt(m[1]) : 0;
-          const label = m ? m[2] : sp;
-          const bar = document.getElementById(syncProgId);
-          if (bar) {
-            const fill = bar.querySelector('.sync-fill');
-            const pctEl = bar.querySelector('.sync-pct');
-            const lblEl = bar.querySelector('.card-progress-text span');
-            if (fill) fill.style.width = pct + '%';
-            if (pctEl) pctEl.textContent = pct + '%';
-            if (lblEl) lblEl.textContent = '📦 ' + (label || '同步中...');
-          }
-
-          if(target.sync_status && target.sync_status !== 'syncing'){
-            clearInterval(poll);
-            toast(`✅ 同步完成: ${name}，自动进入分集`,'success');
-            await loadProjects();
-            setTimeout(() => openFenjiFor(name), 300);
+          if(target){
+            const sp = target.sync_progress || '';
+            const m = sp.match(/^(\d+)%\s*(.*)$/);
+            const pct = m ? parseInt(m[1]) : 0;
+            const label = m ? m[2] : sp;
+            const bar = document.getElementById(syncProgId);
+            if (bar) {
+              const fill = bar.querySelector('.sync-fill');
+              const pctEl = bar.querySelector('.sync-pct');
+              const lblEl = bar.querySelector('.card-progress-text span');
+              if (fill) fill.style.width = pct + '%';
+              if (pctEl) pctEl.textContent = pct + '%';
+              if (lblEl) lblEl.textContent = '📦 ' + (label || '同步中...');
+            }
+            // 只有真正 synced 才算完成（避免首次同步前 pending 状态被误判为完成）
+            if(target.sync_status === 'synced'){
+              _syncDone = true;
+              if(window._syncPolling) delete window._syncPolling[name];
+              toast(`✅ 同步完成: ${name}，自动进入分集`,'success');
+              await loadProjects();
+              setTimeout(() => openFenjiFor(name), 300);
+              return;
+            }
           }
         } catch(e){}
-      }, 2000);
-      setTimeout(() => clearInterval(poll), 300000);
+        if(_syncDone) return;
+        if(Date.now() - _syncStart > 300000){ if(window._syncPolling) delete window._syncPolling[name]; return; }   // 超 5 分钟停止
+        setTimeout(_pollOnce, 2000);
+      };
+      setTimeout(_pollOnce, 2000);
     } else {
+      if(window._syncPolling) delete window._syncPolling[name];
       toast('同步失败: ' + (r.message || ''),'error');
     }
   } catch(e){
+    if(window._syncPolling) delete window._syncPolling[name];
     toast('同步请求失败: '+e.message,'error');
   }
 }

@@ -742,6 +742,13 @@ async function syncAssign(){
   await loadProjects();
 }
 async function openFenjiFor(name){
+  // 防抖：同一项目 600ms 内只执行一次，避免轮询/多路径重复跳转导致反复弹窗
+  var _key = String(name||'');
+  var _now = Date.now();
+  if(window._fjOpenLock && window._fjOpenLock.key === _key && (_now - window._fjOpenLock.ts) < 600){
+    return;
+  }
+  window._fjOpenLock = { key: _key, ts: _now };
   switchTab('fenji');
   await loadFenjiProjects(name);
   $('fjProject').value = name;
