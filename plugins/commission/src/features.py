@@ -8,6 +8,42 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from utils import parse_episode_ranges, parse_overtime_episodes, merge_episode_ranges
 
 
+# ---- 提成基准集数（从 config.json 读取，随设置联动）----
+_RULES_CACHE = {"mtime": None, "rules": None}
+
+def _load_rules_cached():
+    """读取 plugins/commission/config.json 的 rules，按 mtime 缓存。"""
+    try:
+        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.json')
+        mt = os.path.getmtime(cfg_path)
+        if _RULES_CACHE["mtime"] == mt and _RULES_CACHE["rules"] is not None:
+            return _RULES_CACHE["rules"]
+        with open(cfg_path, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        rules = d.get('rules', {}) or {}
+        _RULES_CACHE["mtime"] = mt
+        _RULES_CACHE["rules"] = rules
+        return rules
+    except Exception:
+        return {}
+
+
+def _quota_for(role, default):
+    r = _load_rules_cached().get(role, {}) or {}
+    try:
+        return int(r.get('基准集数', default) or default)
+    except Exception:
+        return default
+
+
+def _card1_quota():
+    return _quota_for('一卡剪辑', 40)
+
+
+def _card2_quota():
+    return _quota_for('二卡剪辑', 120)
+
+
 # ===================== 工具函数 =====================
 
 def _find_chinese_font():
@@ -640,7 +676,13 @@ def generate_person_trend_html(person_name, role_map, output_dir):
     max_comm = max(abs(m['comm']) for m in months) or 1
     eps_bars = ''
     comm_bars = ''
-    quota = 70 if '一卡' in role_map.get(person_name, '') else (120 if '二卡' in role_map.get(person_name, '') or '助理' in role_map.get(person_name, '') else 0)
+    _role = role_map.get(person_name, '')
+    if '一卡' in _role:
+        quota = _card1_quota()
+    elif '二卡' in _role or '助理' in _role:
+        quota = _card2_quota()
+    else:
+        quota = 0
 
     for m in months:
         ep_pct = min(100, int(m['eps'] / max_eps * 100)) if max_eps else 0

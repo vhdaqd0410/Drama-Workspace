@@ -177,12 +177,17 @@ def display_role(role):
 
 
 def commission_desc(role):
-    """本月提成构成文案（职位栏口径）：组长/卡前/卡后。"""
+    """本月提成构成文案（职位栏口径）：组长/卡前/卡后。
+    文案从当前 rules 配置动态生成，基准集数等随设置联动，不再硬编码。"""
+    rule = RULES.get(role, {}) or {}
     if role == '剪辑组长':
-        return '20元/集，一部提成100元（只能剪前十集）'
-    if role == '一卡剪辑':
-        return '基本量70集/月，超出一集20元/集，缺一集-50元/集'
-    return '基本量120集/月，超出一集20元/集，缺一集-50元/集'
+        eps_price = rule.get('每集单价', 20)
+        proj_price = rule.get('组内每部提成', 100)
+        return f'{eps_price}元/集，一部提成{proj_price}元（只能剪前十集）'
+    quota = rule.get('基准集数', 120)
+    over = rule.get('超额每集', 20)
+    short = rule.get('缺集每集扣', 50)
+    return f'基本量{quota}集/月，超出一集{over}元/集，缺一集-{short}元/集'
 
 
 def normalize_role(role_str):
@@ -493,10 +498,9 @@ def self_check(records):
 
 def compute_commission(records, group_pids):
     """
-    提成计算：
-    - 一卡：(总集数-70)×20，不足则-(70-集数)×50
-    - 二卡/剪辑助理：(总集数-120)×20，不足则-(120-集数)×50
-    - 组长：总集数×20 + 全组去重项目数×100
+    提成计算（基准/单价均取当前 rules 配置，可设置）：
+    - 一卡/二卡/剪辑助理：(总集数-基准)×超额单价，不足则-(基准-集数)×缺集扣
+    - 组长：总集数×每集单价 + 全组去重项目数×组内每部提成
     """
     person_episodes = defaultdict(int)
     for r in records:
@@ -527,8 +531,8 @@ def compute_commission(records, group_pids):
                 'desc': rule['提成构成描述'],
             }
         else:
-            # 一卡/二卡/剪辑助理：一卡基准70，其余120
-            quota = rule.get('基准集数', 120)
+            # 一卡/二卡/剪辑助理：基准取配置（一卡默认40，其余120）
+            quota = rule.get('基准集数', 40 if role == '一卡剪辑' else 120)
             if total >= quota:
                 overtime = (total - quota) * rule['超额每集']
                 result[name] = {
@@ -884,7 +888,7 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
         proj_price = rule.get('组内每部提成', 100)
         p_value = f'{total_ep}×{eps_price}+{project_count}×{proj_price}'
     else:
-        quota = rule.get('基准集数', 120)
+        quota = rule.get('基准集数', 40 if role == '一卡剪辑' else 120)
         if total_ep >= quota:
             over_price = rule.get('超额每集', 20)
             p_value = f'({total_ep}-{quota})×{over_price}'

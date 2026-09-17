@@ -18,8 +18,8 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PLUGIN_CFG = os.path.join(_BASE, "plugins", "commission", "config.json")
 
 DEFAULT_RULES = {
-    "一卡剪辑": {"基准集数": 70, "超额每集": 20, "缺集每集扣": 50,
-                "提成构成描述": "基本量70集/月，超出一集20元/集，缺一集-50元/集"},
+    "一卡剪辑": {"基准集数": 40, "超额每集": 20, "缺集每集扣": 50,
+                "提成构成描述": "基本量40集/月，超出一集20元/集，缺一集-50元/集"},
     "二卡剪辑": {"基准集数": 120, "超额每集": 20, "缺集每集扣": 50,
                 "提成构成描述": "基本量120集/月，超出一集20元/集，缺一集-50元/集"},
     "剪辑助理": {"基准集数": 120, "超额每集": 20, "缺集每集扣": 50,
@@ -77,7 +77,8 @@ def editor_quota_map(cfg_path=None):
             out[name] = {"role": role, "quota": 0}
         else:
             rule = rules.get(role, rules.get("剪辑助理", DEFAULT_RULES["剪辑助理"]))
-            out[name] = {"role": role, "quota": int(rule.get("基准集数", 120) or 120)}
+            _dft = DEFAULT_RULES.get(role, {}).get("基准集数", 120)
+            out[name] = {"role": role, "quota": int(rule.get("基准集数", _dft) or _dft)}
     return out
 
 
@@ -116,7 +117,8 @@ def compute_commission_breakdown(editor_workload, month=None, cfg_path=None,
                 "commission": commission, "desc": rule.get("提成构成描述", ""),
             })
         else:
-            quota = int(rule.get("基准集数", 120) or 120)
+            _dft = DEFAULT_RULES.get(role, {}).get("基准集数", 120)
+            quota = int(rule.get("基准集数", _dft) or _dft)
             if total >= quota:
                 overtime = (total - quota) * int(rule.get("超额每集", 20) or 0)
                 rows.append({

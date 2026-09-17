@@ -2652,8 +2652,9 @@ class App:
                      bg=C['card'], fg=C['text'], width=12, anchor='w').pack(side='left', padx=10, pady=8)
 
             r = rules.get(role_name, {})
+            _dft = 40 if role_name == '一卡剪辑' else 120
             for key, label in [('基准集数', '基准'), ('超额每集', '超额/集'), ('缺集每集扣', '缺扣/集')]:
-                v = tk.IntVar(value=r.get(key, 70 if role_name == '一卡剪辑' else 120))
+                v = tk.IntVar(value=r.get(key, _dft))
                 vars_map[f'{role_name}|{key}'] = v
                 sub = tk.Frame(frm, bg=C['card'])
                 sub.pack(side='left', padx=4, pady=4)

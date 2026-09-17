@@ -374,18 +374,21 @@ class TestCommissionBreakdown:
 
     def test_一卡_超额(self):
         from commission_service import compute_commission_breakdown
+        # 传不存在的 cfg_path：固定用内置默认规则(一卡40/二卡120)，不受用户改设置影响
         rows, summary = compute_commission_breakdown(
-            [self._mk_editor("陈春阳", 90), self._mk_editor("程梦", 80)])
+            [self._mk_editor("陈春阳", 90), self._mk_editor("程梦", 80)],
+            cfg_path="__nonexistent_cfg__.json")
         by = {r["name"]: r for r in rows}
-        # 陈春阳 一卡(基准70)，超额20集×20=400
+        # 陈春阳 一卡(基准40)，超额50集×20=1000
         assert by["陈春阳"]["role"] == "一卡剪辑"
-        assert by["陈春阳"]["commission"] == (90 - 70) * 20
+        assert by["陈春阳"]["commission"] == (90 - 40) * 20
         assert by["陈春阳"]["is_complete"] is True
 
     def test_二卡_缺集扣款(self):
         from commission_service import compute_commission_breakdown
         rows, summary = compute_commission_breakdown(
-            [self._mk_editor("王田田", 100)])  # 二卡基准120，缺20×50
+            [self._mk_editor("王田田", 100)],
+            cfg_path="__nonexistent_cfg__.json")  # 二卡基准120，缺20×50
         by = {r["name"]: r for r in rows}
         assert by["王田田"]["role"] == "二卡剪辑"
         assert by["王田田"]["is_complete"] is False
@@ -394,7 +397,8 @@ class TestCommissionBreakdown:
     def test_组长_组奖(self):
         from commission_service import compute_commission_breakdown
         rows, summary = compute_commission_breakdown(
-            [{"name": "张大强", "assigned": 8, "projects": 4}])
+            [{"name": "张大强", "assigned": 8, "projects": 4}],
+            cfg_path="__nonexistent_cfg__.json")
         by = {r["name"]: r for r in rows}
         # 组长：8×20 + 4×100 = 160+400=560
         assert by["张大强"]["role"] == "剪辑组长"
@@ -406,9 +410,9 @@ class TestCommissionBreakdown:
         rows, summary = compute_commission_breakdown([
             self._mk_editor("陈春阳", 90),
             self._mk_editor("王田田", 100),
-        ])
-        # 陈春阳 +400，王田田 -1000，合计 -600
-        assert summary["total_commission"] == (90 - 70) * 20 - (120 - 100) * 50
+        ], cfg_path="__nonexistent_cfg__.json")
+        # 陈春阳(基准40) +1000，王田田(基准120) -1000，合计 0
+        assert summary["total_commission"] == (90 - 40) * 20 - (120 - 100) * 50
         assert summary["met_quota"] == 1
         assert summary["unmet_quota"] == 1
 
@@ -590,4 +594,64 @@ class TestResolvePreviewFolder:
         assert engine.resolve_preview_folder("项目C", "revising", "", str(tmp_path / "不存在")) is None
 
 
+# ============================================================
+# 13. 提成规则读写（卡前/卡后/助理/组长）—— 工作台与提成工具共用真源
+# ============================================================
 
+class TestCommissionRules:
+    def _client(self, tmp_path, monkeypatch):
+        """构造独立 Flask app + 临时 config.json，避免污染真实配置。"""
+        import json as _json
+        import commission
+        from flask import Flask
+        cfg = tmp_path / "config.json"
+        cfg.write_text(_json.dumps({
+            "rules": {
+                "一卡剪辑": {"基准集数": 40, "超额每集": 20, "缺集每集扣": 50},
+                "二卡剪辑": {"基准集数": 120, "超额每集": 20, "缺集每集扣": 50},
+                "剪辑助理": {"基准集数": 120, "超额每集": 20, "缺集每集扣": 50},
+                "剪辑组长": {"每集单价": 20, "组内每部提成": 100},
+            },
+            "人员角色": {}, "小组": {},
+        }, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(commission, "_CONFIG_PATH", str(cfg))
+        app = Flask(__name__)
+        commission.register_routes(app, None)
+        return app.test_client(), cfg
+
+    def test_get_rules(self, tmp_path, monkeypatch):
+        c, _ = self._client(tmp_path, monkeypatch)
+        d = c.get("/api/commission/rules").get_json()
+        assert d["ok"] is True
+        assert d["rules"]["一卡剪辑"]["基准集数"] == 40
+
+    def test_update_card1_quota_and_desc(self, tmp_path, monkeypatch):
+        c, cfg = self._client(tmp_path, monkeypatch)
+        r = c.put("/api/commission/rules",
+                  json={"rules": {"一卡剪辑": {"基准集数": 55}}})
+        d = r.get_json()
+        assert d["ok"] is True
+        assert d["rules"]["一卡剪辑"]["基准集数"] == 55
+        # 提成构成描述应随基准联动
+        assert "55集" in d["rules"]["一卡剪辑"]["提成构成描述"]
+        # 已落盘
+        import json as _json
+        saved = _json.loads(cfg.read_text(encoding="utf-8"))
+        assert saved["rules"]["一卡剪辑"]["基准集数"] == 55
+
+    def test_reject_negative_and_unknown_field(self, tmp_path, monkeypatch):
+        c, _ = self._client(tmp_path, monkeypatch)
+        r1 = c.put("/api/commission/rules",
+                   json={"rules": {"一卡剪辑": {"基准集数": -1}}})
+        assert r1.status_code == 400
+        r2 = c.put("/api/commission/rules",
+                   json={"rules": {"一卡剪辑": {"乱写字段": 1}}})
+        assert r2.status_code == 400
+
+    def test_alias_card_before_after(self, tmp_path, monkeypatch):
+        # 前端可用"卡前/卡后"别名
+        c, _ = self._client(tmp_path, monkeypatch)
+        d = c.put("/api/commission/rules",
+                  json={"rules": {"卡前": {"基准集数": 42}, "卡后": {"基准集数": 130}}}).get_json()
+        assert d["rules"]["一卡剪辑"]["基准集数"] == 42
+        assert d["rules"]["二卡剪辑"]["基准集数"] == 130

@@ -108,8 +108,9 @@ class RegressionTests(unittest.TestCase):
 
             sheet = load_workbook(output).active
             self.assertEqual(sheet["M4"].value, 80)
-            # R列现在是算式文本（一卡：超额(80-70)×20=200）
-            self.assertEqual(sheet["R4"].value, "(80-70)×20=200")
+            # P列是算式文本（一卡：超额(80-40)×20），R列是结果数字
+            self.assertEqual(sheet["P4"].value, "(80-40)×20")
+            self.assertEqual(sheet["R4"].value, 800)
 
     def test_overtime_is_explicit_input(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8", delete=False) as f:

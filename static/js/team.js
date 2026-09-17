@@ -276,6 +276,85 @@ async function loadConfig(){
   }catch(_){}
   // 加载开机自启状态
   try{ await loadAutostartStatus(); }catch(_){}
+  // 加载提成规则（卡前/卡后/助理/组长）
+  try{ await loadCommissionRules(); }catch(_){}
+}
+
+/* ============ 提成规则（卡前/卡后/助理/组长）============ */
+// 后端角色 -> 界面显示名（卡前=一卡剪辑，卡后=二卡剪辑）
+const COMMISSION_ROLE_META = [
+  {key:'一卡剪辑', label:'卡前（一卡剪辑）', fields:[
+    {k:'基准集数', t:'基准集数', hint:'达到此集数后才算超额'},
+    {k:'超额每集', t:'超额/集（元）', hint:'超出基准后每集奖励'},
+    {k:'缺集每集扣', t:'缺集/集（元）', hint:'未达基准每集扣款'}]},
+  {key:'二卡剪辑', label:'卡后（二卡剪辑）', fields:[
+    {k:'基准集数', t:'基准集数', hint:''},
+    {k:'超额每集', t:'超额/集（元）', hint:''},
+    {k:'缺集每集扣', t:'缺集/集（元）', hint:''}]},
+  {key:'剪辑助理', label:'剪辑助理', fields:[
+    {k:'基准集数', t:'基准集数', hint:''},
+    {k:'超额每集', t:'超额/集（元）', hint:''},
+    {k:'缺集每集扣', t:'缺集/集（元）', hint:''}]},
+  {key:'剪辑组长', label:'组长', fields:[
+    {k:'每集单价', t:'每集单价（元）', hint:''},
+    {k:'组内每部提成', t:'组内每部提成（元）', hint:''}]}
+];
+
+async function loadCommissionRules(){
+  const box = document.getElementById('commissionRulesBox');
+  if(!box) return;
+  const st = document.getElementById('commissionRulesStatus');
+  try{
+    const d = await api('GET','/api/commission/rules');
+    const rules = (d && d.rules) || {};
+    box.innerHTML = COMMISSION_ROLE_META.map(function(meta){
+      const r = rules[meta.key] || {};
+      const inputs = meta.fields.map(function(f){
+        const v = (r[f.k] !== undefined && r[f.k] !== null) ? r[f.k] : '';
+        return '<label style="display:flex;flex-direction:column;gap:3px;font-size:12px">'
+          + '<span style="color:var(--text-sec)" title="'+(f.hint||'')+'">'+f.t+'</span>'
+          + '<input type="number" min="0" class="cr-input" data-role="'+meta.key+'" data-field="'+f.k+'" value="'+v+'" style="width:110px;padding:5px 8px;border:1px solid var(--bg-border);border-radius:6px">'
+          + '</label>';
+      }).join('');
+      return '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;padding:10px 12px;background:#fafafa;border:1px solid var(--bg-border);border-radius:8px">'
+        + '<div style="min-width:120px;font-weight:600;font-size:13px">'+meta.label+'</div>'
+        + inputs + '</div>';
+    }).join('');
+    if(st) st.textContent = '已载入';
+  }catch(e){
+    box.innerHTML = '<div style="color:#c5221f;font-size:12px">载入提成规则失败: '+e.message+'</div>';
+  }
+}
+
+async function saveCommissionRules(){
+  const box = document.getElementById('commissionRulesBox');
+  const st = document.getElementById('commissionRulesStatus');
+  if(!box) return;
+  const rules = {};
+  box.querySelectorAll('input.cr-input').forEach(function(inp){
+    const role = inp.getAttribute('data-role');
+    const field = inp.getAttribute('data-field');
+    const val = parseInt(inp.value);
+    if(!rules[role]) rules[role] = {};
+    if(!isNaN(val)) rules[role][field] = val;
+  });
+  try{
+    const d = await api('PUT','/api/commission/rules',{rules:rules});
+    if(d && d.ok){
+      if(st) st.textContent = '✅ 已保存，两边同时生效';
+      toast('提成规则已保存（工作台+提成工具同时生效）','success');
+      // 若提成/绩效面板已打开，刷新
+      if(typeof showCommissionReport === 'function' && document.getElementById('commissionBoard')){
+        try{ showCommissionReport(); }catch(_){}
+      }
+    } else {
+      if(st) st.textContent = '❌ '+((d&&d.message)||'保存失败');
+      toast('保存失败: '+((d&&d.message)||''),'error');
+    }
+  }catch(e){
+    if(st) st.textContent = '❌ '+e.message;
+    toast('保存失败: '+e.message,'error');
+  }
 }
 
 // 读取开机自启状态

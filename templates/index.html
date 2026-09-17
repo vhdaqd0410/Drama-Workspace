@@ -1556,6 +1556,15 @@ a{color:var(--blue);text-decoration:none}
       <div style="font-size:12px;color:var(--text-sec);margin-bottom:8px">NAS 盘断开时，可切换到离线模式查看最近一次缓存的项目列表/状态/分集/待办（只读）。</div>
       <button class="btn btn-sm btn-primary" onclick="if(window.WB)WB.toggleOffline()">📴 切换离线模式</button>
     </div>
+    <div class="panel settings-section" style="grid-column:1/-1"><h3>💰 提成规则</h3>
+      <div style="font-size:12px;color:var(--text-sec);margin-bottom:10px">卡前/卡后/助理/组长的提成计算方法。此处修改与「提成工具」共用同一份配置（plugins/commission/config.json），改完两边同时生效。金额单位：元，集数单位：集。</div>
+      <div id="commissionRulesBox" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
+        <button class="btn btn-sm btn-primary" onclick="saveCommissionRules()">💾 保存提成规则</button>
+        <button class="btn btn-sm" onclick="loadCommissionRules()">↻ 重新载入</button>
+        <span id="commissionRulesStatus" style="font-size:12px;color:var(--text-sec)"></span>
+      </div>
+    </div>
     <div class="panel settings-section" style="grid-column:1/-1;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn" onclick="migrateOld()">📦 迁移旧数据</button>
       <button class="btn btn-primary" onclick="saveConfig()">🔄 保存设置</button>
@@ -1600,7 +1609,7 @@ a{color:var(--blue);text-decoration:none}
             </div>
             <div class="tb-note">💡 点击「🚀 启动提成工具」打开独立窗口（保留全部功能）。也可双击
               <code>plugins/commission/启动工具.vbs</code> 或命令行 <code>python src/generate_commission.py</code>。<br>
-              功能：智能计算（一卡70/二卡120基准）、生成 Excel 提成表、可视化仪表盘、智能分集、个人绩效卡片、
+              功能：智能计算（基准可配置，默认一卡40/二卡120）、生成 Excel 提成表、可视化仪表盘、智能分集、个人绩效卡片、
               角色管理器、批量处理、月份对比、数据导入导出、统计图表等。</div>
           </div></div>
           <div class="tb-card-foot">
