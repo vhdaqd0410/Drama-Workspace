@@ -6,12 +6,33 @@ function fjRenderChips(){
   if(fjPersons.length === 0){
     wrap.innerHTML = '<div style="color:var(--text-sec);font-size:12px">暂无人员，在下方添加</div>';
   } else {
-    wrap.innerHTML = fjPersons.map(p => {
+    wrap.innerHTML = fjPersons.map((p, i) => {
       const sel = fjSelected.includes(p) ? 'selected' : '';
-      return `<div class="fj-chip ${sel}" onclick="fjToggle('${jsq(p)}')">${p}</div>`;
+      const upDis = i === 0 ? 'disabled' : '';
+      const dnDis = i === fjPersons.length - 1 ? 'disabled' : '';
+      return `<div class="fj-chip ${sel}" onclick="fjToggle('${jsq(p)}')" title="${p}">
+        <span class="fj-chip-name">${p}</span>
+        <span class="fj-chip-move">
+          <button type="button" ${upDis} onclick="event.stopPropagation();fjMovePerson('${jsq(p)}',-1)" title="上移">↑</button>
+          <button type="button" ${dnDis} onclick="event.stopPropagation();fjMovePerson('${jsq(p)}',1)" title="下移">↓</button>
+        </span>
+      </div>`;
     }).join('');
   }
   $('fjSelCount').textContent = `(已选 ${fjSelected.length} 人)`;
+}
+// 人员上下移动：调整分配顺序（一键分配按 chip 顺序）
+function fjMovePerson(name, dir){
+  const i = fjPersons.indexOf(name);
+  if(i < 0) return;
+  const j = i + dir;
+  if(j < 0 || j >= fjPersons.length) return;
+  const tmp = fjPersons[i]; fjPersons[i] = fjPersons[j]; fjPersons[j] = tmp;
+  fjSave(FJ_KEY_PERSONS, fjPersons);
+  fjRenderChips();
+  fjRenderHeadTail();
+  fjRenderTable();
+  fjSaveSession();
 }
 function fjToggle(p){
   const i = fjSelected.indexOf(p);
@@ -112,7 +133,7 @@ function fjRenderHeadTail(){
   const sel = $('fjHeadTailPerson');
   if(sel){
     const cur = sel.value;
-    sel.innerHTML = '<option value="">选一位...</option>' + fjSelected.map(p => `<option value="${p}">${p}</option>`).join('');
+    sel.innerHTML = '<option value="">选一位...</option>' + fjPersons.filter(p => fjSelected.includes(p)).map(p => `<option value="${p}">${p}</option>`).join('');
     if(cur) sel.value = cur;
   }
 }
@@ -129,7 +150,8 @@ function fjAssign(){
 
   if(htOn && !htPerson){ toast('请选择头尾分的剪辑师','warning'); return; }
 
-  let persons = fjSelected.slice();
+  // 按 chip 顺序（fjPersons）分配，受人员上下移动控制
+  let persons = fjPersons.filter(p => fjSelected.includes(p));
   let startEp = 1, endEp = total;
 
   if(htOn){
@@ -167,7 +189,10 @@ function fjAssign(){
 function fjRenderTable(){
   const body = $('fjAllocBody');
   const empty = $('fjTableEmpty');
-  const names = Object.keys(fjRanges).filter(k => fjSelected.includes(k));
+  // 按 chip 顺序显示（与人员上下移动一致）
+  const _inRanges = Object.keys(fjRanges).filter(k => fjSelected.includes(k));
+  const names = fjPersons.filter(p => _inRanges.includes(p))
+    .concat(_inRanges.filter(p => !fjPersons.includes(p)));
   if(names.length === 0){
     body.innerHTML = '';
     empty.style.display = '';
@@ -265,22 +290,58 @@ function fjAutoAlignFrom(person){
   // 这个人自己保留原样，从他后面那个人开始对齐
   fjAutoAlignImpl(ordered, idx + 1);
 }
-function fjAutoAlignAll(){
-  const ordered = fjOrderedPersons();
-  if(ordered.length === 0) return;
+// 把集号数组转为范围字符串（连续段合并）
+function fjEpsToRangeStr(eps){
+  eps = (eps||[]).slice().sort((a,b)=>a-b);
+  if(eps.length === 0) return '';
+  const parts = []; let st = eps[0], prev = eps[0];
+  for(let i=1;i<eps.length;i++){
+    if(eps[i] === prev+1){ prev = eps[i]; }
+    else { parts.push(st===prev?`${st}`:`${st}-${prev}`); st = prev = eps[i]; }
+  }
+  parts.push(st===prev?`${st}`:`${st}-${prev}`);
+  return parts.join(',');
+}
+// 对齐实现：前 startIdx 人保留不动，其余人保持长度，
+// 依次填入"未被占用"的集号空隙（考虑多段已分集数）。
+// startIdx=0 表示全部重排（从 1 开始连续）。
+function fjFillGaps(ordered, startIdx){
   const total = parseInt($('fjTotal').value) || 0;
-  let nextStart = 1;
-  for(let i = 0; i < ordered.length; i++){
+  const occupied = new Set();
+  let cursor = 1;
+  if(startIdx > 0){
+    // 保留前 startIdx 人，其占用集号计入 occupied
+    for(let i=0;i<startIdx;i++){
+      fjParseRange(fjRanges[ordered[i]]).forEach(ep => occupied.add(ep));
+    }
+    // 起点：从保留的最后一人"起始集号"开始扫描，
+    // 而非其末尾+1 —— 多段人段间的空隙会被后面人优先填补
+    cursor = fjGetStartEpisode(fjRanges[ordered[startIdx-1]]);
+    if(cursor < 1) cursor = 1;
+  }
+  for(let i=startIdx;i<ordered.length;i++){
     const p = ordered[i];
     const len = fjRangeToCount(fjRanges[p]);
     if(len <= 0) continue;
-    if(nextStart + len - 1 > total){
-      toast(`对齐时 ${p} 超出总集数`, 'warning');
+    const picked = [];
+    let scan = cursor;
+    while(picked.length < len && scan <= total){
+      if(!occupied.has(scan)) picked.push(scan);
+      scan++;
+    }
+    if(picked.length < len){
+      toast(`对齐时 ${p} 找不到足够空位（需 ${len} 集）`, 'warning');
       break;
     }
-    fjRanges[p] = `${nextStart}-${nextStart + len - 1}`;
-    nextStart += len;
+    fjRanges[p] = fjEpsToRangeStr(picked);
+    picked.forEach(e => occupied.add(e));
+    cursor = picked[picked.length-1] + 1;
   }
+}
+function fjAutoAlignAll(){
+  const ordered = fjOrderedPersons();
+  if(ordered.length === 0) return;
+  fjFillGaps(ordered, 0);
   fjRenderTable();
   fjUpdateValidation();
   fjSaveSession();
@@ -288,20 +349,7 @@ function fjAutoAlignAll(){
 }
 function fjAutoAlignImpl(ordered, startIdx){
   if(startIdx <= 0 || startIdx >= ordered.length) return;
-  const total = parseInt($('fjTotal').value) || 0;
-  // 前面人的最后一集 + 1 就是第一个要对齐人的起点
-  let nextStart = fjGetEndEpisode(fjRanges[ordered[startIdx - 1]]) + 1;
-  for(let i = startIdx; i < ordered.length; i++){
-    const p = ordered[i];
-    const len = fjRangeToCount(fjRanges[p]);
-    if(len <= 0) continue;
-    if(nextStart + len - 1 > total){
-      toast(`对齐时 ${p} 超出总集数`, 'warning');
-      break;
-    }
-    fjRanges[p] = `${nextStart}-${nextStart + len - 1}`;
-    nextStart += len;
-  }
+  fjFillGaps(ordered, startIdx);
   fjRenderTable();
   fjUpdateValidation();
   fjSaveSession();
@@ -314,11 +362,12 @@ function fjGetStartEpisode(rangeStr){
   const eps = fjParseRange(rangeStr).sort((a,b)=>a-b);
   return eps[0] || 1;
 }
+// 对齐顺序 = chip 顺序（人员上下移动控制），chip 外的已分配人员追加在后。
+// 不再按起始集号暗中重排，避免用户手动调整的顺序被覆盖。
 function fjOrderedPersons(){
-  return Object.entries(fjRanges)
-    .map(([p,r]) => [p, fjGetStartEpisode(r)])
-    .sort((a,b) => a[1] - b[1])
-    .map(e => e[0]);
+  const inRanges = Object.keys(fjRanges);
+  const ordered = fjPersons.filter(p => inRanges.includes(p));
+  return ordered.concat(inRanges.filter(p => !fjPersons.includes(p)));
 }
 function fjParseRange(s){
   s = (s||'').trim(); if(!s) return [];

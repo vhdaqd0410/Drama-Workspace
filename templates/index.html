@@ -151,9 +151,16 @@ a{color:var(--blue);text-decoration:none}
 .fj-hist-bar select{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:13px}
 .fj-section-title{font-size:12px;font-weight:600;color:var(--text-sec);margin:14px 0 6px;letter-spacing:.5px}
 .fj-chip-wrap{display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:8px;border:1px dashed var(--border);border-radius:8px;background:#fafafa;margin-bottom:6px}
-.fj-chip{padding:5px 12px;border-radius:16px;background:#f0f1f3;color:var(--text-sec);font-size:13px;cursor:pointer;user-select:none;transition:all .15s;border:1px solid transparent}
+.fj-chip{padding:4px 8px 4px 12px;border-radius:16px;background:#f0f1f3;color:var(--text-sec);font-size:13px;cursor:pointer;user-select:none;transition:all .15s;border:1px solid transparent;display:inline-flex;align-items:center;gap:6px}
 .fj-chip:hover{background:#e5e5ea}
 .fj-chip.selected{background:var(--blue);color:#fff;border-color:var(--blue)}
+.fj-chip-name{line-height:1.2}
+.fj-chip-move{display:inline-flex;flex-direction:column;gap:1px}
+.fj-chip-move button{width:16px;height:12px;line-height:1;padding:0;border:none;border-radius:3px;background:rgba(0,0,0,.08);color:inherit;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.fj-chip.selected .fj-chip-move button{background:rgba(255,255,255,.28);color:#fff}
+.fj-chip-move button:hover:not(:disabled){background:rgba(0,0,0,.22)}
+.fj-chip.selected .fj-chip-move button:hover:not(:disabled){background:rgba(255,255,255,.45)}
+.fj-chip-move button:disabled{opacity:.3;cursor:default}
 .fj-chip-actions{display:flex;gap:8px;align-items:center;margin-bottom:4px}
 .fj-add-person{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px}
 .fj-headrow{display:flex;gap:8px;align-items:center;margin:14px 0 8px;flex-wrap:wrap;position:sticky;top:95px;z-index:20;background:#fff;padding:8px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
