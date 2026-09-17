@@ -82,7 +82,11 @@ class SyncMixin:
 
     # ===== 自动推断项目总集数（从素材/剧本文件夹） =====
     # 素材文件夹关键词（各部门命名可能不同）
-    _MATERIAL_FOLDER_KEYWORDS = ("视频素材", "抽卡素材", "素材")
+    # 强关键词：命中即视为素材目录
+    _MATERIAL_STRONG_KEYWORDS = ("视频素材", "抽卡素材", "视频原素材")
+    # 弱关键词：含"素材"但需排除干扰（配音素材/音频素材/音色素材等）
+    _MATERIAL_WEAK_KEYWORDS = ("素材",)
+    _MATERIAL_EXCLUDE_KEYWORDS = ("配音素材", "音频素材", "音色素材", "声音素材", "配乐素材")
     # 剧本分集关键词（剧本文件夹里按集分集的子目录）
     _SCRIPT_FOLDER_KEYWORDS = ("剧本", "分集")
 
@@ -129,18 +133,42 @@ class SyncMixin:
         _walk(root, 0)
         return eps
 
-    def _find_material_folder(self, group_path):
-        """在项目目录里定位素材文件夹（视频素材/抽卡素材）。找不到返回 None。"""
+    def _is_material_dirname(self, name):
+        """判断目录名是否为素材目录：强关键词命中即算；弱关键词(素材)需排除配音/音频等干扰。"""
+        if not name:
+            return False
+        if any(k in name for k in self._MATERIAL_STRONG_KEYWORDS):
+            return True
+        if any(k in name for k in self._MATERIAL_WEAK_KEYWORDS):
+            # 排除 配音素材/音频素材/音色素材 等非视频素材
+            if any(x in name for x in self._MATERIAL_EXCLUDE_KEYWORDS):
+                return False
+            return True
+        return False
+
+    def _find_material_folders(self, group_path):
+        """在项目目录里定位所有素材文件夹（视频素材/抽卡素材），返回列表。
+        强关键词目录排在前，便于优先取视频素材。"""
         if not group_path or not os.path.isdir(group_path):
-            return None
+            return []
+        strong, weak = [], []
         try:
             for s in os.listdir(group_path):
                 full = os.path.join(group_path, s)
-                if os.path.isdir(full) and any(k in s for k in self._MATERIAL_FOLDER_KEYWORDS):
-                    return full
+                if not os.path.isdir(full):
+                    continue
+                if any(k in s for k in self._MATERIAL_STRONG_KEYWORDS):
+                    strong.append(full)
+                elif self._is_material_dirname(s):
+                    weak.append(full)
         except OSError:
-            return None
-        return None
+            return []
+        return strong + weak
+
+    def _find_material_folder(self, group_path):
+        """兼容旧调用：返回第一个（优先强关键词）素材文件夹，找不到返回 None。"""
+        dirs = self._find_material_folders(group_path)
+        return dirs[0] if dirs else None
 
     def auto_detect_total_episodes(self, project_name):
         """自动推断项目总集数：扫描素材文件夹（视频素材/抽卡素材），
@@ -158,16 +186,18 @@ class SyncMixin:
         pp = proj.get("production_path", "") or ""
         if pp and pp not in candidates:
             candidates.append(pp)
+        best = 0
         for root in candidates:
             if not os.path.isdir(root):
                 continue
-            mat = self._find_material_folder(root)
-            if not mat:
-                continue
-            eps = self._collect_episode_numbers(mat)
-            if eps:
-                return max(eps)
-        return 0
+            # 遍历所有候选素材目录（视频素材优先），取识别出的最大集号
+            for mat in self._find_material_folders(root):
+                eps = self._collect_episode_numbers(mat)
+                if eps:
+                    best = max(best, max(eps))
+            if best > 0:
+                return best
+        return best
 
     def auto_set_total_episodes(self, project_name):
         """同步后自动推断并填入总集数（仅当当前为 0 时）。返回 (ok, msg, detected)。"""
