@@ -383,6 +383,8 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
 
         opts = {
             'cp_folder': data.get('cp_folder'),
+            # 成片性质版本（成片 + 无码版等）：期望有硬字幕
+            'cp_like_folders': data.get('cp_like_folders') or [],
             # 兜底：前端可能不传 hardsub_folders（data.get 返回 None），
             # 若为 None 让 qa_engine 用扫描出的默认值，避免遍历 None 崩溃
             'hardsub_folders': data.get('hardsub_folders') or [],

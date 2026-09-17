@@ -780,6 +780,8 @@ def process_single_video(base, vfile, info, cache=None, cancel_token=None):
     vname = os.path.splitext(vfile)[0]
     t_start = time.perf_counter()
     cp_folder = info['cp_folder']
+    # 成片性质版本（成片 + 无码版等）：这些版本"期望有硬字幕"
+    cp_like_folders = info.get('cp_like_folders') or [cp_folder]
     hardsub_folders = info['hardsub_folders']
     all_video_folders = info['all_video_folders']
     width = info['width']
@@ -839,31 +841,35 @@ def process_single_video(base, vfile, info, cache=None, cancel_token=None):
         cp_hs = None
         cp_hs_ts_for_compare = None  # 传给无字幕版的定点时间戳
 
-        # 第一步：先检测成片（快检模式，攒够3个命中即停）
-        if cp_folder in all_video_folders:
+        # 第一步：先检测所有"成片性质"版本（成片 + 无码版等），快检模式，攒够3个命中即停
+        for _cpf in cp_like_folders:
             if cancel_token and cancel_token.cancelled:
-                pass
-            else:
-                hpath = os.path.join(base, cp_folder, vfile)
-                if os.path.exists(hpath):
-                    cp_hs = check_hard_subtitle(
-                        hpath, width, height, duration,
-                        sub_y, sub_h, sub_x, sub_w, cache,
-                        mode='first_positive', min_positive_samples=3)
-                    result['hard_sub'][cp_folder] = cp_hs
-                    # 抽命中时刻的时间戳给无字幕版定点对比
-                    if cp_hs.get('samples'):
-                        pos_ts = [s[0] for s in cp_hs['samples'] if s[1] >= 3.0][:3]
-                        if len(pos_ts) < 3 and cp_hs['samples']:
-                            # 不足3个，用密度最高的补齐
-                            by_density = sorted(cp_hs['samples'],
-                                                key=lambda s: -s[1])
-                            for s in by_density:
-                                if s[0] not in pos_ts:
-                                    pos_ts.append(s[0])
-                                    if len(pos_ts) >= 3:
-                                        break
-                        cp_hs_ts_for_compare = pos_ts[:3] if pos_ts else None
+                break
+            if _cpf not in all_video_folders:
+                continue
+            hpath = os.path.join(base, _cpf, vfile)
+            if not os.path.exists(hpath):
+                continue
+            _cp_hs = check_hard_subtitle(
+                hpath, width, height, duration,
+                sub_y, sub_h, sub_x, sub_w, cache,
+                mode='first_positive', min_positive_samples=3)
+            result['hard_sub'][_cpf] = _cp_hs
+            # 主成片：抽命中时刻的时间戳给无字幕版定点对比
+            if _cpf == cp_folder:
+                cp_hs = _cp_hs
+                if cp_hs.get('samples'):
+                    pos_ts = [s[0] for s in cp_hs['samples'] if s[1] >= 3.0][:3]
+                    if len(pos_ts) < 3 and cp_hs['samples']:
+                        # 不足3个，用密度最高的补齐
+                        by_density = sorted(cp_hs['samples'],
+                                            key=lambda s: -s[1])
+                        for s in by_density:
+                            if s[0] not in pos_ts:
+                                pos_ts.append(s[0])
+                                if len(pos_ts) >= 3:
+                                    break
+                    cp_hs_ts_for_compare = pos_ts[:3] if pos_ts else None
 
         # 第二步：检测无字幕版本
         #   a) 密度法：check_hard_subtitle（定点对比/快检回退）→ 保留 avg_density 等指标
@@ -884,8 +890,8 @@ def process_single_video(base, vfile, info, cache=None, cancel_token=None):
         frame_diff_by_folder = {}  # {folder: compare_versions_by_framediff result}
         cp_path_for_diff = os.path.join(base, cp_folder, vfile)
         for hf in all_video_folders:
-            if hf == cp_folder:
-                continue
+            if hf in cp_like_folders:
+                continue  # 成片性质版本(成片/无码版)不参与"无字幕"帧差对比
             if cancel_token and cancel_token.cancelled:
                 break
             hpath = os.path.join(base, hf, vfile)
@@ -921,11 +927,34 @@ def process_single_video(base, vfile, info, cache=None, cancel_token=None):
                             'ns_looks_same': fd['ns_looks_same'],
                         }
 
+        # 第二步补充：成片性质版本（无码版等）vs 无字幕版 帧差对比。
+        # 无码版期望有字幕，但快检/密度在高边缘画面会恒判"有字幕" → 必须像成片
+        # 一样用无字幕版做像素级对照：有差异=确实有字幕(正常)，完全一致=缺字幕(异常)。
+        cp_like_frame_diff = {}  # {cp_like_folder: {ns_folder: fd}}
+        for _clf in cp_like_folders:
+            if _clf == cp_folder:
+                continue
+            _clf_path = os.path.join(base, _clf, vfile)
+            if not os.path.exists(_clf_path) or not fd_timestamps:
+                continue
+            _per_ns = {}
+            for _nsf in all_video_folders:
+                if _nsf in cp_like_folders:
+                    continue
+                _nsf_path = os.path.join(base, _nsf, vfile)
+                if not os.path.exists(_nsf_path):
+                    continue
+                _fd2 = compare_versions_by_framediff(
+                    _clf_path, _nsf_path, fd_timestamps,
+                    width, height, sub_y, sub_h, sub_x, sub_w)
+                _per_ns[_nsf] = _fd2
+            cp_like_frame_diff[_clf] = _per_ns
+
         # 收集各版本密度（定点对比：用 avg_density 对比，多帧平均更稳）
         cp_density = (cp_hs or {}).get('avg_density', 0)
         no_sub_densities = {}
         for f in all_video_folders:
-            if f != cp_folder and f in result['hard_sub']:
+            if f not in cp_like_folders and f in result['hard_sub']:
                 no_sub_densities[f] = result['hard_sub'][f].get('avg_density', 0)
         max_no_sub = max(no_sub_densities.values()) if no_sub_densities else 0
         has_reference = bool(no_sub_densities)
@@ -961,34 +990,77 @@ def process_single_video(base, vfile, info, cache=None, cancel_token=None):
             hs = result['hard_sub'][hf]
             avg_d = hs.get('avg_density', 0)
 
-            if hf == cp_folder:
-                # ---------- 成片硬字幕判定 ----------
-                cp_has_hs_quick = (cp_hs or {}).get('found_positive', False)
-                cp_hs_via_frame_diff = False  # 最终：帧差法给出的CP真相
+            if hf in cp_like_folders:
+                # ---------- 成片性质版本硬字幕判定（成片/无码版等：期望有字幕）----------
+                folder_quick = hs.get('found_positive', False)
+                folder_density = avg_d
 
-                if usable_fds:
-                    if any_diff_found:
-                        # 至少一个NS发现了像素差异 → CP确实有字幕叠加
-                        cp_hs_via_frame_diff = True
-                    elif all_looks_same:
-                        # 所有NS都和CP像素一致 → CP根本没有字幕
-                        cp_hs_via_frame_diff = False
-                    else:
-                        # 混合情况（部分可用但结论不一致）→ 以密度法兜底
-                        cp_hs_via_frame_diff = None
-                else:
-                    # 帧差法全都不可用 → 交给密度法
+                if hf == cp_folder:
+                    # 主成片：帧差法为绝对权威（用无字幕版对比揭示 CP 真相）
                     cp_hs_via_frame_diff = None
-
-                if cp_hs_via_frame_diff is not None:
-                    has_hs = cp_hs_via_frame_diff
-                elif has_reference and max_no_sub > 1.0:
-                    has_hs = cp_has_hs_quick or (
-                        cp_density > 2.0 and (
-                            (cp_density - max_no_sub) >= MIN_HARDSUB_GAP_FOR_CONFIRM
-                            or cp_density >= max_no_sub * 1.20))
+                    if usable_fds:
+                        if any_diff_found:
+                            # 至少一个NS发现了像素差异 → CP确实有字幕叠加
+                            cp_hs_via_frame_diff = True
+                        elif all_looks_same:
+                            # 所有NS都和CP像素一致 → CP根本没有字幕
+                            cp_hs_via_frame_diff = False
+                    if cp_hs_via_frame_diff is not None:
+                        has_hs = cp_hs_via_frame_diff
+                    elif has_reference and max_no_sub > 1.0:
+                        has_hs = folder_quick or (
+                            folder_density > 2.0 and (
+                                (folder_density - max_no_sub) >= MIN_HARDSUB_GAP_FOR_CONFIRM
+                                or folder_density >= max_no_sub * 1.20))
+                    else:
+                        has_hs = folder_quick or (folder_density > EDGE_DENSITY_HIGH)
                 else:
-                    has_hs = cp_has_hs_quick or (avg_d > EDGE_DENSITY_HIGH)
+                    # 无码版等其他成片性质版本：帧差法为绝对权威（与成片同口径）
+                    _per_ns = cp_like_frame_diff.get(hf) or {}
+                    _usable2 = {k: v for k, v in _per_ns.items()
+                                if v and v.get('usable')}
+                    _any_diff2 = any(v.get('diff_found') for v in _usable2.values())
+                    _all_same2 = (len(_usable2) >= 1 and
+                                  all(v.get('ns_looks_same') for v in _usable2.values()))
+                    _via_fd = None
+                    if _usable2:
+                        if _any_diff2:
+                            _via_fd = True   # 与无字幕版有差异 → 确实有字幕（正常）
+                        elif _all_same2:
+                            _via_fd = False  # 与无字幕版完全一致 → 缺字幕（异常）
+
+                    if _via_fd is not None:
+                        has_hs = _via_fd
+                    elif has_reference and max_no_sub > 1.0:
+                        has_hs = folder_quick or (
+                            folder_density > 2.0 and (
+                                (folder_density - max_no_sub) >= MIN_HARDSUB_GAP_FOR_CONFIRM
+                                or folder_density >= max_no_sub * 1.20))
+                    else:
+                        has_hs = folder_quick or (folder_density > EDGE_DENSITY_HIGH)
+                    if '_hardsub_diag' not in result:
+                        result['_hardsub_diag'] = []
+                    _pairs2 = sum(v.get('pairs', 0) for v in _usable2.values())
+                    result['_hardsub_diag'].append({
+                        'folder': hf,
+                        'role': 'cp_like',
+                        'density': round(folder_density, 2),
+                        'found_positive': folder_quick,
+                        'max_no_sub': round(max_no_sub, 2),
+                        'frame_diff_usable': bool(_usable2),
+                        'any_diff_found': _any_diff2,
+                        'all_looks_same': _all_same2,
+                        'pairs': _pairs2,
+                        'final_has_hardsub': has_hs,
+                        'reason': (
+                            (f"帧差法：与无字幕版对比，"
+                             f"{'发现差异→确实有字幕✓' if _any_diff2 else ('完全一致→缺字幕✗' if _all_same2 else '不确定→回退密度法')}")
+                            if _usable2 else
+                            (f"帧差法不可用，回退：快检命中={folder_quick}, "
+                             f"密度={folder_density:.2f}%, 无字幕版最高={max_no_sub:.2f}% "
+                             f"→ {'有字幕✓' if has_hs else '缺字幕✗'}")
+                        ),
+                    })
                 if not has_hs:
                     result['issues'].append(f'NO_HARDSUB:{hf}')
                     result['status'] = 'fail'
@@ -1123,8 +1195,8 @@ def process_single_video(base, vfile, info, cache=None, cancel_token=None):
             details.append(f"结尾黑帧{len(cp_bf)}段: {bps}")
     for hf, hs in result['hard_sub'].items():
         has_hs = hs.get('has_hardsub', False)
-        if hf == cp_folder:
-            # 成片：应有硬字幕
+        if hf in cp_like_folders:
+            # 成片性质版本（成片/无码版）：应有硬字幕
             if has_hs:
                 details.append(f"{hf}:有字幕✓")
             else:
@@ -1224,12 +1296,22 @@ def run_detection_batch(base, opts, cache=None, cancel_token=None,
         on_log(f"分辨率: {width}x{height}, {fps}fps")
         on_log(f"字幕区域({region_src}): X={sub_x}~{sub_x+sub_w}, Y={sub_y}~{sub_y+sub_h}")
 
-    all_video_folders = [cp_folder] + \
-        [f for f in opts.get("hardsub_folders", []) if f != cp_folder]
+    # 成片性质版本（成片 + 无码版等），期望有硬字幕；其余为无字幕版
+    cp_like_folders = [cp_folder]
+    for f in opts.get("cp_like_folders", []):
+        if f and f not in cp_like_folders:
+            cp_like_folders.append(f)
+    hardsub_only = [f for f in opts.get("hardsub_folders", [])
+                    if f and f not in cp_like_folders]
+    all_video_folders = list(cp_like_folders)
+    for f in hardsub_only:
+        if f not in all_video_folders:
+            all_video_folders.append(f)
 
     folder_info = {
         'cp_folder': cp_folder,
-        'hardsub_folders': opts.get("hardsub_folders", []),
+        'cp_like_folders': cp_like_folders,
+        'hardsub_folders': hardsub_only,
         'all_video_folders': all_video_folders,
         'width': width, 'height': height,
         'fps': fps,

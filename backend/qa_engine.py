@@ -32,7 +32,10 @@ logger = logging.getLogger("qa_engine")
 VIDEO_EXTS = ('.mp4', '.mov', '.mkv', '.avi', '.flv', '.wmv')
 SRT_EXTS = ('.srt', '.ass', '.ssa', '.vtt')
 
+# 注意顺序：'无码版' 必须在 '成片' 之前。
+# 否则 "01成片-无码版" 会先命中 '成片' 被误判为成片目录。
 VERSION_KEYWORDS = {
+    '无码版': ['无码', '去码', '无马'],
     '成片': ['成片', '完成版', 'final', 'output', 'outputs', 'export',
              'master', 'chinese', 'cn', 'with_sub', 'wsub', '完整版'],
     '无字幕版': ['无字幕', '无中字', 'nosub', 'no_sub', 'ns', 'clean',
@@ -266,6 +269,7 @@ class QAEngine:
         """
         layout = {
             'cp_folder': None,
+            'cp_like_folders': [],
             'hardsub_folders': [],
             'all_folders': [],
             'other_folders': [],
@@ -292,6 +296,7 @@ class QAEngine:
 
         if root_has_videos:
             layout['cp_folder'] = '.'
+            layout['cp_like_folders'] = ['.']
             layout['hardsub_folders'] = ['.']
             layout['all_folders'] = ['.']
 
@@ -319,8 +324,16 @@ class QAEngine:
 
             if matched == '成片' and videos_here:
                 layout['cp_folder'] = subdir
+                if subdir not in layout['cp_like_folders']:
+                    layout['cp_like_folders'].append(subdir)
                 if subdir not in layout['hardsub_folders']:
                     layout['hardsub_folders'].append(subdir)
+                if subdir not in layout['all_folders']:
+                    layout['all_folders'].append(subdir)
+            elif matched == '无码版' and videos_here:
+                # 无码版：与成片同类，期望有硬字幕
+                if subdir not in layout['cp_like_folders']:
+                    layout['cp_like_folders'].append(subdir)
                 if subdir not in layout['all_folders']:
                     layout['all_folders'].append(subdir)
             elif matched == '无字幕版' and videos_here:
@@ -344,10 +357,13 @@ class QAEngine:
                 )
                 if has_v:
                     layout['cp_folder'] = subdir
+                    layout['cp_like_folders'] = [subdir]
                     layout['hardsub_folders'] = [subdir]
                     layout['all_folders'] = [subdir]
                     break
 
+        if layout['cp_folder'] and layout['cp_folder'] not in layout['cp_like_folders']:
+            layout['cp_like_folders'].insert(0, layout['cp_folder'])
         if layout['cp_folder'] and layout['cp_folder'] not in layout['all_folders']:
             layout['all_folders'].insert(0, layout['cp_folder'])
 
@@ -386,6 +402,8 @@ class QAEngine:
             # 注意：setdefault 在 key 存在但值为 None 时不会生效（前端可能传 hardsub_folders=null），
             # 因此这里用显式空值判断兜底，避免下方 `for f in opts['hardsub_folders']` 遍历 None 崩溃。
             opts.setdefault('cp_folder', cp_folder)
+            if not opts.get('cp_like_folders'):
+                opts['cp_like_folders'] = list(folder_layout.get('cp_like_folders') or [cp_folder])
             if not opts.get('hardsub_folders'):
                 opts['hardsub_folders'] = hardsub_folders
             opts.setdefault('srt_folder', srt_folder)
@@ -559,6 +577,7 @@ class QAEngine:
                     sub_y_e = getattr(detection, 'SUB_Y_RATIO_END', 0.83)
                     folder_info = {
                         'cp_folder': cp_folder,
+                        'cp_like_folders': opts.get('cp_like_folders') or [cp_folder],
                         'hardsub_folders': opts['hardsub_folders'],
                         'all_video_folders': all_video_folders,
                         'width': info.get('width'),
@@ -860,6 +879,7 @@ class QAEngine:
     @staticmethod
     def _to_public_results(results, folder_layout):
         cp_folder = folder_layout.get('cp_folder', '')
+        cp_like_folders = folder_layout.get('cp_like_folders') or [cp_folder]
         out = []
         for r in results:
             video = r.get('video', '')
@@ -910,6 +930,7 @@ class QAEngine:
             out.append({
                 'video': video,
                 'version': cp_folder,
+                'cp_like_folders': cp_like_folders,
                 'status': public_status,
                 'details': details,
                 'duration': round(r.get('duration', 0), 2),

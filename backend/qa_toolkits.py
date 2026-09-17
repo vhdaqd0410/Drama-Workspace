@@ -109,6 +109,7 @@ def auto_detect_folders(base):
         "cp_folder": None,
         "cp_match_auto": False,
         "hardsub_folders": [],
+        "cp_like_folders": [],
         "hardsub_vars_default": {},
         "srt_folder": None,
         "srt_count": 0,
@@ -140,6 +141,7 @@ def auto_detect_folders(base):
 
     cp_match = srt_match = None
     hardsub_matches = []
+    cp_like_matches = []   # 成片性质版本（成片 + 无码版）：期望有硬字幕
 
     for f in available:
         fl = f.lower()
@@ -153,6 +155,10 @@ def auto_detect_folders(base):
 
         if has_srt or '字幕文件' in f or fl.startswith('3') or 'srt' in fl:
             srt_match = f
+            continue
+        # 无码版：与成片同类，期望有硬字幕（必须在"无字幕"判断之前，避免误归无字幕版）
+        if '无码' in f or '去码' in f or '无马' in f:
+            cp_like_matches.append(f)
             continue
         if '成片' in f or fl.startswith('00') or 'final' in fl:
             cp_match = f
@@ -198,6 +204,9 @@ def auto_detect_folders(base):
     all_video_folders = []
     if cp_match:
         all_video_folders.append(cp_match)
+    for f in cp_like_matches:
+        if f not in all_video_folders:
+            all_video_folders.append(f)
     for f in hardsub_matches:
         if f not in all_video_folders:
             all_video_folders.append(f)
@@ -211,10 +220,19 @@ def auto_detect_folders(base):
             n = 0
         file_counts[folder] = n
 
+    # 成片性质版本 = 成片 + 无码版（去重，成片在前）
+    cp_like = []
+    if cp_match:
+        cp_like.append(cp_match)
+    for f in cp_like_matches:
+        if f not in cp_like:
+            cp_like.append(f)
+    out["cp_like_folders"] = cp_like
+
     out["hardsub_folders"] = hardsub_matches
     out["hardsub_vars_default"] = {f: True for f in hardsub_matches}
-    if cp_match:
-        out["hardsub_vars_default"][cp_match] = True
+    for f in cp_like:
+        out["hardsub_vars_default"][f] = True
     out["file_counts"] = file_counts
 
     all_vals = list(file_counts.values()) + ([out["srt_count"]] if srt_match else [])
@@ -398,6 +416,11 @@ def generate_report_html(project_path, project_name, results, total,
     folder_info = extra_data.get('folder_info', {})
     srt_folder = extra_data.get('srt_folder', '')
     cp_folder = extra_data.get('cp_folder') or folder_info.get('cp_folder', '')
+    # 成片性质版本（成片 + 无码版等）：期望有硬字幕
+    cp_like_folders = (extra_data.get('cp_like_folders')
+                       or folder_info.get('cp_like_folders')
+                       or ([cp_folder] if cp_folder else []))
+    cp_like_set = set(cp_like_folders) or {cp_folder}
 
     all_video_folders = folder_info.get('all_video_folders') or ([cp_folder] if cp_folder else [])
     if not all_video_folders:
@@ -432,7 +455,7 @@ def generate_report_html(project_path, project_name, results, total,
             if folder not in hs_by_version:
                 hs_by_version[folder] = {'pass': 0, 'fail': 0, 'data': []}
             has = bool(hs.get('has_hardsub', False))
-            is_cp = (folder == cp_folder)
+            is_cp = (folder in cp_like_set)
             ok = has if is_cp else not has
             if ok:
                 hs_by_version[folder]['pass'] += 1
@@ -510,14 +533,15 @@ def generate_report_html(project_path, project_name, results, total,
         'duration_mismatch': [],
         'fps_mismatch': [],
     }
+    cp_like_set = set(cp_like_folders or [cp_folder])
     for r in results:
         vname = r.get('video', '')
         for folder, hs in (r.get('hard_sub') or {}).items():
             has_hs = bool(hs.get('has_hardsub', False))
-            is_cp = (folder == cp_folder)
-            if is_cp and not has_hs:
+            is_cp_like = (folder in cp_like_set)
+            if is_cp_like and not has_hs:
                 issues['hardsub_cp_missing'].append((vname, folder))
-            elif not is_cp and has_hs:
+            elif not is_cp_like and has_hs:
                 issues['hardsub_version_present'].append((vname, folder))
         dc = r.get('duration_check') or {}
         if dc.get('status') == 'fail':
@@ -614,7 +638,7 @@ def generate_report_html(project_path, project_name, results, total,
                 continue
             v_pass, v_fail = vd['pass'], vd['fail']
             v_total = v_pass + v_fail
-            is_cp = (folder == cp_folder)
+            is_cp = (folder in cp_like_set)
             cls2 = 'success' if v_fail == 0 else 'danger'
             if is_cp:
                 label = '有硬字幕（正常）' if v_fail == 0 else f'{v_fail}个缺硬字幕'
@@ -678,7 +702,7 @@ def generate_report_html(project_path, project_name, results, total,
                 continue
             vp, vf = vd['pass'], vd['fail']
             vt = vp + vf
-            is_cp = (folder == cp_folder)
+            is_cp = (folder in cp_like_set)
             if is_cp:
                 if vf > 0:
                     conclusion_details.append(f"- {folder}：{vp}/{vt} 有硬字幕，{vf}个缺硬字幕（需检查）")
@@ -787,7 +811,7 @@ def generate_report_html(project_path, project_name, results, total,
         if r.get('hard_sub'):
             for folder, hs in r['hard_sub'].items():
                 has_hs = bool(hs.get('has_hardsub', False))
-                is_cp = (folder == cp_folder)
+                is_cp = (folder in cp_like_set)
                 ok = has_hs if is_cp else not has_hs
                 expect = "（应有字幕）" if is_cp else "（应无字幕）"
                 b = (f'<span style="color:var(--success); font-weight:600;">✓ 正常</span>'

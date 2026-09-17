@@ -546,8 +546,13 @@ function qa2Start() {
     var cpFolder = $('qa2CpFolder').value;
     if (!cpFolder) { toast('请指定成片文件夹', 'warning'); return; }
 
-    // 硬字幕版本：勾选的 + 成片
-    var hardsubFolders = [cpFolder];
+    // 成片性质版本（成片 + 无码版等）：期望有硬字幕
+    var cpLikeFolders = [cpFolder];
+    ((qa2State.layout && qa2State.layout.cp_like_folders) || []).forEach(function (f) {
+        if (f && cpLikeFolders.indexOf(f) < 0) cpLikeFolders.push(f);
+    });
+    // 硬字幕版本：勾选的 + 成片性质版本
+    var hardsubFolders = cpLikeFolders.slice();
     Object.keys(qa2State.hardsubVars).forEach(function (f) {
         if (qa2State.hardsubVars[f] && hardsubFolders.indexOf(f) < 0) hardsubFolders.push(f);
     });
@@ -557,6 +562,7 @@ function qa2Start() {
     var opts = {
         project_path: dir,
         cp_folder: cpFolder,
+        cp_like_folders: cpLikeFolders,
         hardsub_folders: hardsubFolders,
         srt_folder: srtFolder,
         opt_blackframes: !!$('qa2OptBlack').checked,
@@ -575,7 +581,8 @@ function qa2Start() {
 
     qa2ClearLog();
     qa2Log('启动质检: ' + projectName + '  @ ' + dir);
-    qa2Log('  成片=' + cpFolder + '  硬字幕版本=[' + hardsubFolders.join(', ') + ']' +
+    qa2Log('  成片=' + cpFolder + '  成片性质版本=[' + cpLikeFolders.join(', ') + ']' +
+           '  硬字幕版本=[' + hardsubFolders.join(', ') + ']' +
            (srtFolder ? '  字幕=' + srtFolder : ''));
     qa2SetProgress(0, '准备中...');
     qa2ClearResultTable();
@@ -784,11 +791,14 @@ function qa2RenderResultTable(results, status) {
         if (hsKeys.length === 0) {
             tdHs.innerHTML = '<span style="color:var(--text-sec)">—</span>';
         } else {
+            var cpLike = (r.cp_like_folders && r.cp_like_folders.length)
+                ? r.cp_like_folders
+                : ((qa2State.layout && qa2State.layout.cp_like_folders) || [cpFolder]);
             var hsHtml = '';
             hsKeys.forEach(function (folder) {
                 var hs = hsMap[folder] || {};
                 var has = !!hs.has_hardsub;
-                var isCp = (folder === cpFolder);
+                var isCp = (cpLike.indexOf(folder) >= 0);
                 var ok = isCp ? has : !has;
                 var cls = ok ? 'ok' : 'bad';
                 var icon = ok ? '✓' : '✗';
