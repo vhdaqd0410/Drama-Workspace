@@ -1158,6 +1158,42 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             saved[k] = v
         return jsonify(ok=True, saved=saved)
 
+    # ============ 「我参与的项目」（供 CEP 插件标记/筛选） ============
+    @app.route('/api/my/projects', methods=['GET'])
+    def api_my_projects():
+        """返回「我参与」的项目及其集数。
+
+        「我」= 设置里的 my_editor_name；参与 = 该项目 episode_plan 里有我。
+        返回 { ok, editor, mine: { 项目名: {eps: N, total: M} } }
+        这是个轻量端点（不返回大字段），给插件做标记与筛选用。
+        """
+        try:
+            me = (db.get_setting('my_editor_name', '') or '').strip()
+            if not me:
+                return jsonify(ok=True, editor='', mine={})
+            mine = {}
+            for p in db.get_all_projects():
+                name = p.get('name') or ''
+                if not name:
+                    continue
+                raw = p.get('episode_plan') or ''
+                if not raw or raw == '{}':
+                    continue
+                try:
+                    plan = _j.loads(raw) if isinstance(raw, str) else (raw or {})
+                except Exception:
+                    continue
+                if not isinstance(plan, dict):
+                    continue
+                mine_eps = sorted(int(k) for k, v in plan.items()
+                                  if str(v).strip() == me and str(k).strip().isdigit())
+                if mine_eps:
+                    mine[name] = {'eps': len(mine_eps), 'total': len(plan),
+                                  'list': mine_eps}
+            return jsonify(ok=True, editor=me, mine=mine)
+        except Exception as e:
+            return jsonify(ok=False, msg=str(e)), 500
+
     # ============ 分集人员模板（勾选人员保存为模板） ============
     @app.route('/api/fenji/person_templates', methods=['GET'])
     def fenji_list_person_templates():
