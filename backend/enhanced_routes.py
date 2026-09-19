@@ -383,6 +383,8 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
 
         opts = {
             'cp_folder': data.get('cp_folder'),
+            # 成片性质版本（成片 + 无码版等）：期望有硬字幕
+            'cp_like_folders': data.get('cp_like_folders') or [],
             # 兜底：前端可能不传 hardsub_folders（data.get 返回 None），
             # 若为 None 让 qa_engine 用扫描出的默认值，避免遍历 None 崩溃
             'hardsub_folders': data.get('hardsub_folders') or [],
@@ -884,6 +886,17 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return jsonify({"ok": False, "message": "assign 为空"}), 400
         try:
             db.set_episode_plan(project_name, assign)
+            # 失效 episodes_status 短 TTL 缓存，确保替换后卡片立即读到新分集
+            try:
+                if sync_engine is not None:
+                    _c = getattr(sync_engine, "_episode_status_cache", None)
+                    if isinstance(_c, dict):
+                        _c.pop(project_name, None)
+                    _d = getattr(sync_engine, "_delivery_stats_cache", None)
+                    if isinstance(_d, dict):
+                        _d.pop(project_name, None)
+            except Exception:
+                pass
             # 问题6：同步分集时一并重算 editor_workload，保证所有统计口径跟随最新分集
             try:
                 from collections import Counter as _Counter
@@ -1144,6 +1157,42 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             db.set_setting(k, v)
             saved[k] = v
         return jsonify(ok=True, saved=saved)
+
+    # ============ 「我参与的项目」（供 CEP 插件标记/筛选） ============
+    @app.route('/api/my/projects', methods=['GET'])
+    def api_my_projects():
+        """返回「我参与」的项目及其集数。
+
+        「我」= 设置里的 my_editor_name；参与 = 该项目 episode_plan 里有我。
+        返回 { ok, editor, mine: { 项目名: {eps: N, total: M} } }
+        这是个轻量端点（不返回大字段），给插件做标记与筛选用。
+        """
+        try:
+            me = (db.get_setting('my_editor_name', '') or '').strip()
+            if not me:
+                return jsonify(ok=True, editor='', mine={})
+            mine = {}
+            for p in db.get_all_projects():
+                name = p.get('name') or ''
+                if not name:
+                    continue
+                raw = p.get('episode_plan') or ''
+                if not raw or raw == '{}':
+                    continue
+                try:
+                    plan = _j.loads(raw) if isinstance(raw, str) else (raw or {})
+                except Exception:
+                    continue
+                if not isinstance(plan, dict):
+                    continue
+                mine_eps = sorted(int(k) for k, v in plan.items()
+                                  if str(v).strip() == me and str(k).strip().isdigit())
+                if mine_eps:
+                    mine[name] = {'eps': len(mine_eps), 'total': len(plan),
+                                  'list': mine_eps}
+            return jsonify(ok=True, editor=me, mine=mine)
+        except Exception as e:
+            return jsonify(ok=False, msg=str(e)), 500
 
     # ============ 分集人员模板（勾选人员保存为模板） ============
     @app.route('/api/fenji/person_templates', methods=['GET'])
