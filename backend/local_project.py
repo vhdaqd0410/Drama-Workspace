@@ -18,48 +18,90 @@ logger = logging.getLogger("local_project")
 # 素材文件夹关键词
 _MATERIAL_KEYWORDS = ("抽卡素材", "抽卡", "视频素材", "素材")
 # 粗剪文件夹关键词（自动识别，各部门命名可能不同）
-_ROUGHCUT_KEYWORDS = ("粗剪", "初剪", "粗减")
+_ROUGHCUT_KEYWORDS = ("粗剪", "初剪", "粗减", "精剪", "定剪")
 # 剧本文件夹关键词
 _SCRIPT_KEYWORDS = ("剧本", "分集", "脚本")
-# 结构目录词：这些目录是"分类/结构"目录（序号是目录序号，不是集号），应跳过
-_STRUCT_WORDS = ("抽卡素材", "抽卡", "单补镜头", "单补", "视频素材", "素材",
-                 "前期筹备", "制作明细", "工程成片", "成片交付", "交付",
-                 "备注", "评论", "分镜", "剧本", "脚本", "参考", "模板")
+# 结构目录词：这些目录是"分类/结构"目录（序号是目录序号，不是集号）
+# 注意：必须够全，否则会把「07_范堉淼」（集号）误判为结构目录。
+# 词表来自真实 NAS（O:\AI漫剧剪辑一组）实测枚举。
+_STRUCT_WORDS = (
+    # 素材/筹备
+    "抽卡素材", "抽卡", "单补镜头", "单补", "视频素材", "配音素材", "素材",
+    "前期筹备", "制作明细", "资产表", "资产包", "项目资产", "资产", "溶图",
+    # 剪辑/交付
+    "工程成片", "成片交付", "成片", "交付", "交片", "多版本交片",
+    "粗剪", "精剪", "定剪", "修改", "剪辑",
+    "项目完成保存", "工程打包",
+    # 文本/参考
+    "备注", "评论", "分镜", "剧本", "脚本", "参考", "模板",
+    "最终版剧本", "海报",
+    # 音频
+    "音频", "音乐", "音效",
+    # 版本/字幕/其他
+    "无音乐无字幕", "有音乐无字幕", "字幕",
+    "人名条", "预告片", "集数", "导出", "原片",
+    # 资产子类
+    "人物", "场景", "道具",
+    # 审核
+    "审核", "最终",
+)
 
 
-def _extract_episode_number(name):
-    """从文件/文件夹名提取集号。只认真正的"集号"命名，排除结构目录序号。
+def _is_struct_name(name):
+    """名字里含结构词 → 是结构目录（不是集号）。"""
+    if not name:
+        return False
+    return any(w in name for w in _STRUCT_WORDS)
 
-    支持：
-      - 「第N集 ...」           → N
-      - 「N-剪辑师名」/「N 剪辑师名」 → N（数字后跟 -/空格 + 非数字中文）
-    排除：
-      - 「NN_结构词」（如 01_抽卡素材、02_单补镜头）→ None（结构目录序号，非集号）
+
+def _is_roughcut_name(name):
+    """名字里含粗剪类关键词 → 归粗剪管，不当素材。"""
+    if not name:
+        return False
+    return any(k in name for k in _ROUGHCUT_KEYWORDS)
+
+
+def _extract_episode_number(name, allow_bare=False):
+    """从文件/文件夹名提取集号。
+
+    真实 NAS 里「N_剪辑师名」与「NN_结构词」形式完全相同，只能靠后缀区分：
+      - 「第N集 ...」            → N
+      - 「N_剪辑师名」（07_范堉淼）→ N（后缀不是结构词）
+      - 「NN_结构词」（01_抽卡素材）→ None（结构目录）
+      - 「N-剪辑师名」/「N 剪辑师名」→ N
+      - 纯数字（19.mp4）         → 仅当 allow_bare=True（粗剪上下文）才认
     """
     if not name:
         return None
+    s = str(name)
     # 1) 「第N集」最明确
-    m = re.search(r'第\s*(\d{1,3})\s*集', name)
+    m = re.search(r'第\s*(\d{1,3})\s*集', s)
     if m:
         return int(m.group(1))
-    # 2) 排除结构目录：数字 + 下划线（01_xxx）
-    if re.match(r'^\d{1,3}_', name):
-        return None
-    # 3) 「N-中文」或「N 中文」：数字后跟 -/空格 + 中文
-    m = re.match(r'^(\d{1,3})\s*[- 　]\s*([\u4e00-\u9fff])', name)
+    # 2) 「N_中文」
+    m = re.match(r'^(\d{1,3})_([\u4e00-\u9fff].*)$', s)
     if m:
-        return int(m.group(1))
+        return None if _is_struct_name(m.group(2)) else int(m.group(1))
+    # 3) 「N-中文」/「N 中文」
+    m = re.match(r'^(\d{1,3})\s*[- 　]\s*([\u4e00-\u9fff].*)$', s)
+    if m:
+        return None if _is_struct_name(m.group(2)) else int(m.group(1))
+    # 4) 纯数字（粗剪目录里的 19.mp4）
+    if allow_bare:
+        m = re.match(r'^(\d{1,3})$', s)
+        if m:
+            return int(m.group(1))
     return None
 
 
 def _extract_editor_from_dirname(name):
-    """从集号文件夹名提取剪辑师名（如「1- 张光强」→「张光强」，「第1集 张光强」→「张光强」）。"""
-    # 去掉「第N集」
-    s = re.sub(r'第\s*\d{1,3}\s*集', '', name)
-    # 去掉开头「N-」或「N 」
-    s = re.sub(r'^\d{1,3}\s*[- 　]', '', s)
-    # 去掉「-」前缀残留
-    s = s.strip().strip('-').strip()
+    """从集号文件夹名提取剪辑师名（「1- 张光强」→「张光强」，「07_范堉淼」→「范堉淼」）。
+    纯数字（如 19.mp4）不算名字，返回空串。"""
+    s = re.sub(r'^第\s*\d{1,3}\s*集', '', name)
+    s = re.sub(r'^\d{1,3}\s*[-_ 　]\s*', '', s)
+    s = s.strip().strip('-_').strip()
+    if re.match(r'^\d+$', s):
+        return ""
     return s
 
 
@@ -130,17 +172,26 @@ def _find_pr_exe():
     return ""
 
 
-def _flatten_copy(src_dir, dst_dir, unc_map=None):
-    """把 src_dir 下所有文件扁平复制到 dst_dir（保留子目录里的文件，但去掉中间层级）。"""
+def _flatten_copy(src_dir, dst_dir, unc_map=None, skip_dir=None):
+    """把 src_dir 下所有文件扁平复制到 dst_dir（保留子目录里的文件，但去掉中间层级）。
+
+    skip_dir: 回调，命中则整棵跳过（如素材里的粗剪子目录）。
+    只有真复制了文件才建目标目录，避免拉出一堆空目录。"""
     count = 0
     if not os.path.isdir(src_dir):
         return 0
     for root, dirs, files in os.walk(src_dir):
+        if skip_dir:
+            dirs[:] = [d for d in dirs if not skip_dir(d)]
         for f in files:
             src = os.path.join(root, f)
             # 跳过临时/缓存文件
             if f.startswith('.') or f.lower() in ('thumbs.db', 'desktop.ini'):
                 continue
+            try:
+                os.makedirs(dst_dir, exist_ok=True)
+            except OSError:
+                return count
             dst = os.path.join(dst_dir, f)
             # 同名去重
             if os.path.exists(dst):
@@ -152,6 +203,21 @@ def _flatten_copy(src_dir, dst_dir, unc_map=None):
             if _copy_file_robust(src, dst, unc_map):
                 count += 1
     return count
+
+
+def _has_files_except(src_dir, skip_name):
+    """src_dir 里除了被 skip_name 排除的子目录外，还有没有文件（含更深层）。
+    用于跳过「第19集\粗剪」这种除了粗剪别无内容的目录。"""
+    if not os.path.isdir(src_dir):
+        return False
+    for root, dirs, files in os.walk(src_dir):
+        if skip_name:
+            dirs[:] = [d for d in dirs if not skip_name(d)]
+        for f in files:
+            if f.startswith('.') or f.lower() in ('thumbs.db', 'desktop.ini'):
+                continue
+            return True
+    return False
 
 
 def create_local_project(sync_engine, project_name, progress_cb=None):
@@ -211,16 +277,18 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
         if not ok:
             logger.warning("复制模板失败: %s", err)
 
-    # 原素材目标目录（参考项目结构 01原素材）
+    # 原素材 / 粗剪 目标目录
     material_target = os.path.join(local_proj_dir, "01原素材")
     os.makedirs(material_target, exist_ok=True)
+    rough_target = os.path.join(local_proj_dir, "02粗剪")
+    os.makedirs(rough_target, exist_ok=True)
+    prproj_dst = ""
 
     unc_map = sync_engine._unc_map
     stats = {"episodes": my_episodes, "material_copied": 0, "roughcut_copied": 0,
              "script_copied": 0, "template_copied": template_copied,
              "pr_copied": False, "pr_opened": False,
              "material_dirs": []}
-    prproj_dst = ""
 
     # 4. 定位素材/粗剪/剧本文件夹（递归查找，支持多层嵌套）
     def _find_dirs(root, keywords):
@@ -243,12 +311,13 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
         _walk(root)
         return found
 
-    material_dirs = _find_dirs(group_path, _MATERIAL_KEYWORDS)
+    material_dirs = [d for d in _find_dirs(group_path, _MATERIAL_KEYWORDS)
+                     if not _is_roughcut_name(os.path.basename(d))]
     roughcut_dirs = _find_dirs(group_path, _ROUGHCUT_KEYWORDS)
     script_dirs = _find_dirs(group_path, _SCRIPT_KEYWORDS)
 
     # 5. 递归查找"集号文件夹"，只收集我负责的集
-    def _find_episode_dirs(folder):
+    def _find_episode_dirs(folder, allow_bare=False, skip_rough=False):
         """递归查找 folder 下的集号文件夹，返回 {集号: (源目录, 剪辑师名)}。
         跳过结构目录（_extract_episode_number 返回 None 的），递归其内部。"""
         result = {}
@@ -263,9 +332,11 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
                 full = os.path.join(p, item)
                 if not os.path.isdir(full):
                     continue
-                ep = _extract_episode_number(item)
+                # 素材里嵌套的粗剪目录不当素材
+                if skip_rough and _is_roughcut_name(item):
+                    continue
+                ep = _extract_episode_number(item, allow_bare)
                 if ep is not None:
-                    # 只记录我负责的集（同集多个文件夹取第一个）
                     if ep in my_ep_set and ep not in result:
                         editor = _extract_editor_from_dirname(item) or my_editor
                         result[ep] = (full, editor)
@@ -274,9 +345,12 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
         _walk(folder)
         return result
 
-    def _collect_episode_files(folder):
+    def _collect_episode_files(folder, fallback_ep=None):
         """收集 folder 下按「集号-剪辑师.扩展名」命名的文件（如 1-张光强.mp4），
-        返回 {集号: (文件路径, 剪辑师名)}。用于粗剪等"每集一个文件"的结构。"""
+        返回 {集号: (文件路径, 剪辑师名)}。用于粗剪等"每集一个文件"的结构。
+
+        fallback_ep：文件名本身没带集号时，用父目录的集号兜底
+        （真实结构：03 视频素材\第19集\粗剪\19.mp4，父目录才是集号）。"""
         result = {}
         try:
             items = os.listdir(folder)
@@ -288,23 +362,27 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
                 continue
             if item.startswith('.'):
                 continue
-            # 去掉扩展名后提取集号/剪辑师
             stem = os.path.splitext(item)[0]
-            ep = _extract_episode_number(stem)
+            ep = _extract_episode_number(stem, allow_bare=True)
+            if ep is None and fallback_ep is not None:
+                ep = fallback_ep
             if ep is not None and ep in my_ep_set and ep not in result:
                 editor = _extract_editor_from_dirname(stem) or my_editor
                 result[ep] = (full, editor)
         return result
 
     # 6. 拉取素材：对每个素材目录，找集号文件夹，扁平复制到 01原素材/第N集 剪辑师
+    #    跳过目录内嵌套的粗剪（粗剪归第 7 步），并跳过"除粗剪外别无内容"的目录
     for md in material_dirs:
-        ep_dirs = _find_episode_dirs(md)
+        ep_dirs = _find_episode_dirs(md, skip_rough=True)
         for ep in my_episodes:
             if ep not in ep_dirs:
                 continue
             src_dir, editor = ep_dirs[ep]
+            if not _has_files_except(src_dir, _is_roughcut_name):
+                continue
             dst_dir = os.path.join(material_target, "第%d集 %s" % (ep, editor))
-            n = _flatten_copy(src_dir, dst_dir, unc_map)
+            n = _flatten_copy(src_dir, dst_dir, unc_map, skip_dir=_is_roughcut_name)
             if n > 0:
                 stats["material_copied"] += n
                 stats["material_dirs"].append("第%d集 %s (%d 文件)" % (ep, editor, n))
@@ -312,23 +390,25 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
 
     # 7. 拉取粗剪（全局按集号去重，避免「03_粗剪」与「N-剪辑师/粗剪」子目录重复）
     # 支持两种结构：文件形式「N-剪辑师.mp4」、文件夹形式「N-剪辑师/xxx」
-    # 粗剪与素材放在一起，统一放入 01原素材/第N集 剪辑师/
-    rough_seen = set()  # 已处理的集号（全局去重）
+    # 真实结构：03 视频素材\第19集\粗剪\19.mp4（父目录才是集号）
+    # 粗剪统一放入 02粗剪/第N集 剪辑师/（与素材分开几方便分别导入 PR）
+    rough_seen = set()
     for rd in roughcut_dirs:
-        # 文件形式：粗剪目录下直接是「集号-剪辑师.mp4」
-        for ep, (src_file, editor) in _collect_episode_files(rd).items():
+        parent_ep = _extract_episode_number(os.path.basename(os.path.dirname(rd)), allow_bare=True)
+        # 文件形式
+        for ep, (src_file, editor) in _collect_episode_files(rd, parent_ep).items():
             if ep in rough_seen:
                 continue
             rough_seen.add(ep)
-            dst_dir = os.path.join(material_target, "第%d集 %s" % (ep, editor))
+            dst_dir = os.path.join(rough_target, "第%d集 %s" % (ep, editor)).strip()
             if _copy_file_robust(src_file, os.path.join(dst_dir, os.path.basename(src_file)), unc_map):
                 stats["roughcut_copied"] += 1
-        # 文件夹形式：粗剪目录下是「集号-剪辑师/xxx」
-        for ep, (src_dir, editor) in _find_episode_dirs(rd).items():
+        # 文件夹形式
+        for ep, (src_dir, editor) in _find_episode_dirs(rd, allow_bare=True).items():
             if ep in rough_seen:
                 continue
             rough_seen.add(ep)
-            dst_dir = os.path.join(material_target, "第%d集 %s" % (ep, editor))
+            dst_dir = os.path.join(rough_target, "第%d集 %s" % (ep, editor)).strip()
             n = _flatten_copy(src_dir, dst_dir, unc_map)
             if n > 0:
                 stats["roughcut_copied"] += n
@@ -368,13 +448,14 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
     if stats.get("pr_copied"):
         _pr_note = "\n工程文件：已复制 PR 模板并改名" + ("，已用 PR 打开" if stats.get("pr_opened") else "")
     msg = ("已创建本地项目：%s\n负责集数：%s\n"
-           "拉取素材：%s\n剧本 %d 个%s%s"
+           "拉取素材：%s\n粗剪 %d 个\n剧本 %d 个%s%s"
            % (local_proj_dir, ",".join(map(str, my_episodes)),
-              detail_lines, stats["script_copied"],
+              detail_lines, stats["roughcut_copied"], stats["script_copied"],
               "，模板已复制" if template_copied else "", _pr_note))
     stats["seq"] = seq
     stats["local_dir_name"] = local_dir_name
     stats["local_proj_dir"] = local_proj_dir
     stats["material_target"] = material_target
+    stats["rough_target"] = rough_target
     stats["prproj_path"] = prproj_dst
     return True, msg, stats
