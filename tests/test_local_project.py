@@ -169,7 +169,7 @@ class TestLocalProject:
         assert ok is True, msg
         # 只拉我负责的 2 个粗剪文件（第1、2集），不是全部 6 个
         assert stats["roughcut_copied"] == 2
-        # 粗剪文件在 01原素材/第N集 剪辑师/ 里
-        mat_dir = os.path.join(str(tmp_path), "local", "001-测试项目", "01原素材")
-        assert "1-张三.mp4" in os.listdir(os.path.join(mat_dir, "第1集 张三"))
-        assert "2-张三.mp4" in os.listdir(os.path.join(mat_dir, "第2集 张三"))
+        # 粗剪文件在 02粗剪/第N集 剪辑师/ 里（与素材 01原素材 分开，方便分别导入 PR）
+        rc_dir = os.path.join(str(tmp_path), "local", "001-测试项目", "02粗剪")
+        assert "1-张三.mp4" in os.listdir(os.path.join(rc_dir, "第1集 张三"))
+        assert "2-张三.mp4" in os.listdir(os.path.join(rc_dir, "第2集 张三"))

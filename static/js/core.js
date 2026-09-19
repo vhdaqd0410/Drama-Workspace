@@ -449,7 +449,11 @@ function jumpToProject(name){
   // 离开 QA 页时停止质检进度轮询，避免切走后仍在后台每 1.5s 打请求
   if(name!=='qa' && typeof qa2StopPolling==='function') qa2StopPolling();
   if(name==='fenji'){
-    loadFenjiProjects();
+    // 若正由 openFenjiFor/_openFenjiCore 指定项目打开，则跳过这里的无参加载，
+    // 避免并发把目标项目覆盖掉（_openFenjiCore 会自己 loadFenjiProjects(name)）
+    if(!window._fjPendingTarget){
+      loadFenjiProjects();
+    }
     if(typeof fjUpdateTplBadge==='function')fjUpdateTplBadge();
     if(typeof fjUpdateTargetBadge==='function')fjUpdateTargetBadge();
   }

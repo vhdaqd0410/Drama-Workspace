@@ -27,6 +27,16 @@ async function loadFenjiProjects(targetName){
   try{
     const data = await api('GET','/api/projects/light');
     fenjiLight = Array.isArray(data) ? data : (data.projects||[]);
+    // 目标项目可能不在 light 列表里（如已完成项目只在 group_completed 桶）：
+    // 动态补进去，否则下拉选不中、后续 readFromProject 会拿到空项目名
+    if(targetName && !fenjiLight.some(p => p && p.name === targetName)){
+      let _te = 0;
+      try{
+        const _pd = await api('GET','/api/project/'+encodeURIComponent(targetName)+'/episodes_plan');
+        _te = (_pd && _pd.total_episodes) || 0;
+      }catch(_){}
+      fenjiLight.unshift({ name: targetName, total_episodes: _te, custom_status: '', department: '' });
+    }
     if(fenjiLight.length > 0){
       const savedVal = targetName || $('fjProject').value;
       $('fjProject').innerHTML = '<option value="">— 选择项目 —</option>' +

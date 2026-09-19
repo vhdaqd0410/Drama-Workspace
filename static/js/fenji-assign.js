@@ -807,12 +807,18 @@ async function openFenjiFor(name){
 }
 // 实际进入分集页的核心逻辑（不带防抖，供调整模式直接调用）
 async function _openFenjiCore(name){
-  switchTab('fenji');
-  await loadFenjiProjects(name);
-  $('fjProject').value = name;
-  try{ await readFromProject(); }catch(_){ fjOnProjectChange(); }
-  fjUpdateTplBadge();
-  fjUpdateTargetBadge();
+  // 标记待打开目标：让 switchTab('fenji') 跳过它的无参加载，避免覆盖目标项目
+  window._fjPendingTarget = name || '';
+  try{
+    switchTab('fenji');
+    await loadFenjiProjects(name);
+    $('fjProject').value = name;
+    try{ await readFromProject(); }catch(_){ fjOnProjectChange(); }
+    fjUpdateTplBadge();
+    fjUpdateTargetBadge();
+  } finally {
+    window._fjPendingTarget = '';
+  }
 }
 
 // ===== 卡片「✏️ 调整分集」：进入分集页编辑该项目，完成后可替换并同步 =====
