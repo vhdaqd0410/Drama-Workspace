@@ -886,6 +886,17 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return jsonify({"ok": False, "message": "assign 为空"}), 400
         try:
             db.set_episode_plan(project_name, assign)
+            # 失效 episodes_status 短 TTL 缓存，确保替换后卡片立即读到新分集
+            try:
+                if sync_engine is not None:
+                    _c = getattr(sync_engine, "_episode_status_cache", None)
+                    if isinstance(_c, dict):
+                        _c.pop(project_name, None)
+                    _d = getattr(sync_engine, "_delivery_stats_cache", None)
+                    if isinstance(_d, dict):
+                        _d.pop(project_name, None)
+            except Exception:
+                pass
             # 问题6：同步分集时一并重算 editor_workload，保证所有统计口径跟随最新分集
             try:
                 from collections import Counter as _Counter

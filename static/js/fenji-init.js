@@ -55,6 +55,8 @@ async function loadQAProjects(){ await loadFenjiProjects(); }
 
 function fjOnProjectChange(){
   const name = $('fjProject').value;
+  // 手动切换项目 → 退出调整模式
+  try{ if(typeof fjAdjustMode !== 'undefined' && fjAdjustMode.active){ fjAdjustMode = { active:false, project:'' }; if(typeof fjRenderAdjustBar==='function') fjRenderAdjustBar(); } }catch(_){}
   if(!name){ fjClearAll(); return; }
   // Check reuse from history
   const hit = fjHist.find(h => h.path === name || h.name === name);

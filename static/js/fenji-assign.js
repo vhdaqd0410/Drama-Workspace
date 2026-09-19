@@ -803,12 +803,75 @@ async function openFenjiFor(name){
     return;
   }
   window._fjOpenLock = { key: _key, ts: _now };
+  await _openFenjiCore(name);
+}
+// 实际进入分集页的核心逻辑（不带防抖，供调整模式直接调用）
+async function _openFenjiCore(name){
   switchTab('fenji');
   await loadFenjiProjects(name);
   $('fjProject').value = name;
   try{ await readFromProject(); }catch(_){ fjOnProjectChange(); }
   fjUpdateTplBadge();
   fjUpdateTargetBadge();
+}
+
+// ===== 卡片「✏️ 调整分集」：进入分集页编辑该项目，完成后可替换并同步 =====
+let fjAdjustMode = { active: false, project: '' };
+async function adjustEpisodesFromCard(name){
+  if(!name) return;
+  // 绕过防抖，确保项目下拉与分集数据一定载入
+  await _openFenjiCore(name);
+  fjAdjustMode = { active: true, project: name };
+  fjRenderAdjustBar();
+  toast('✏️ 已进入调整模式，改完点「完成调整」替换并同步', 'info');
+}
+function fjRenderAdjustBar(){
+  const bar = $('fjAdjustBar');
+  if(!bar) return;
+  if(fjAdjustMode.active){
+    bar.style.display = 'flex';
+    const el = $('fjAdjustProj');
+    if(el) el.textContent = fjAdjustMode.project;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+function fjCancelAdjust(){
+  fjAdjustMode = { active: false, project: '' };
+  fjRenderAdjustBar();
+  toast('已退出调整模式', 'info');
+}
+// 完成调整：用当前分集替换该项目分集，并同步到工作台 + 刷新卡片面板
+async function fjFinishAdjust(){
+  const project = fjAdjustMode.project || $('fjProject').value;
+  if(!project){ toast('未指定项目','warning'); return; }
+  const total = parseInt($('fjTotal').value) || 0;
+  const assign = buildAssignObj();
+  if(Object.keys(assign).length === 0){ toast('当前没有分集数据可替换','warning'); return; }
+  if(!confirm('确认用当前分集替换「'+project+'」的分集，并同步到工作台？')) return;
+  try{
+    toast('⏳ 正在替换并同步...', 'info');
+    // 1) 覆盖式替换项目分集（import_episodes 为整体覆盖 episode_plan）
+    await api('POST','/api/bulk/import_episodes',{project_name:project,total_episodes:total,assign});
+    // 2) 清缓存 + 刷新卡片面板（分集网格与缺集汇总）
+    try{ if(typeof _episodeStatusCache === 'object' && _episodeStatusCache) delete _episodeStatusCache[project]; }catch(_){}
+    if(typeof refreshProjectStatus === 'function'){ try{ await refreshProjectStatus(project, null); }catch(_){} }
+    // 2.5) 刷新已展开的卡片分集面板
+    try{ if(typeof refreshEpisodesPanel === 'function') refreshEpisodesPanel(project); }catch(_){}
+    // 3) 刷新分集页历史
+    try{ fjMaybeSaveHist(); }catch(_){}
+    await loadProjects();
+    toast('✅ 已替换并同步到工作台', 'success');
+    fjAdjustMode = { active: false, project: '' };
+    fjRenderAdjustBar();
+    // 4) 返回项目看板并定位卡片
+    try{
+      if(typeof jumpToProject === 'function') jumpToProject(project);
+      else switchTab('dashboard');
+    }catch(_){ switchTab('dashboard'); }
+  }catch(e){
+    toast('替换/同步失败: '+e.message, 'error');
+  }
 }
 
 // ===== 自动获取总集数：从素材文件夹推断并填入 =====

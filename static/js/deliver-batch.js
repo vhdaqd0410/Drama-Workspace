@@ -29,6 +29,20 @@ function toggleEpisodesPanel(projectName, btn){
   }
 }
 
+// === 刷新已展开的分集面板（替换分集后调用）===
+function refreshEpisodesPanel(projectName){
+  const id = 'ep-panel-' + projectName.replace(/[^a-zA-Z0-9_]/g,'_');
+  const panel = document.getElementById(id);
+  if (!panel || !panel.classList.contains('open')) return;
+  panel.innerHTML = '<div style="text-align:center;padding:20px;color:#86868b;font-size:12px">加载分集数据中...</div>';
+  fetchEpisodeStatus(projectName).then(function(data){
+    if (data && data.total > 0) panel.innerHTML = renderEpisodesGrid(projectName, data);
+    else panel.innerHTML = '<div style="text-align:center;padding:20px;color:#86868b;font-size:12px">暂无分集数据（未设置总集数）</div>';
+  }).catch(function(){
+    panel.innerHTML = '<div style="text-align:center;padding:20px;color:#ff3b30;font-size:12px">加载失败</div>';
+  });
+}
+
 // === 渲染分集 grid（常驻展开用）===
 
 // === 粘贴分集文本 → 解析为 assign ===
@@ -204,6 +218,7 @@ function renderEpisodesGrid(projectName, data){
   const header = `<div style="font-size:11px;color:#86868b;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
     <span>📺 ${total} 集 · 已输出 <b style="color:#34c759">${present.length}</b> · 缺 <b style="color:#ff3b30">${missingCount}</b></span>
     <span style="display:flex;gap:6px;align-items:center">
+      <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#fff7e6;border:1px solid #d97706;color:#b45309;border-radius:4px;cursor:pointer" onclick="adjustEpisodesFromCard('${jsq(projectName)}')" title="进入分集页编辑该项目分集，完成后可替换并同步到工作台">✏️ 调整分集</button>
       <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#f0f7ff;border:1px solid #007aff;color:#007aff;border-radius:4px;cursor:pointer" onclick="openPasteEpisodesModal('${jsq(projectName)}', ${total})">📋 粘贴分集</button>
       <span style="cursor:pointer;color:#007aff" onclick="refreshProjectStatus('${jsq(projectName)}', null)">🔄 刷新进度</span>
     </span>

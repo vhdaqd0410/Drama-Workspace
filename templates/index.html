@@ -1207,6 +1207,13 @@ a{color:var(--blue);text-decoration:none}
       </div>
 
       <div class="fj-section-title">🎯 集数分配</div>
+      <div id="fjAdjustBar" style="display:none;margin:8px 0 10px;padding:10px 14px;background:linear-gradient(135deg,#fff7e6,#ffeccc);border:1px solid #f0b429;border-radius:8px;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:13px;color:#8a5300">✏️ 正在调整 <b id="fjAdjustProj"></b> 的分集。改完后点右侧按钮替换并同步。</span>
+        <span style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="fjCancelAdjust()">取消调整</button>
+          <button class="btn btn-sm" style="background:#d97706;color:#fff;font-weight:bold" onclick="fjFinishAdjust()">✅ 完成调整（替换并同步到工作台）</button>
+        </span>
+      </div>
       <div class="fj-table-head"><div style="width:40px">#</div><div>人员</div><div>集数范围</div><div style="width:90px">长度(集)</div><div style="width:140px;flex:0 0 140px">操作</div></div>
       <div id="fjTableEmpty" class="fj-empty">还没有分配任务。先选择剪辑师，再点「⚡ 一键分配」</div>
       <div id="fjAllocBody"></div>
@@ -1779,13 +1786,13 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/project.js?v=20260815r"></script>
 <script src="/static/js/tabs.js?v=20260820a"></script>
 <script src="/static/js/episode.js?v=20260828del"></script>
-<script src="/static/js/fenji-init.js?v=20260815n"></script>
-<script src="/static/js/fenji-assign.js?v=20260818a"></script>
+<script src="/static/js/fenji-init.js?v=20260905adj"></script>
+<script src="/static/js/fenji-assign.js?v=20260905adj"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
 <script src="/static/js/team.js?v=20260818a"></script>
 <script src="/static/js/deliverables.js?v=20260820b"></script>
 <script src="/static/js/deliver-events.js?v=20260818a"></script>
-<script src="/static/js/deliver-batch.js?v=20260815m"></script>
+<script src="/static/js/deliver-batch.js?v=20260905adj"></script>
 <script src="/static/js/preview.js?v=20260815m"></script>
 <script src="/static/js/nameplate.js?v=20260816"></script>
 <script src="/static/js/command-palette.js?v=20260816"></script>
