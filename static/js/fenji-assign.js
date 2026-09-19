@@ -6,33 +6,12 @@ function fjRenderChips(){
   if(fjPersons.length === 0){
     wrap.innerHTML = '<div style="color:var(--text-sec);font-size:12px">暂无人员，在下方添加</div>';
   } else {
-    wrap.innerHTML = fjPersons.map((p, i) => {
+    wrap.innerHTML = fjPersons.map(p => {
       const sel = fjSelected.includes(p) ? 'selected' : '';
-      const upDis = i === 0 ? 'disabled' : '';
-      const dnDis = i === fjPersons.length - 1 ? 'disabled' : '';
-      return `<div class="fj-chip ${sel}" onclick="fjToggle('${jsq(p)}')" title="${p}">
-        <span class="fj-chip-name">${p}</span>
-        <span class="fj-chip-move">
-          <button type="button" ${upDis} onclick="event.stopPropagation();fjMovePerson('${jsq(p)}',-1)" title="上移">↑</button>
-          <button type="button" ${dnDis} onclick="event.stopPropagation();fjMovePerson('${jsq(p)}',1)" title="下移">↓</button>
-        </span>
-      </div>`;
+      return `<div class="fj-chip ${sel}" onclick="fjToggle('${jsq(p)}')" title="${p}">${p}</div>`;
     }).join('');
   }
   $('fjSelCount').textContent = `(已选 ${fjSelected.length} 人)`;
-}
-// 人员上下移动：调整分配顺序（一键分配按 chip 顺序）
-function fjMovePerson(name, dir){
-  const i = fjPersons.indexOf(name);
-  if(i < 0) return;
-  const j = i + dir;
-  if(j < 0 || j >= fjPersons.length) return;
-  const tmp = fjPersons[i]; fjPersons[i] = fjPersons[j]; fjPersons[j] = tmp;
-  fjSave(FJ_KEY_PERSONS, fjPersons);
-  fjRenderChips();
-  fjRenderHeadTail();
-  fjRenderTable();
-  fjSaveSession();
 }
 function fjToggle(p){
   const i = fjSelected.indexOf(p);
@@ -83,9 +62,9 @@ function fjApplyPersonTemplate(){
   if(!sel || !sel.value){ toast('请选择模板','warning'); return; }
   const persons = fjPersonTemplates[sel.value] || [];
   if(!persons.length){ toast('模板为空','warning'); return; }
-  // 应用模板：把人员加入 fjPersons，并全选
+  // 应用模板：把人员加入 fjPersons，并按模板顺序勾选
   persons.forEach(p => { if(!fjPersons.includes(p)) fjPersons.push(p); });
-  fjSelected = fjPersons.filter(p => persons.includes(p));
+  fjSelected = persons.filter(p => fjPersons.includes(p));
   fjSave(FJ_KEY_PERSONS, fjPersons);
   fjRenderChips(); fjRenderHeadTail(); fjRenderTable(); fjUpdateValidation(); fjSaveSession();
   toast(`👥 已应用人员模板「${sel.value}」(${fjSelected.length}人)`,'success');
@@ -133,7 +112,7 @@ function fjRenderHeadTail(){
   const sel = $('fjHeadTailPerson');
   if(sel){
     const cur = sel.value;
-    sel.innerHTML = '<option value="">选一位...</option>' + fjPersons.filter(p => fjSelected.includes(p)).map(p => `<option value="${p}">${p}</option>`).join('');
+    sel.innerHTML = '<option value="">选一位...</option>' + fjSelected.map(p => `<option value="${p}">${p}</option>`).join('');
     if(cur) sel.value = cur;
   }
 }
@@ -150,8 +129,8 @@ function fjAssign(){
 
   if(htOn && !htPerson){ toast('请选择头尾分的剪辑师','warning'); return; }
 
-  // 按 chip 顺序（fjPersons）分配，受人员上下移动控制
-  let persons = fjPersons.filter(p => fjSelected.includes(p));
+  // 按勾选顺序分配（fjSelected 顺序）；顺序可在下方表格用 ↑↓ 调整
+  let persons = fjSelected.slice();
   let startEp = 1, endEp = total;
 
   if(htOn){
@@ -189,10 +168,8 @@ function fjAssign(){
 function fjRenderTable(){
   const body = $('fjAllocBody');
   const empty = $('fjTableEmpty');
-  // 按 chip 顺序显示（与人员上下移动一致）
-  const _inRanges = Object.keys(fjRanges).filter(k => fjSelected.includes(k));
-  const names = fjPersons.filter(p => _inRanges.includes(p))
-    .concat(_inRanges.filter(p => !fjPersons.includes(p)));
+  // 按勾选顺序显示（= 分配顺序，可用行内 ↑↓ 调整）
+  const names = fjOrderedPersons();
   if(names.length === 0){
     body.innerHTML = '';
     empty.style.display = '';
@@ -205,6 +182,8 @@ function fjRenderTable(){
     const rng = fjRanges[name] || '';
     const len = fjRangeToCount(rng);
     const escaped = jsq(name);
+    const upDis = i === 0 ? 'disabled' : '';
+    const dnDis = i === names.length - 1 ? 'disabled' : '';
     return `<div class="fj-row">
       <div class="idx">${i+1}</div>
       <div>${name}</div>
@@ -215,6 +194,8 @@ function fjRenderTable(){
              oninput="fjOnLenLive('${escaped}', this.value)"
              onblur="fjOnLenBlur('${escaped}')">
       <div class="row-actions">
+        <button ${upDis} onclick="fjMoveRow('${escaped}',-1)" title="上移（与上一位交换分集）">↑</button>
+        <button ${dnDis} onclick="fjMoveRow('${escaped}',1)" title="下移（与下一位交换分集）">↓</button>
         <button onclick="fjOpenSegModal('${escaped}')" title="多段编辑">⛓</button>
         <button onclick="fjAutoAlignFrom('${escaped}')" title="从此人起自动连续对齐">🔗</button>
         <button class="danger" onclick="fjRemovePerson('${escaped}')">✕</button>
@@ -362,12 +343,32 @@ function fjGetStartEpisode(rangeStr){
   const eps = fjParseRange(rangeStr).sort((a,b)=>a-b);
   return eps[0] || 1;
 }
-// 对齐顺序 = chip 顺序（人员上下移动控制），chip 外的已分配人员追加在后。
-// 不再按起始集号暗中重排，避免用户手动调整的顺序被覆盖。
+// 分配/显示顺序 = 勾选顺序（fjSelected）。顺序可在下方表格用 ↑↓ 调整。
+// 未在勾选列表里的已分配人员追加在后，避免丢人。
 function fjOrderedPersons(){
   const inRanges = Object.keys(fjRanges);
-  const ordered = fjPersons.filter(p => inRanges.includes(p));
-  return ordered.concat(inRanges.filter(p => !fjPersons.includes(p)));
+  const ordered = fjSelected.filter(p => inRanges.includes(p));
+  return ordered.concat(inRanges.filter(p => !fjSelected.includes(p)));
+}
+// 表格行上下移动：与相邻人员交换分集（位置+集数一起换），直观调整分配顺序
+function fjMoveRow(person, dir){
+  const ordered = fjOrderedPersons();
+  const i = ordered.indexOf(person);
+  if(i < 0) return;
+  const j = i + dir;
+  if(j < 0 || j >= ordered.length) return;
+  const other = ordered[j];
+  // 1) 交换两人的分集
+  const tmp = fjRanges[person];
+  fjRanges[person] = fjRanges[other];
+  fjRanges[other] = tmp;
+  // 2) 同步交换勾选顺序，保证表格顺序与集数一致
+  const ia = fjSelected.indexOf(person), ib = fjSelected.indexOf(other);
+  if(ia >= 0 && ib >= 0){ fjSelected[ia] = other; fjSelected[ib] = person; }
+  fjRenderChips();
+  fjRenderTable();
+  fjUpdateValidation();
+  fjSaveSession();
 }
 function fjParseRange(s){
   s = (s||'').trim(); if(!s) return [];
@@ -612,9 +613,11 @@ function fjRestoreHistEntry(h){
   // Extract persons & ranges from assign
   const ranges = h.assign || {};
   fjPersons = Object.keys(ranges);
-  fjSelected = fjPersons.slice();
   fjRanges = {};
   Object.entries(ranges).forEach(([p, r]) => fjRanges[p] = r);
+  // 勾选顺序按起始集号排序，表格/分配顺序直观
+  fjSelected = Object.keys(fjRanges).sort(
+    (a, b) => fjGetStartEpisode(fjRanges[a]) - fjGetStartEpisode(fjRanges[b]));
   fjSave(FJ_KEY_PERSONS, fjPersons);
   const projSel = $('fjProject');
   if(projSel && h.path){
@@ -760,7 +763,9 @@ async function readFromProject(){
       parts.push(s===prev?`${s}`:`${s}-${prev}`);
       fjRanges[name] = parts.join(',');
     });
-    fjSelected = Object.keys(fjRanges);
+    // 勾选顺序按起始集号排序，表格/分配顺序直观
+    fjSelected = Object.keys(fjRanges).sort(
+      (a, b) => fjGetStartEpisode(fjRanges[a]) - fjGetStartEpisode(fjRanges[b]));
     fjSave(FJ_KEY_PERSONS, fjPersons);
     if(data.total_episodes)$('fjTotal').value=data.total_episodes;
     fjRenderChips(); fjRenderHeadTail(); fjRenderTable(); fjUpdateValidation();
