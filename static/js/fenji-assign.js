@@ -100,8 +100,14 @@ function fjAddPerson(){
   fjPersons.push(v);
   fjSave(FJ_KEY_PERSONS, fjPersons);
   input.value = '';
+  // 新增人员默认自动勾选，直接进入分配顺序，避免"加了却没反应"
+  if(!fjSelected.includes(v)) fjSelected.push(v);
   fjRenderChips();
   fjRenderHeadTail();
+  fjRenderTable();
+  fjUpdateValidation();
+  fjSaveSession();
+  toast('已添加并选中：'+v, 'success');
 }
 
 // ===== Head/Tail =====
@@ -168,8 +174,9 @@ function fjAssign(){
 function fjRenderTable(){
   const body = $('fjAllocBody');
   const empty = $('fjTableEmpty');
-  // 按勾选顺序显示（= 分配顺序，可用行内 ↑↓ 调整）
-  const names = fjOrderedPersons();
+  // 表格显示列表 = 已勾选的人（按勾选顺序，含尚未分配集数的）+ 已分配但未勾选的人
+  // 注意：fjOrderedPersons 只含已分配的人（供对齐/导出用），表格用 fjDisplayList
+  const names = fjDisplayList();
   if(names.length === 0){
     body.innerHTML = '';
     empty.style.display = '';
@@ -343,28 +350,38 @@ function fjGetStartEpisode(rangeStr){
   const eps = fjParseRange(rangeStr).sort((a,b)=>a-b);
   return eps[0] || 1;
 }
-// 分配/显示顺序 = 勾选顺序（fjSelected）。顺序可在下方表格用 ↑↓ 调整。
-// 未在勾选列表里的已分配人员追加在后，避免丢人。
+// 分配/对齐顺序 = 勾选顺序（fjSelected）。供对齐/导出用（只含已分配的人）。
 function fjOrderedPersons(){
   const inRanges = Object.keys(fjRanges);
   const ordered = fjSelected.filter(p => inRanges.includes(p));
   return ordered.concat(inRanges.filter(p => !fjSelected.includes(p)));
 }
-// 表格行上下移动：与相邻人员交换分集（位置+集数一起换），直观调整分配顺序
+// 表格显示顺序：已勾选的人（含尚未分配集数的，按勾选顺序）+ 已分配但未勾选的人
+function fjDisplayList(){
+  const sel = fjSelected.slice();
+  const extra = Object.keys(fjRanges).filter(p => !sel.includes(p));
+  return sel.concat(extra);
+}
+// 表格行上下移动：与相邻人员交换位置（有分集则一起交换），直观调整分配顺序
 function fjMoveRow(person, dir){
-  const ordered = fjOrderedPersons();
-  const i = ordered.indexOf(person);
+  const list = fjDisplayList();
+  const i = list.indexOf(person);
   if(i < 0) return;
   const j = i + dir;
-  if(j < 0 || j >= ordered.length) return;
-  const other = ordered[j];
-  // 1) 交换两人的分集
+  if(j < 0 || j >= list.length) return;
+  const other = list[j];
+  // 1) 交换两人的分集（任一方可能尚未分配）
   const tmp = fjRanges[person];
-  fjRanges[person] = fjRanges[other];
-  fjRanges[other] = tmp;
-  // 2) 同步交换勾选顺序，保证表格顺序与集数一致
-  const ia = fjSelected.indexOf(person), ib = fjSelected.indexOf(other);
-  if(ia >= 0 && ib >= 0){ fjSelected[ia] = other; fjSelected[ib] = person; }
+  if(Object.prototype.hasOwnProperty.call(fjRanges, other)) fjRanges[person] = fjRanges[other];
+  else delete fjRanges[person];
+  if(tmp !== undefined) fjRanges[other] = tmp;
+  else delete fjRanges[other];
+  // 2) 交换显示顺序，并让显示顺序 = 勾选顺序
+  list[i] = other; list[j] = person;
+  const listSet = new Set(list);
+  const rest = fjSelected.filter(p => !listSet.has(p));
+  fjSelected = list.concat(rest);
+  fjSave(FJ_KEY_PERSONS, fjPersons);
   fjRenderChips();
   fjRenderTable();
   fjUpdateValidation();
@@ -754,7 +771,9 @@ async function readFromProject(){
     const byEditor={};
     Object.entries(plan).forEach(([ep,name])=>{if(!name)return;if(!byEditor[name])byEditor[name]=[];byEditor[name].push(parseInt(ep))});
     fjRanges = {};
-    fjPersons = (window._teamNames && window._teamNames.length ? window._teamNames.slice() : []);
+    // 合并团队成员到现有人员列表（不直接覆盖，避免丢掉用户手动添加的人员）
+    const _team = (window._teamNames && window._teamNames.length ? window._teamNames : []);
+    _team.forEach(function(n){ if(n && !fjPersons.includes(n)) fjPersons.push(n); });
     Object.entries(byEditor).forEach(([name,eps]) => {
       if(!fjPersons.includes(name)) fjPersons.push(name);
       eps.sort((a,b)=>a-b);
