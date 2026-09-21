@@ -99,75 +99,81 @@ async function deliverFolders(){
     return;
   }
 
-  // 轮询进度（和 deliverBatch 类似，读 sync_progress 字段）
+  // 串行递归轮询（避免 setInterval+async 并发：回传时 /api/projects 变慢会堆积回调，
+  // 完成瞬间多个在途回调同时命中 -> 重复弹窗 + 卡顿）
   var pollCount = 0;
   var maxPolls = 300; // 最多等 10 分钟
   var startTs = Date.now();
-  var poll = _trackDelivPoll('folder', setInterval(async function(){
-    pollCount++;
-    if(pollCount > maxPolls){
-      _clearDelivPoll('folder');
-      var barEl2 = document.getElementById(progBarId);
-      if(barEl2){ barEl2.querySelector('.deliv-folder-text').textContent = '⏱ 超时'; }
-      return;
-    }
-    try{
-      var d = await api('GET', '/api/projects');
-      var flat = (d.production || []).concat(d.group_all || []);
-      var target = flat.find(function(x){ return x.name === name; });
-      if(!target) return;
-
-      var sp = target.sync_progress || '';
-      var pct = 0;
-      var label = sp;
-
-      // 解析 "回传 X/Y 文件" 格式
-      var m = sp.match(/回传\s*(\d+)\s*\/\s*(\d+)/);
-      if(m){
-        var cur = parseInt(m[1]);
-        var tot = parseInt(m[2]);
-        pct = tot > 0 ? Math.round(cur * 100 / tot) : 0;
-        label = cur + ' / ' + tot + ' 文件';
-      }else if(sp.indexOf('正在复制') >= 0){
-        // 整目录复制（系统进度对话框已在显示详细进度），显示 0~100% 的平滑伪进度
-        var elapsedSec = (Date.now() - startTs) / 1000;
-        // 假设最多 60 分钟，log 增长曲线
-        pct = Math.min(95, Math.round(3 + 95 * (1 - Math.exp(-elapsedSec / 240))));
-        label = '📋 正在全量复制（请查看系统复制进度窗口）';
-      }
-
-      // 更新进度条 UI
-      var barFill = document.querySelector('#' + progBarId + ' .deliv-folder-fill');
-      var barText = document.querySelector('#' + progBarId + ' .deliv-folder-text');
-      if(barFill) barFill.style.width = Math.max(2, pct) + '%';
-      if(barText) barText.textContent = label || (pct + '%');
-
-      // 判断完成
-      var st = target.delivery_status || target.sync_status || '';
-      if(sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0){
+  var _folderDone = false;
+  var _folderTimer = null;
+  _trackDelivPoll('folder', function(){ _folderDone = true; if(_folderTimer){ clearTimeout(_folderTimer); _folderTimer = null; } });
+  var _folderPollOnce = function(){
+    if(_folderDone) return;
+    _folderTimer = setTimeout(async function(){
+      if(_folderDone) return;
+      pollCount++;
+      if(pollCount > maxPolls){
         _clearDelivPoll('folder');
-        var barEl3 = document.getElementById(progBarId);
-        if(barEl3){
-          barEl3.style.background = '#e2efda';
-          if(barFill) barFill.style.width = '100%';
-          if(barText){ barText.style.color = '#006100'; barText.textContent = '✅ 回传完成'; }
-        }
-        setTimeout(function(){
-          toast('✅ 文件夹回传完成', 'success');
-          refreshDeliverablesList();
-          if(typeof renderDashboard === 'function') renderDashboard();
-          _showDeliverDoneModal(name);
-        }, 500);
-      } else if(sp.indexOf('失败') >= 0 || sp.indexOf('超时') >= 0 || sp.indexOf('异常') >= 0){
-        _clearDelivPoll('folder');
-        var barEl4 = document.getElementById(progBarId);
-        if(barEl4){
-          barEl4.style.background = '#fde2e2';
-          if(barText){ barText.style.color = '#c5221f'; barText.textContent = '❌ ' + (sp || '回传失败'); }
-        }
+        var barEl2 = document.getElementById(progBarId);
+        if(barEl2){ barEl2.querySelector('.deliv-folder-text').textContent = '⏱ 超时'; }
+        return;
       }
-    }catch(err){}
-  }, 2000));
+      var _keepGoing = true;
+      try{
+        var d = await api('GET', '/api/projects');
+        if(_folderDone) return;
+        var flat = (d.production || []).concat(d.group_all || []);
+        var target = flat.find(function(x){ return x.name === name; });
+        if(target){
+          var sp = target.sync_progress || '';
+          var pct = 0;
+          var label = sp;
+          var m = sp.match(/回传\s*(\d+)\s*\/\s*(\d+)/);
+          if(m){
+            var cur = parseInt(m[1]);
+            var tot = parseInt(m[2]);
+            pct = tot > 0 ? Math.round(cur * 100 / tot) : 0;
+            label = cur + ' / ' + tot + ' 文件';
+          }else if(sp.indexOf('正在复制') >= 0){
+            var elapsedSec = (Date.now() - startTs) / 1000;
+            pct = Math.min(95, Math.round(3 + 95 * (1 - Math.exp(-elapsedSec / 240))));
+            label = '📋 正在全量复制（请查看系统复制进度窗口）';
+          }
+          var barFill = document.querySelector('#' + progBarId + ' .deliv-folder-fill');
+          var barText = document.querySelector('#' + progBarId + ' .deliv-folder-text');
+          if(barFill) barFill.style.width = Math.max(2, pct) + '%';
+          if(barText) barText.textContent = label || (pct + '%');
+
+          if(sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0){
+            _keepGoing = false;
+            _clearDelivPoll('folder');
+            var barEl3 = document.getElementById(progBarId);
+            if(barEl3){
+              barEl3.style.background = '#e2efda';
+              if(barFill) barFill.style.width = '100%';
+              if(barText){ barText.style.color = '#006100'; barText.textContent = '✅ 回传完成'; }
+            }
+            setTimeout(function(){
+              toast('✅ 文件夹回传完成', 'success');
+              refreshDeliverablesList();
+              if(typeof renderDashboard === 'function') renderDashboard();
+              _showDeliverDoneModal(name);
+            }, 500);
+          } else if(sp.indexOf('失败') >= 0 || sp.indexOf('超时') >= 0 || sp.indexOf('异常') >= 0){
+            _keepGoing = false;
+            _clearDelivPoll('folder');
+            var barEl4 = document.getElementById(progBarId);
+            if(barEl4){
+              barEl4.style.background = '#fde2e2';
+              if(barText){ barText.style.color = '#c5221f'; barText.textContent = '❌ ' + (sp || '回传失败'); }
+            }
+          }
+        }
+      }catch(err){}
+      if(_keepGoing && !_folderDone) _folderPollOnce();
+    }, 2000);
+  };
+  _folderPollOnce();
 
   renderDeliverablesModal();
 }
@@ -251,67 +257,74 @@ async function deliverBatch(){
     _deliverablesState.selected = {};
     _deliverablesState.selectedFolders = {};
 
-    // 开始轮询进度（参考 syncMaterial 的 setInterval 写法）
+    // 串行递归轮询（避免 setInterval+async 并发导致重复弹窗 + 卡顿）
     var pollCount = 0;
     var maxPolls = 180; // 最多等 6 分钟
-    var poll = _trackDelivPoll('batch', setInterval(async function(){
-      pollCount++;
-      if(pollCount > maxPolls){ _clearDelivPoll('batch'); return; }
-      try{
-        var d = await api('GET', '/api/projects');
-        var flat = (d.production || []).concat(d.group_all || []);
-        var target = flat.find(function(x){ return x.name === name; });
-        if(!target) return;
+    var _batchDone = false;
+    var _batchTimer = null;
+    _trackDelivPoll('batch', function(){ _batchDone = true; if(_batchTimer){ clearTimeout(_batchTimer); _batchTimer = null; } });
+    var _batchPollOnce = function(){
+      if(_batchDone) return;
+      _batchTimer = setTimeout(async function(){
+        if(_batchDone) return;
+        pollCount++;
+        if(pollCount > maxPolls){ _clearDelivPoll('batch'); return; }
+        var _keepGoing = true;
+        try{
+          var d = await api('GET', '/api/projects');
+          if(_batchDone) return;
+          var flat = (d.production || []).concat(d.group_all || []);
+          var target = flat.find(function(x){ return x.name === name; });
+          if(target){
+            var sp = target.sync_progress || '';
+            var label = sp;
+            var pct = 0;
+            var m = sp.match(/回传\s*(\d+)\s*\/\s*(\d+)/);
+            if(m){
+              var cur = parseInt(m[1]);
+              var tot = parseInt(m[2]);
+              pct = tot > 0 ? Math.round(cur * 100 / tot) : 0;
+              label = cur + ' / ' + tot;
+            } else {
+              var pctM = sp.match(/^(\d+)%\s*(.*)$/);
+              if(pctM){ pct = parseInt(pctM[1]); label = pctM[2] || sp; }
+            }
+            var barFill = document.querySelector('#' + progBarId + ' .deliv-batch-fill');
+            var barText = document.querySelector('#' + progBarId + ' .deliv-batch-text');
+            if(barFill) barFill.style.width = pct + '%';
+            if(barText) barText.textContent = label || (pct + '%');
 
-        // 后端写的是 "回传 X/Y" 格式
-        var sp = target.sync_progress || '';
-        var label = sp;
-        var pct = 0;
-        var m = sp.match(/回传\s*(\d+)\s*\/\s*(\d+)/);
-        if(m){
-          var cur = parseInt(m[1]);
-          var tot = parseInt(m[2]);
-          pct = tot > 0 ? Math.round(cur * 100 / tot) : 0;
-          label = cur + ' / ' + tot;
-        } else {
-          var pctM = sp.match(/^(\d+)%\s*(.*)$/);
-          if(pctM){ pct = parseInt(pctM[1]); label = pctM[2] || sp; }
-        }
-
-        // 更新进度条 UI
-        var barFill = document.querySelector('#' + progBarId + ' .deliv-batch-fill');
-        var barText = document.querySelector('#' + progBarId + ' .deliv-batch-text');
-        if(barFill) barFill.style.width = pct + '%';
-        if(barText) barText.textContent = label || (pct + '%');
-
-        // 判断完成（后端完成时 sync_progress = "批量回传完成（N 个文件）"）
-        var st = target.delivery_status || target.sync_status || '';
-        var isDone = sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0
-          || (st === 'delivered' && sp.indexOf('回传') !== 0);
-        if(isDone){
-          _clearDelivPoll('batch');
-          var bar2 = document.getElementById(progBarId);
-          if(bar2) bar2.style.background = '#e2efda';
-          var txt2 = document.querySelector('#' + progBarId + ' .deliv-batch-text');
-          if(txt2){ txt2.style.color = '#006100'; txt2.textContent = '✅ ' + (sp || '回传完成'); }
-          setTimeout(function(){
-            toast('✅ 批量回传完成', 'success');
-            refreshDeliverablesList();
-            _showDeliverDoneModal(name);
-            // 回传完成后推进状态（成片回传→审核中，修改回传→下一轮审核）
-            try{
-              var mode2 = _deliverablesState.mode || 'editing';
-              if(mode2 === 'revising'){
-                if(typeof submitRevisionSetStatus === 'function') submitRevisionSetStatus(name);
-              } else {
-                api('POST','/api/project/'+encodeURIComponent(name)+'/custom_status',{custom_status:'审核中'})
-                  .then(function(){ if(typeof loadProjects==='function') loadProjects(); });
-              }
-            }catch(_){}
-          }, 500);
-        }
-      }catch(err){}
-    }, 2000));
+            var st = target.delivery_status || target.sync_status || '';
+            var isDone = sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0
+              || (st === 'delivered' && sp.indexOf('回传') !== 0);
+            if(isDone){
+              _keepGoing = false;
+              _clearDelivPoll('batch');
+              var bar2 = document.getElementById(progBarId);
+              if(bar2) bar2.style.background = '#e2efda';
+              var txt2 = document.querySelector('#' + progBarId + ' .deliv-batch-text');
+              if(txt2){ txt2.style.color = '#006100'; txt2.textContent = '✅ ' + (sp || '回传完成'); }
+              setTimeout(function(){
+                toast('✅ 批量回传完成', 'success');
+                refreshDeliverablesList();
+                _showDeliverDoneModal(name);
+                try{
+                  var mode2 = _deliverablesState.mode || 'editing';
+                  if(mode2 === 'revising'){
+                    if(typeof submitRevisionSetStatus === 'function') submitRevisionSetStatus(name);
+                  } else {
+                    api('POST','/api/project/'+encodeURIComponent(name)+'/custom_status',{custom_status:'审核中'})
+                      .then(function(){ if(typeof loadProjects==='function') loadProjects(); });
+                  }
+                }catch(_){}
+              }, 500);
+            }
+          }
+        }catch(err){}
+        if(_keepGoing && !_batchDone) _batchPollOnce();
+      }, 2000);
+    };
+    _batchPollOnce();
   }catch(e){
     toast('❌ 批量回传失败: ' + e.message, 'error');
     var bar = document.getElementById(progBarId);
@@ -323,6 +336,17 @@ async function deliverBatch(){
 
 // ===== 回传完成弹窗：打开回传目录 + 复制回传目录路径 =====
 async function _showDeliverDoneModal(projectName){
+  // 去重保护：同一项目短时间内只弹一次（防止轮询/SSE 多路径重复触发）
+  window._deliverDoneShown = window._deliverDoneShown || {};
+  var _prev = window._deliverDoneShown[projectName];
+  if(_prev && (Date.now() - _prev) < 8000){
+    return;
+  }
+  window._deliverDoneShown[projectName] = Date.now();
+  // 已有该项目的完成弹窗未关闭 → 不重复创建
+  var _exist = document.querySelector('.modal-overlay[data-deliver-done="' + (window.CSS && CSS.escape ? CSS.escape(projectName) : projectName) + '"]');
+  if(_exist) return;
+
   // 获取目标目录（制作部上映单集版）
   let dst = '';
   try{
@@ -332,6 +356,7 @@ async function _showDeliverDoneModal(projectName){
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay active';
+  overlay.setAttribute('data-deliver-done', projectName);
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:999;display:flex;align-items:center;justify-content:center';
   const dstHtml = dst
     ? `<div style="font-size:12px;color:#86868b;margin:8px 0 2px">回传目录</div>

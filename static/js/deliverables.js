@@ -13,22 +13,28 @@ var _deliverablesState = {
     _polls: {}   // 活跃的进度轮询句柄（modal 关闭时统一清理，防止后台持续请求）
 };
 
-// 登记一个进度轮询，返回包装后的句柄；modal 关闭时会自动 clearInterval
-function _trackDelivPoll(key, intervalId){
+// 登记一个进度轮询句柄；modal 关闭时会自动清理。
+// 句柄可以是：setInterval 的 id（数字）或一个取消函数（串行递归轮询用）。
+function _trackDelivPoll(key, handle){
     _deliverablesState._polls = _deliverablesState._polls || {};
-    _deliverablesState._polls[key] = intervalId;
-    return intervalId;
+    _deliverablesState._polls[key] = handle;
+    return handle;
+}
+function _cancelDelivPoll(handle){
+    if(handle == null) return;
+    if(typeof handle === 'function'){ try{ handle(); }catch(_){} }
+    else { try{ clearInterval(handle); }catch(_){} }
 }
 function _clearDelivPoll(key){
     var p = _deliverablesState && _deliverablesState._polls && _deliverablesState._polls[key];
-    if(p){ clearInterval(p); delete _deliverablesState._polls[key]; }
+    if(p != null){ _cancelDelivPoll(p); delete _deliverablesState._polls[key]; }
 }
 // 关闭成片详情 modal，并清理所有活跃轮询（防止后台每 2s 持续请求 /api/projects）
 function closeDeliverablesModal(){
     var polls = _deliverablesState && _deliverablesState._polls;
     if(polls){
         Object.keys(polls).forEach(function(k){
-            clearInterval(polls[k]);
+            _cancelDelivPoll(polls[k]);
         });
         polls = {};
         _deliverablesState._polls = polls;
