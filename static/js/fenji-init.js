@@ -16,6 +16,11 @@ function fjLoad(k, def){ try{ const s = localStorage.getItem(k); if(s) return JS
 function fjSave(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
 
 async function loadFenjiProjects(targetName){
+  // 序列守卫：并发调用时只有「最新一次」允许写 DOM。
+  // 否则一个较慢的旧的无参调用会在稍后完成，把指定打开的目标项目覆盖掉。
+  var _seq = (window._fjLoadSeq || 0) + 1;
+  window._fjLoadSeq = _seq;
+  var _isLatest = function(){ return window._fjLoadSeq === _seq; };
   // 问题5：始终合并团队设置里的所有成员到剪辑师列表，避免缺人
   try{
     const td = await api('GET','/api/team/members');
@@ -26,6 +31,7 @@ async function loadFenjiProjects(targetName){
   }catch(_){}
   try{
     const data = await api('GET','/api/projects/light');
+    if(!_isLatest()) return;   // 已被更新的调用取代，放弃写 DOM
     fenjiLight = Array.isArray(data) ? data : (data.projects||[]);
     // 目标项目可能不在 light 列表里（如已完成项目只在 group_completed 桶）：
     // 动态补进去，否则下拉选不中、后续 readFromProject 会拿到空项目名
@@ -35,6 +41,7 @@ async function loadFenjiProjects(targetName){
         const _pd = await api('GET','/api/project/'+encodeURIComponent(targetName)+'/episodes_plan');
         _te = (_pd && _pd.total_episodes) || 0;
       }catch(_){}
+      if(!_isLatest()) return;
       fenjiLight.unshift({ name: targetName, total_episodes: _te, custom_status: '', department: '' });
     }
     if(fenjiLight.length > 0){
@@ -48,11 +55,13 @@ async function loadFenjiProjects(targetName){
         sel.innerHTML = '<option value="">选一位...</option>' + fjPersons.map(p => `<option value="${p}">${p}</option>`).join('');
       }
     }
-  }catch(e){ updateLightLists(); }
+  }catch(e){ if(!_isLatest()) return; updateLightLists(); }
+  if(!_isLatest()) return;
   // 从后端恢复模板/目标路径（重开软件自动恢复）
   try{ if(typeof fjLoadPersistedSettings === 'function') await fjLoadPersistedSettings(); }catch(_){}
   // 加载人员模板
   try{ if(typeof fjLoadPersonTemplates === 'function') await fjLoadPersonTemplates(); }catch(_){}
+  if(!_isLatest()) return;
   fjRenderChips();
   fjRenderHeadTail();
   fjRenderHistSelect();
