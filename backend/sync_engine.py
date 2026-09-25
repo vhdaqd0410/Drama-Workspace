@@ -35,6 +35,15 @@ class SyncEngine(ScanMixin, SyncMixin, DeliverMixin, PreviewMixin):
         self._delivery_folder = config.get(
             "delivery_folder", r"C:\Users\Admin\Desktop\000交付")
         self._sse_clients = []       # 活跃 SSE 客户端队列列表
+        # /api/projects 结果缓存：短 TTL + 写操作主动失效，兼顾性能与实时性
+        self._projects_cache = {"data": None, "mtime": 0.0}
+        self._projects_cache_lock = threading.RLock()
+        # 注册项目数据变更钩子：任何写操作后失效缓存
+        try:
+            from db import register_projects_changed_hook
+            register_projects_changed_hook(self.invalidate_projects_cache)
+        except Exception:
+            pass
         # 持久化缓存：上映单集版目录查找结果落盘，重启后免全量重扫
         self._output_dir_cache_file = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

@@ -364,6 +364,32 @@ class ScanMixin:
             # 更新数据库（这里用 extra 字段记录，但我们直接改API层返回）
             proj["on_group"] = exists
 
+    # /api/projects 结果缓存 TTL（秒）。写操作会主动失效，因此可以设短，
+    # 兼顾性能（避免高频重复扫盘）与实时性（进度/状态变化几秒内可见）。
+    _PROJECTS_CACHE_TTL = 3.0
+
+    def invalidate_projects_cache(self):
+        """失效 /api/projects 结果缓存（写操作后调用）。"""
+        with self._projects_cache_lock:
+            self._projects_cache["data"] = None
+            self._projects_cache["mtime"] = 0.0
+
+    def get_projects_enriched_cached(self, force=False):
+        """带短 TTL 缓存的项目列表获取。
+        force=True 强制重扫（前端 ?refresh=1 时）。"""
+        import time as _time
+        now = _time.time()
+        with self._projects_cache_lock:
+            c = self._projects_cache
+            if (not force and c.get("data") is not None
+                    and (now - c.get("mtime", 0.0)) < self._PROJECTS_CACHE_TTL):
+                return c["data"]
+        data = self.get_projects_enriched()
+        with self._projects_cache_lock:
+            self._projects_cache["data"] = data
+            self._projects_cache["mtime"] = _time.time()
+        return data
+
     def get_projects_enriched(self):
         """获取所有项目，附带部门标签和组盘标记。
         返回 { production: [...], group_all: [...] }

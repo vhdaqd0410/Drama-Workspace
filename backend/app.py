@@ -201,10 +201,15 @@ def _get_db_info_for_list(db_inst, project_name):
 
 @app.route('/api/projects', methods=['GET'])
 def api_projects():
-    """磁盘驱动的项目列表 — 保留 nas-bridge 完整字段 + sections 分组。"""
-    # Step 1: 用 sync_engine 获取完整字段的 flat 数据
+    """磁盘驱动的项目列表 — 保留 nas-bridge 完整字段 + sections 分组。
+    短 TTL 缓存 + 写操作主动失效；?refresh=1 强制重扫。"""
+    force = request.args.get("refresh") == "1"
+    # Step 1: 用 sync_engine 获取完整字段的 flat 数据（带短 TTL 缓存）
     try:
-        enriched = sync_engine.get_projects_enriched()
+        if hasattr(sync_engine, 'get_projects_enriched_cached'):
+            enriched = sync_engine.get_projects_enriched_cached(force=force)
+        else:
+            enriched = sync_engine.get_projects_enriched()
     except Exception as e:
         app.logger.error(f'get_projects_enriched failed: {e}')
         enriched = {'production': [], 'group_all': [], 'group_completed': []}

@@ -29,6 +29,30 @@ def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# ============ 项目数据变更失效钩子（供 sync_engine 注册，做 /api/projects 缓存失效） ============
+_PROJECTS_CHANGED_HOOKS = []
+_PROJECTS_HOOKS_LOCK = threading.Lock()
+
+
+def register_projects_changed_hook(fn):
+    """注册一个项目数据变更回调。sync_engine 在启动时注册，用于失效其
+    /api/projects 结果缓存（写操作后调用，保证实时性）。"""
+    with _PROJECTS_HOOKS_LOCK:
+        if fn not in _PROJECTS_CHANGED_HOOKS:
+            _PROJECTS_CHANGED_HOOKS.append(fn)
+
+
+def _notify_projects_changed():
+    """项目数据发生写操作后，通知所有钩子（如失效缓存）。永不抛异常。"""
+    with _PROJECTS_HOOKS_LOCK:
+        hooks = list(_PROJECTS_CHANGED_HOOKS)
+    for fn in hooks:
+        try:
+            fn()
+        except Exception:
+            pass
+
+
 def _coerce_priority(value):
     """把待办 priority 规范化为整数，杜绝 int('高') 之类崩溃。
 
@@ -468,6 +492,7 @@ class Database:
                  (name, production_path, group_path, source_root, department,
                   is_special, sc),
             )
+        _notify_projects_changed()
 
 
     def get_project(self, name):
@@ -490,6 +515,7 @@ class Database:
     def delete_project(self, name):
         with self.get_conn() as conn:
             conn.execute("DELETE FROM projects WHERE name=?", (name,))
+        _notify_projects_changed()
 
     def update_project_status(self, name, **kwargs):
         if not kwargs:
@@ -515,6 +541,7 @@ class Database:
             conn.execute(
                 f"UPDATE projects SET {fields} WHERE name=?", values
             )
+        _notify_projects_changed()
 
     def set_episodes(self, name, total, current):
         with self.get_conn() as conn:
@@ -523,6 +550,7 @@ class Database:
                 "WHERE name=?",
                 (int(total), int(current), name),
             )
+        _notify_projects_changed()
 
     def set_episode_plan(self, name, plan_dict):
         if not isinstance(plan_dict, dict):
@@ -532,6 +560,7 @@ class Database:
                 "UPDATE projects SET episode_plan=? WHERE name=?",
                 (json.dumps(plan_dict, ensure_ascii=False), name),
             )
+        _notify_projects_changed()
 
     def set_output_dir_name(self, name, dir_name):
         """设置项目单独的成片存放目录名（空串 = 使用全局默认）。"""
@@ -569,6 +598,7 @@ class Database:
                 "UPDATE projects SET editor_workload=? WHERE name=?",
                 (json.dumps(workload_dict, ensure_ascii=False), name),
             )
+        _notify_projects_changed()
 
     def get_editor_workload(self, name):
         p = self.get_project(name)
