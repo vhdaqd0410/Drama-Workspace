@@ -7,7 +7,6 @@ import json as _j
 import yaml as _y
 import logging as _logging
 from flask import request, jsonify, send_file, send_from_directory, abort
-import config as _cfg
 from utils import scan_dir
 from fenji_exporter import export_from_template, export_upsert, backup_template, list_templates as _list_templates
 
@@ -697,6 +696,15 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         result["projects"].sort(key=lambda x: -x["missing"])
         return jsonify(result)
 
+    def _sync_team_roles_to_commission():
+        """团队称号变化后，同步写回提成工具 config.json 的「人员角色」，
+        让工作台(读团队称号)与提成工具 GUI(读 config.json)口径一致。"""
+        try:
+            from commission_service import sync_team_titles_to_commission
+            sync_team_titles_to_commission(db)
+        except Exception:
+            pass
+
     @app.route("/api/team/members", methods=["GET"])
     def api_team_members_get():
         try:
@@ -731,6 +739,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             db.add_member(name=name, role=role, title=title, department=department)
             if hire_date or resign_date:
                 db.update_member(name, hire_date=hire_date, resign_date=resign_date)
+            _sync_team_roles_to_commission()
             return jsonify({"ok": True, "message": f"已添加 {name}"})
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
@@ -763,6 +772,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                 kwargs["resign_date"] = (data.get("resign_date") or "").strip()
             if kwargs:
                 db.update_member(old_name, **kwargs)
+            _sync_team_roles_to_commission()
             return jsonify({"ok": True, "message": "已更新"})
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
@@ -776,6 +786,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                 if not row:
                     return jsonify({"ok": False, "message": "成员不存在"}), 404
                 conn.execute("DELETE FROM team_members WHERE id=?", (mid,))
+            _sync_team_roles_to_commission()
             return jsonify({"ok": True, "message": "已删除"})
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500

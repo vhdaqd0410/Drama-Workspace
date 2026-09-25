@@ -90,6 +90,33 @@ def _team_title_roles(db):
     return out
 
 
+def sync_team_titles_to_commission(db):
+    """把团队称号同步写回提成工具 config.json 的「人员角色」。
+
+    工作台报告以团队称号(team_members.title)为准，但独立的提成工具 GUI
+    生成 Excel 时读的是 config.json「人员角色」。此函数让两者口径一致：
+    有称号的成员写回 config.json，无称号的成员从「人员角色」移除。
+    在团队增/删/改成员后调用。返回成功写入的角色数。
+    """
+    roles = _team_title_roles(db)
+    try:
+        with open(_PLUGIN_CFG, "r", encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+        # 「人员角色」以团队称号为准，整体重建
+        cfg["人员角色"] = dict(roles)
+        dir_path = os.path.dirname(_PLUGIN_CFG)
+        import tempfile as _tf
+        with _tf.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
+                                    dir=dir_path, delete=False) as tmp:
+            json.dump(cfg, tmp, ensure_ascii=False, indent=2)
+            tmp_path = tmp.name
+        os.replace(tmp_path, _PLUGIN_CFG)
+        return len(roles)
+    except Exception as e:
+        logger.warning("同步团队称号到提成配置失败: %s", e)
+        return 0
+
+
 def _normalize_role(role):
     if role == "剪辑组长":
         return "剪辑组长"
