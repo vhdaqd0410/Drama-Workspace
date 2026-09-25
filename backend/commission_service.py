@@ -39,14 +39,20 @@ DEFAULT_ROLES = {
 }
 
 
-def load_config(cfg_path=None):
-    """加载角色/提成规则配置。返回 (roles, rules)。"""
+def load_config(cfg_path=None, db=None):
+    """加载角色/提成规则配置。返回 (roles, rules, groups)。
+
+    角色优先级：团队设置「称号」(team_members.title) > config.json「人员角色」> 内置默认。
+    这样在团队成员设置里改卡前/卡后/组长会立即反映到提成报告。
+    """
     path = cfg_path or _PLUGIN_CFG
     try:
         with open(path, "r", encoding="utf-8") as f:
             cfg = json.load(f) or {}
         roles = dict(DEFAULT_ROLES)
         roles.update({k: v for k, v in cfg.get("人员角色", {}).items() if v})
+        # 团队设置「称号」最高优先级
+        roles.update(_team_title_roles(db))
         rules = dict(DEFAULT_RULES)
         rules.update(cfg.get("rules", {}) or {})
         groups = cfg.get("小组", {}) or {}
@@ -54,6 +60,34 @@ def load_config(cfg_path=None):
     except Exception as e:
         logger.warning("读取提成配置失败(%s)，使用内置默认: %s", path, e)
         return dict(DEFAULT_ROLES), dict(DEFAULT_RULES), {}
+
+
+# 团队成员设置的「称号」→ 提成角色（最高优先级，覆盖 config.json 的人员角色）
+_TITLE_TO_ROLE = {
+    "组长": "剪辑组长",
+    "小组长": "小组长",
+    "卡前": "一卡剪辑",
+    "卡后": "二卡剪辑",
+    "助理": "剪辑助理",
+}
+
+
+def _team_title_roles(db):
+    """从 team_members.title 读取「称号」，映射成提成角色。返回 {姓名: 提成角色}。"""
+    if db is None:
+        return {}
+    try:
+        members = db.list_members() if hasattr(db, "list_members") else []
+    except Exception:
+        return {}
+    out = {}
+    for m in members:
+        name = (m.get("name") or "").strip()
+        title = (m.get("title") or "").strip()
+        role = _TITLE_TO_ROLE.get(title)
+        if name and role:
+            out[name] = role
+    return out
 
 
 def _normalize_role(role):
@@ -66,10 +100,10 @@ def _normalize_role(role):
     return "二卡剪辑" if role == "二卡剪辑" else "剪辑助理"
 
 
-def editor_quota_map(cfg_path=None):
+def editor_quota_map(cfg_path=None, db=None):
     """返回 {剪辑师姓名: {'role': 角色, 'quota': 基准集数}}，用于工作量看板标注卡点。
     组长无基准(0)；其余按角色基准。"""
-    roles, rules, groups = load_config(cfg_path)
+    roles, rules, groups = load_config(cfg_path, db=db)
     out = {}
     for name, role_raw in roles.items():
         role = _normalize_role(role_raw)
@@ -83,7 +117,7 @@ def editor_quota_map(cfg_path=None):
 
 
 def compute_commission_breakdown(editor_workload, month=None, cfg_path=None,
-                                 group_completed_count=None):
+                                 group_completed_count=None, db=None):
     """从剪辑师集数计算每人绩效+提成。
 
     editor_workload: [{'name','assigned','projects'}]（来自 aggregate_editor_workload）
@@ -94,7 +128,7 @@ def compute_commission_breakdown(editor_workload, month=None, cfg_path=None,
               'shortage_penalty','group_bonus','commission','desc'}]
       summary: {'total_commission','total_people','met_quota','unmet_quota','total_episodes'}
     """
-    roles, rules, groups = load_config(cfg_path)
+    roles, rules, groups = load_config(cfg_path, db=db)
     rows = []
     for ed in editor_workload:
         name = ed.get("name") or ""
@@ -160,7 +194,7 @@ def compute_group_completed(db, month=None, cfg_path=None):
     from datetime import datetime
     if not month:
         month = datetime.now().strftime("%Y-%m")
-    roles, rules, groups = load_config(cfg_path)
+    roles, rules, groups = load_config(cfg_path, db=db)
     # 组长 -> 成员集合
     leader_members = {}
     for gname, g in (groups or {}).items():
@@ -202,7 +236,7 @@ def compute_person_cards(db, year=None, cfg_path=None):
     from collections import defaultdict
     if not year:
         year = str(datetime.now().year)
-    roles, _rules, _groups = load_config(cfg_path)
+    roles, _rules, _groups = load_config(cfg_path, db=db)
     # 逐月集数
     monthly = defaultdict(lambda: defaultdict(int))  # name -> month -> eps
     try:

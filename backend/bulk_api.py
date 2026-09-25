@@ -400,7 +400,7 @@ def register_routes(app, db):
         # 为剪辑师附上角色/提成卡点(基准集数)，供工作量看板标注（功能：70集卡点标记）
         try:
             from commission_service import editor_quota_map
-            _quota = editor_quota_map()
+            _quota = editor_quota_map(db=db)
             for e in editor_list:
                 q = _quota.get(e.get("name"))
                 e["quota"] = q["quota"] if q else None

@@ -209,7 +209,7 @@ def register_routes(app, db):
             # 功能3：组长组奖按组内当月全部完成部数计（数据来自项目本月完成数）
             group_completed = compute_group_completed(db, month=month)
             rows, summary = compute_commission_breakdown(
-                workload, month, group_completed_count=group_completed)
+                workload, month, group_completed_count=group_completed, db=db)
             return jsonify({
                 "ok": True, "month": month,
                 "rows": rows, "summary": summary,
