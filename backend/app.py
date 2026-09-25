@@ -1704,4 +1704,13 @@ def create_app():
             print("[OK] 已自动删除离职成员: %s" % "、".join(_removed))
     except Exception:
         pass
+    # 启动时统一提成口径：团队称号(team_members.title)为唯一角色来源，
+    # 同步写回提成工具 config.json 的「人员角色」，避免两者漂移。
+    try:
+        from commission_service import sync_team_titles_to_commission
+        _n = sync_team_titles_to_commission(db)
+        if _n:
+            print("[OK] 已同步团队称号到提成配置: %d 人" % _n)
+    except Exception as _e:
+        print("[WARN] 同步团队称号到提成配置失败:", _e)
     return app
