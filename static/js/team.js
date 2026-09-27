@@ -280,18 +280,14 @@ async function loadConfig(){
   try{ await loadCommissionRules(); }catch(_){}
 }
 
-/* ============ 提成规则（卡前/卡后/助理/组长）============ */
+/* ============ 提成规则（卡前/卡后/组长 三种口径）============ */
 // 后端角色 -> 界面显示名（卡前=一卡剪辑，卡后=二卡剪辑）
 const COMMISSION_ROLE_META = [
-  {key:'一卡剪辑', label:'卡前（一卡剪辑）', fields:[
+  {key:'一卡剪辑', label:'卡前', fields:[
     {k:'基准集数', t:'基准集数', hint:'达到此集数后才算超额'},
     {k:'超额每集', t:'超额/集（元）', hint:'超出基准后每集奖励'},
     {k:'缺集每集扣', t:'缺集/集（元）', hint:'未达基准每集扣款'}]},
-  {key:'二卡剪辑', label:'卡后（二卡剪辑）', fields:[
-    {k:'基准集数', t:'基准集数', hint:''},
-    {k:'超额每集', t:'超额/集（元）', hint:''},
-    {k:'缺集每集扣', t:'缺集/集（元）', hint:''}]},
-  {key:'剪辑助理', label:'剪辑助理', fields:[
+  {key:'二卡剪辑', label:'卡后', fields:[
     {k:'基准集数', t:'基准集数', hint:''},
     {k:'超额每集', t:'超额/集（元）', hint:''},
     {k:'缺集每集扣', t:'缺集/集（元）', hint:''}]},
@@ -459,7 +455,7 @@ function renderTeamList(members){
   const roleMap = {editor:'剪辑师', reviewer:'审核师', pm:'项目经理'};
   const roleColor = {editor:'#0071e3', reviewer:'#af52de', pm:'#ff9f0a'};
 
-  const titleOrder = {'组长':0,'小组长':1,'卡前':2,'卡后':3,'助理':4};
+  const titleOrder = {'组长':0,'卡前':1,'卡后':2};
   const sorted = [...members].sort((a,b) => {
     const ta = titleOrder[a.title] !== undefined ? titleOrder[a.title] : 99;
     const tb = titleOrder[b.title] !== undefined ? titleOrder[b.title] : 99;
@@ -514,7 +510,7 @@ function teamFilterMembers(q){
   const roleColor = {editor:'#0071e3', reviewer:'#af52de', pm:'#ff9f0a'};
   const grid = body.querySelector('#teamGrid');
   if(grid){
-    const titleOrder = {'组长':0,'小组长':1,'卡前':2,'卡后':3,'助理':4};
+    const titleOrder = {'组长':0,'卡前':1,'卡后':2};
     const sortedF = [...filtered].sort((a,b) => {
       const ta = titleOrder[a.title] !== undefined ? titleOrder[a.title] : 99;
       const tb = titleOrder[b.title] !== undefined ? titleOrder[b.title] : 99;
@@ -558,10 +554,8 @@ function teamOpenEdit(id){
           <select id="te_title" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff">
             <option value="" ${(!m||!m.title)?'selected':''}>— 请选择 —</option>
             <option value="组长" ${m&&m.title==='组长'?'selected':''}>组长</option>
-            <option value="小组长" ${m&&m.title==='小组长'?'selected':''}>小组长</option>
             <option value="卡前" ${m&&m.title==='卡前'?'selected':''}>卡前</option>
             <option value="卡后" ${m&&m.title==='卡后'?'selected':''}>卡后</option>
-            <option value="助理" ${m&&m.title==='助理'?'selected':''}>助理</option>
           </select>
           <label style="font-size:13px;color:var(--text-sec)">部门</label>
           <input type="text" id="te_dept" value="${m?(m.department||'').replace(/"/g,'&quot;'):''}" placeholder="如：AI漫剧一部 / 海外组" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">

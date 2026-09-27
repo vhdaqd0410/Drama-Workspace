@@ -191,22 +191,26 @@ def commission_desc(role):
 
 
 def normalize_role(role_str):
-    """容错：将用户输入的角色名规范化为标准名"""
+    """容错：将各种角色名规范化为内部标准名（剪辑组长/一卡剪辑/二卡剪辑）。
+
+    统一口径：卡前=一卡剪辑（含小组长），卡后=二卡剪辑（含助理）。
+    全组只有三种角色，卡后共用一套规则。
+    """
     if not role_str:
-        return '一卡剪辑'
+        return '二卡剪辑'
     s = role_str.strip()
-    # 先检查一卡/二卡/助理（避免"一卡组长"被误判为组长）
-    if '一卡' in s:
+    # 卡前/一卡（含小组长）先判定；卡后/二卡/助理归卡后
+    if '卡前' in s or '一卡' in s:
         return '一卡剪辑'
-    if '二卡' in s:
+    if '卡后' in s or '二卡' in s:
         return '二卡剪辑'
     if '助理' in s:
-        return '剪辑助理'
+        return '二卡剪辑'
     if '小组长' in s:
-        return '一卡剪辑'   # 小组长和一卡计算方式一样
+        return '一卡剪辑'   # 小组长按卡前口径
     if '组长' in s:
         return '剪辑组长'
-    return '一卡剪辑'  # 默认
+    return '二卡剪辑'  # 默认
 
 # 不再强制覆盖——GROUPS 中的组长仅表示谁是组长，不强制其角色
 # （只有 config.json 人员角色中标记了"剪辑组长"的才是真正的组长）

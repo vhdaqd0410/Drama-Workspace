@@ -260,7 +260,7 @@ async function _loadCommissionReport(){
     rows.forEach(r => {
       html += '<tr style="border-bottom:1px solid #f0f0f0">'
         + '<td style="padding:6px 8px">'+escHtml(r.name)+'</td>'
-        + '<td style="padding:6px 8px;color:var(--text-sec)">'+escHtml(r.role)+'</td>'
+        + '<td style="padding:6px 8px;color:var(--text-sec)">'+escHtml(_dispRole(r.role))+'</td>'
         + '<td style="padding:6px 8px;text-align:right">'+r.episodes+'</td>'
         + '<td style="padding:6px 8px;text-align:right">'+(r.quota||'—')+'</td>'
         + '<td style="padding:6px 8px;text-align:center;color:'+(r.is_complete?'#34c759':'#ff3b30')+'">'+(r.is_complete?'✔':'✘')+'</td>'
@@ -276,6 +276,15 @@ async function _loadCommissionReport(){
     el.innerHTML = '<div style="color:var(--red);padding:12px">加载失败: '+escHtml(e.message)+'</div>';
   }
 }
+// 角色显示名：统一为三种（组长 / 卡前 / 卡后）
+function _dispRole(role){
+  var s = String(role||'');
+  if(s.indexOf('组长') >= 0) return '组长';
+  if(s.indexOf('一卡') >= 0 || s.indexOf('卡前') >= 0) return '卡前';
+  if(s.indexOf('二卡') >= 0 || s.indexOf('卡后') >= 0 || s.indexOf('助理') >= 0) return '卡后';
+  return s || '—';
+}
+
 // 表头点击排序（功能2）
 function commissionSort(key){
   if(_commissionSort.key === key) _commissionSort.dir = -_commissionSort.dir;

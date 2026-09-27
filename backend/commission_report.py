@@ -330,7 +330,7 @@ def build_report(month, output_dir=None, db=None):
         "title": title,
         "group_label": group_label,
         "swap_pr": True,
-        "full_role": True,       # 职位列用完整角色名（一卡剪辑/二卡剪辑/剪辑助理/剪辑组长）
+        "full_role": False,      # 职位列显示 组长/卡前/卡后（三种口径）
         "use_rule_desc": True,   # 提成构成用配置原值（不带硬编码后缀）
         "highlight_roles": ["一卡剪辑"],  # 本月卡前（一卡剪辑）规则一律全标黄
         "resigned": resigned,            # {姓名: 离职日期}，命中者标红+备注写离职日期

@@ -28,14 +28,14 @@ DEFAULT_RULES = {
                 "提成构成描述": "20元/集，一部提成100元"},
 }
 
-# 缺省角色表（可在插件 config.json 覆盖）
+# 缺省角色表（可在插件 config.json 覆盖）。统一三种角色：组长/卡前(一卡)/卡后(二卡)
 DEFAULT_ROLES = {
-    "张大强": "剪辑组长", "任显翔": "小组长", "陈陆杰": "小组长",
+    "张大强": "剪辑组长", "任显翔": "一卡剪辑", "陈陆杰": "一卡剪辑",
     "陈春阳": "一卡剪辑", "程梦": "一卡剪辑", "张靖杰": "一卡剪辑",
     "王田田": "二卡剪辑", "张淯升": "二卡剪辑",
-    "金文龙": "剪辑助理", "李钊琦": "剪辑助理", "刘梦真": "剪辑助理",
-    "杨倩": "剪辑助理", "陈浩博": "剪辑助理", "袁绍杰": "剪辑助理",
-    "王傲雪": "剪辑助理",
+    "金文龙": "二卡剪辑", "李钊琦": "二卡剪辑", "刘梦真": "二卡剪辑",
+    "杨倩": "二卡剪辑", "陈浩博": "二卡剪辑", "袁绍杰": "二卡剪辑",
+    "王傲雪": "二卡剪辑",
 }
 
 
@@ -63,12 +63,14 @@ def load_config(cfg_path=None, db=None):
 
 
 # 团队成员设置的「称号」→ 提成角色（最高优先级，覆盖 config.json 的人员角色）
+# 统一三种：组长 / 卡前(一卡剪辑) / 卡后(二卡剪辑)
 _TITLE_TO_ROLE = {
     "组长": "剪辑组长",
-    "小组长": "小组长",
     "卡前": "一卡剪辑",
     "卡后": "二卡剪辑",
-    "助理": "剪辑助理",
+    # 兼容旧称号
+    "小组长": "一卡剪辑",
+    "助理": "二卡剪辑",
 }
 
 
@@ -128,13 +130,12 @@ def sync_team_titles_to_commission(db):
 
 
 def _normalize_role(role):
-    if role == "剪辑组长":
+    """统一为三种内部角色：剪辑组长 / 一卡剪辑(卡前) / 二卡剪辑(卡后)。"""
+    if role == "剪辑组长" or role == "组长":
         return "剪辑组长"
-    if role == "一卡剪辑":
+    if role in ("一卡剪辑", "卡前", "小组长"):
         return "一卡剪辑"
-    if role == "小组长":
-        return "一卡剪辑"  # 小组长按一卡口径
-    return "二卡剪辑" if role == "二卡剪辑" else "剪辑助理"
+    return "二卡剪辑"
 
 
 def editor_quota_map(cfg_path=None, db=None):
@@ -147,7 +148,7 @@ def editor_quota_map(cfg_path=None, db=None):
         if role == "剪辑组长":
             out[name] = {"role": role, "quota": 0}
         else:
-            rule = rules.get(role, rules.get("剪辑助理", DEFAULT_RULES["剪辑助理"]))
+            rule = rules.get(role, rules.get("二卡剪辑", DEFAULT_RULES["二卡剪辑"]))
             _dft = DEFAULT_RULES.get(role, {}).get("基准集数", 120)
             out[name] = {"role": role, "quota": int(rule.get("基准集数", _dft) or _dft)}
     return out
@@ -170,8 +171,8 @@ def compute_commission_breakdown(editor_workload, month=None, cfg_path=None,
     for ed in editor_workload:
         name = ed.get("name") or ""
         total = int(ed.get("assigned") or 0)
-        role = _normalize_role(roles.get(name, "剪辑助理"))
-        rule = rules.get(role, rules.get("剪辑助理", DEFAULT_RULES["剪辑助理"]))
+        role = _normalize_role(roles.get(name, "二卡剪辑"))
+        rule = rules.get(role, rules.get("二卡剪辑", DEFAULT_RULES["二卡剪辑"]))
         if role == "剪辑组长":
             # 功能3：组长组奖 = 组内当月完成部数 × 每部提成
             # 优先用传入的组内完成部数（数据来源=项目看板本月项目），否则回退到有分集的项目数
@@ -303,7 +304,7 @@ def compute_person_cards(db, year=None, cfg_path=None):
         best_month = max(by_month, key=lambda m: by_month[m]) if by_month else None
         cards.append({
             "name": name,
-            "role": _normalize_role(roles.get(name, "剪辑助理")),
+            "role": _normalize_role(roles.get(name, "二卡剪辑")),
             "annual_total": total,
             "month_count": len(by_month),
             "best_month": best_month,
