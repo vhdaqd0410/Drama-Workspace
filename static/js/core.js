@@ -457,7 +457,18 @@ function jumpToProject(name){
     if(typeof fjUpdateTplBadge==='function')fjUpdateTplBadge();
     if(typeof fjUpdateTargetBadge==='function')fjUpdateTargetBadge();
   }
-  if(name==='qa'){ loadQAProjects(); if(typeof loadQASummary==='function') loadQASummary(); }
+  if(name==='qa'){
+    loadQAProjects();
+    if(typeof loadQASummary==='function') loadQASummary();
+    // 切回质检页：若任务仍在运行，恢复进度轮询（切走时被 qa2StopPolling 停了）
+    try{
+      if(typeof qa2StartPolling === 'function' && typeof qa2State !== 'undefined'
+         && qa2State && qa2State.running && qa2State.tmpProjectName
+         && !qa2State.pollTimer){
+        qa2StartPolling();
+      }
+    }catch(_){}
+  }
   if(name==='nameplate' && typeof loadNameplateTab==='function'){ loadNameplateTab(); }
   if(name==='risk' && typeof loadRiskCenter==='function'){ loadRiskCenter(); }
   if(name==='settings')loadConfig();
