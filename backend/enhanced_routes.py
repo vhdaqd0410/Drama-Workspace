@@ -884,9 +884,28 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         return jsonify({"ok": True, "results": results})
 
 
+    def _commission_project_file():
+        """解析提成工具读取的项目文件路径（与工作台目标文件一致）。
+        优先 db setting fj_target_path，回退 plugins/commission/config.json 的
+        app_settings.project_file。"""
+        try:
+            p = (db.get_setting('fj_target_path', '') or '').strip()
+            if p:
+                return p
+        except Exception:
+            pass
+        try:
+            _cfg_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                                      'plugins', 'commission', 'config.json')
+            with open(_cfg_path, 'r', encoding='utf-8') as f:
+                _c = _j.load(f) or {}
+            return ((_c.get('app_settings') or {}).get('project_file') or '').strip()
+        except Exception:
+            return ''
+
     @app.route("/api/bulk/import_episodes", methods=["POST"])
     def api_bulk_import_episodes():
-        """接收前端分集结果，保存到 DB。"""
+        """接收前端分集结果，保存到 DB（并同步写回提成工具的项目文件，保证口径一致）。"""
         body = request.get_json(silent=True) or {}
         project_name = body.get("project_name") or ""
         total = int(body.get("total_episodes") or 0)
@@ -897,6 +916,17 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             return jsonify({"ok": False, "message": "assign 为空"}), 400
         try:
             db.set_episode_plan(project_name, assign)
+            # 同步写回项目文件（提成工具的输入），保证两边分集一致
+            _file_synced = False
+            try:
+                _pf = _commission_project_file()
+                if _pf:
+                    from fenji_exporter import update_project_assign_in_file, assign_dict_to_list
+                    _ok, _msg = update_project_assign_in_file(
+                        _pf, project_name, assign_dict_to_list(assign))
+                    _file_synced = bool(_ok)
+            except Exception as _fe:
+                _logger.warning('同步分集到项目文件失败: %s', _fe)
             # 失效 episodes_status 短 TTL 缓存，确保替换后卡片立即读到新分集
             try:
                 if sync_engine is not None:
@@ -922,7 +952,8 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                 p = db.get_project(project_name)
                 cur = int((p or {}).get("current_episodes") or 0)
                 db.set_episodes(project_name, total, cur)
-            return jsonify({"ok": True, "message": "已保存 " + str(len(assign)) + " 集分集", "count": len(assign)})
+            return jsonify({"ok": True, "message": "已保存 " + str(len(assign)) + " 集分集",
+                            "count": len(assign), "file_synced": _file_synced})
         except Exception as e:
             return jsonify({"ok": False, "message": str(e)}), 500
 

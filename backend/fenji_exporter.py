@@ -257,3 +257,101 @@ def export_upsert(tpl_bytes, project_name, path, assign_list,
     buf = _io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), updated
+
+
+def update_project_assign_in_file(file_path, project_name, assign_list):
+    """把某项目的分集原地写回项目文件（保留交片时间/状态/路径等，仅替换分集行）。
+
+    仅当文件里已存在该项目块时才更新（不新增项目），用于保证工作台 DB 分集
+    与提成工具的输入项目文件一致（避免“工作台 155 集、提成表 153 集”）。
+
+    返回 (ok: bool, message: str)。失败（如文件被 Excel 占用）不抛异常。
+    """
+    if not file_path or not _os.path.isfile(file_path):
+        return False, '目标文件不存在'
+    try:
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        wb = openpyxl.load_workbook(_io.BytesIO(data))
+        ws = wb[wb.sheetnames[0]]
+        blocks = _iter_project_blocks(ws)
+        target = None
+        for b in blocks:
+            if b['name'] == project_name:
+                target = b
+                break
+        if target is None:
+            return False, '项目不在目标文件中'
+        # 仅替换分集行，保留 path/time/status
+        target['assign_rows'] = [
+            "%s：%s" % (d.get('person', ''), d.get('range', ''))
+            for d in (assign_list or [])
+            if d.get('person') and str(d.get('range', '')).strip()
+        ]
+        # 清空数据区（第 2 行起）后重写所有块
+        for rng in list(ws.merged_cells.ranges):
+            if rng.min_row >= 2:
+                try:
+                    ws.unmerge_cells(str(rng))
+                except Exception:
+                    pass
+        if ws.max_row >= 2:
+            ws.delete_rows(2, ws.max_row - 1)
+        start = 2
+        for b in blocks:
+            alist = []
+            for line in b['assign_rows']:
+                if '：' in line:
+                    p, r = line.split('：', 1)
+                elif ':' in line:
+                    p, r = line.split(':', 1)
+                else:
+                    continue
+                alist.append({'person': p.strip(), 'range': r.strip()})
+            if not alist:
+                alist = [{'person': '', 'range': ''}]
+            end = _append_project(ws, start, b['name'], b['path'], alist,
+                                  b['time'], b['status'])
+            start = end + 1
+        _beautify(ws)
+        tmp = file_path + '.tmp'
+        wb.save(tmp)
+        _os.replace(tmp, file_path)
+        return True, 'ok'
+    except Exception as e:
+        _logger.warning('更新项目文件分集失败(%s): %s', file_path, e)
+        try:
+            if _os.path.exists(file_path + '.tmp'):
+                _os.unlink(file_path + '.tmp')
+        except Exception:
+            pass
+        return False, str(e)
+
+
+def assign_dict_to_list(assign):
+    """把 {集号: 剪辑师} 转成 [{person, range}]（连续集号合并成 a-b）。
+
+    {1:'A',2:'A',3:'B'} -> [{'person':'A','range':'1-2'},{'person':'B','range':'3'}]
+    """
+    from collections import defaultdict
+    by_editor = defaultdict(list)
+    for ep, name in (assign or {}).items():
+        if name and str(name).strip():
+            try:
+                by_editor[str(name).strip()].append(int(ep))
+            except (TypeError, ValueError):
+                continue
+    out = []
+    for person, eps in by_editor.items():
+        eps = sorted(set(eps))
+        parts = []
+        s = prev = eps[0]
+        for e in eps[1:]:
+            if e == prev + 1:
+                prev = e
+            else:
+                parts.append(str(s) if s == prev else '%d-%d' % (s, prev))
+                s = prev = e
+        parts.append(str(s) if s == prev else '%d-%d' % (s, prev))
+        out.append({'person': person, 'range': ','.join(parts)})
+    return out
