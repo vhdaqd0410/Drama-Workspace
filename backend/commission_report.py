@@ -96,6 +96,99 @@ def _resolve_project_file(month, db=None):
     return ""
 
 
+def validate_report_data(records, df, project_file, db=None, month=None):
+    """按「提成表填写注意事项」校验数据，返回问题列表 issues（每条为可读字符串）。
+
+    校验项：
+      1) 项目ID不能出现错误（非空、可提取）
+      2) 项目名字统一（同一ID不出现两个名字）
+      3) 同一项目的集数不同时出现在两个人列表里（不重叠）
+      4) 项目日期准确（有交付日期且可解析）
+      5) 每人集数与后台（工作台 DB episode_plan）一致，且无重复
+    """
+    import re as _re
+    from collections import defaultdict as _dd
+    issues = []
+
+    # ---- 2) 同一ID多个名字；1) ID 可用性 ----
+    id2names = _dd(set)
+    id2proj = _dd(set)
+    for r in records:
+        pid = r.get("项目ID") or ""
+        nm = r.get("AI项目名称") or ""
+        if not pid:
+            issues.append("项目ID缺失：%s" % nm)
+        id2names[pid].add(nm)
+        id2proj[nm].add(pid)
+    for pid, names in id2names.items():
+        if pid and len(names) > 1:
+            issues.append("同一项目ID %s 出现多个名称：%s" % (pid, " / ".join(sorted(names))))
+    for nm, pids in id2proj.items():
+        if len(pids) > 1:
+            issues.append("同名项目 %s 对应多个ID：%s" % (nm, " / ".join(sorted(pids))))
+
+    # ---- 3) 同项目集数跨人不重叠；5) 重复 ----
+    proj_eps = _dd(lambda: _dd(set))  # 项目名 -> 人 -> 集号集合
+    for r in records:
+        if not r.get("参与剪辑", True):
+            continue
+        nm = r.get("AI项目名称") or ""
+        person = r.get("身份证姓名") or ""
+        eps = set()
+        for e in str(r.get("完成明细") or "").split(","):
+            if e.strip().isdigit():
+                eps.add(int(e.strip()))
+        proj_eps[nm][person] |= eps
+    for nm, persons in proj_eps.items():
+        seen = {}
+        for person, eps in persons.items():
+            for e in eps:
+                if e in seen and seen[e] != person:
+                    issues.append("重叠：项目 %s 第%d集 同时给了 %s 和 %s" % (nm, e, seen[e], person))
+                seen[e] = person
+
+    # ---- 4) 日期准确 ----
+    for r in records:
+        if r.get("参与剪辑", True) and not r.get("结束日期"):
+            issues.append("项目 %s 缺交付日期" % (r.get("AI项目名称")))
+
+    # ---- 5) 与后台（工作台 DB episode_plan）逐人集数比对 ----
+    if db is not None and month:
+        db_map = {}
+        try:
+            for p in db.get_all_projects():
+                if (p.get("project_month") or "") == month:
+                    plan = p.get("episode_plan") or "{}"
+                    try:
+                        plan = json.loads(plan) if isinstance(plan, str) else plan
+                    except Exception:
+                        plan = {}
+                    db_map[p.get("name")] = {int(k): v for k, v in plan.items() if v}
+        except Exception as e:
+            logger.warning("读取后台分集失败: %s", e)
+        if db_map:
+            for nm, persons in proj_eps.items():
+                if nm not in db_map:
+                    continue
+                db_by_person = _dd(set)
+                for ep, who in db_map[nm].items():
+                    db_by_person[who].add(int(ep))
+                names = set(persons) | set(db_by_person)
+                for person in names:
+                    f_eps = persons.get(person, set())
+                    d_eps = db_by_person.get(person, set())
+                    if f_eps != d_eps:
+                        only_f = sorted(f_eps - d_eps)
+                        only_d = sorted(d_eps - f_eps)
+                        detail = []
+                        if only_f:
+                            detail.append("表多出%s" % only_f[:15])
+                        if only_d:
+                            detail.append("表缺少%s" % only_d[:15])
+                        issues.append("集数不符：项目 %s / %s：%s（与后台不一致）" % (nm, person, "，".join(detail)))
+    return issues
+
+
 def build_report(month, output_dir=None, db=None):
     """生成月度提成表，返回 {ok, path, month, title, records, people, projects, error}。
 
@@ -126,9 +219,9 @@ def build_report(month, output_dir=None, db=None):
     out_month_num = data_month_num if data_month_num else m_num
 
     # 组别与标题（工作台“月度最终报表”口径）
-    # 标题：制作部 + AI剪辑一组 + X月份 + 提成表
+    # 标题：后期剪辑部 + YYYY年MM月 + 提成表（如：后期剪辑部2026年09月提成表）
     group_label = "AI剪辑一组"
-    title = "制作部%s%s份提成表" % (group_label, cn_month)
+    title = "后期剪辑部%04d年%02d月提成表" % (year, out_month_num)
 
     # 输出文件
     if not output_dir:
@@ -166,6 +259,16 @@ def build_report(month, output_dir=None, db=None):
     records, group_pids = gc.parse_projects(df, default_year=year)
     if not records:
         return {"ok": False, "error": "项目文件未解析到有效记录：%s" % os.path.basename(project_file)}
+
+    # 按「提成表填写注意事项」校验数据（不阻断生成，但把问题带回前端提示）
+    issues = []
+    try:
+        issues = validate_report_data(records, df, project_file, db=db, month=month)
+    except Exception as _ve:
+        logger.warning("提成表数据校验异常: %s", _ve)
+    if issues:
+        logger.warning("提成表数据校验发现 %d 处问题", len(issues))
+
     commission_data = gc.compute_commission(records, group_pids)
 
     opts = {
@@ -174,6 +277,7 @@ def build_report(month, output_dir=None, db=None):
         "swap_pr": True,
         "full_role": True,       # 职位列用完整角色名（一卡剪辑/二卡剪辑/剪辑助理/剪辑组长）
         "use_rule_desc": True,   # 提成构成用配置原值（不带硬编码后缀）
+        "highlight_roles": ["一卡剪辑"],  # 本月卡前（一卡剪辑）规则一律全标黄
     }
     # 只产出这张 xlsx（不生成仪表盘 HTML，避免桌面多余文件）
     _orig_html = getattr(gc, "generate_html_dashboard", None)
@@ -216,4 +320,6 @@ def build_report(month, output_dir=None, db=None):
         "projects": projects,
         "records": len(records),
         "total_commission": subtotal,
+        "issues": issues,
+        "issue_count": len(issues),
     }

@@ -940,6 +940,12 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
     if opts.get('use_rule_desc'):
         q_value = (rule.get('提成构成描述') or q_value)
     c = ws.cell(start, 17, q_value)
+    # opts['highlight_roles'] 中的角色（如本月规则变动的“一卡剪辑/卡前”）整格标黄
+    if role in (opts.get('highlight_roles') or []):
+        try:
+            c.fill = PatternFill('solid', fgColor='FFFF00')
+        except Exception:
+            pass
     c.font = Font(name='宋体', size=8, bold=False)
     c.alignment = center_wrap; c.border = full_border
 

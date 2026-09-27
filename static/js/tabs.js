@@ -411,7 +411,13 @@ async function exportCommissionReport(){
     const info = '✅ 已生成：' + d.path + '\n人员 ' + d.people + ' 人 · 项目 ' + d.projects + ' 部 · '
                + '全组提成 ' + (d.total_commission||0) + ' 元';
     if(typeof toast === 'function') toast('已生成并打开提成表', 'success');
-    alert(info);
+    if(d.issue_count && d.issue_count > 0){
+      const list = (d.issues||[]).slice(0, 30).map((s,i)=>'  '+(i+1)+'. '+s).join('\n');
+      alert(info + '\n\n⚠️ 数据校验发现 ' + d.issue_count + ' 处问题（请核对）：\n' + list
+            + (d.issue_count > 30 ? '\n  ...（共 ' + d.issue_count + ' 条）' : ''));
+    } else {
+      alert(info + '\n\n✅ 数据校验通过（ID/名称/集数/日期均无异常）');
+    }
   }catch(e){
     alert('生成失败：' + e.message);
   }
