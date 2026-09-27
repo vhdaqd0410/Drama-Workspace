@@ -892,8 +892,11 @@ class Database:
                 if not rd:
                     continue
                 # 统一取 YYYY-MM 前缀比较
+                # 注意：仅当离职月份【早于】当前月才删除（= 次月自动删除）。
+                # 用 < 而非 <=：否则填本月离职日期会在当月启动时就被删，
+                # 导致本月报表无法标红/显示离职日期。
                 ym = rd[:7]
-                if ym and ym <= cur_ym:
+                if ym and ym < cur_ym:
                     with self.get_conn() as conn:
                         conn.execute("DELETE FROM team_members WHERE name=?", (name,))
                     removed.append(name)

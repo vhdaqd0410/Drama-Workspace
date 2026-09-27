@@ -362,14 +362,26 @@ def load_overtime_map(overtime_file):
     return result
 
 
-def parse_projects(df, default_year=None, overtime_map=None):
-    """解析项目表；项目标题不完整时跳过其分配行并输出明确警告。"""
+def parse_projects(df, default_year=None, overtime_map=None,
+                   domestic_ids=None, domestic_names=None):
+    """解析项目表；项目标题不完整时跳过其分配行并输出明确警告。
+
+    domestic_ids / domestic_names：工作台标记为「国内」的项目 ID / 名称集合。
+    命中者项目类型强制为 AI真人（即使项目名里不含「国内」）。
+    """
     _force_utf8_stdio()  # 确保 print 特殊字符不触发 GBK 报错
     records = []
     proj_name, proj_id, end_date = '', '', None
     project_catalog = {}
     group_pids = {g: set() for g in GROUPS}
     overtime_map = overtime_map or {}
+    _dom_ids = {str(x) for x in (domestic_ids or [])}
+    _dom_names = {str(x).strip() for x in (domestic_names or [])}
+
+    def _ptype(pid, raw_name, cleaned_name):
+        if (pid and str(pid) in _dom_ids) or (raw_name and raw_name in _dom_names):
+            return 'AI真人'
+        return project_type_for(cleaned_name)
 
     for i in range(len(df)):
         c0 = clean(df.iloc[i, 0])
@@ -399,6 +411,7 @@ def parse_projects(df, default_year=None, overtime_map=None):
                 'AI项目名称': proj_name,
                 '开始日期': end_date - datetime.timedelta(days=1),
                 '结束日期': end_date,
+                '项目类型': _ptype(proj_id, c0, proj_name),
             }
 
         # 解析当前项目的超时集数（从 overtime_map 取）
@@ -430,7 +443,7 @@ def parse_projects(df, default_year=None, overtime_map=None):
                         '身份证姓名': name,
                         '角色': normalize_role(ROLE_MAP[name]),
                         '项目ID': proj_id,
-                        '项目类型': project_type_for(proj_name),
+                        '项目类型': _ptype(proj_id, c0, proj_name),
                         'AI项目名称': proj_name,
                         '开始日期': start_date,
                         '结束日期': end_date,
@@ -462,7 +475,7 @@ def parse_projects(df, default_year=None, overtime_map=None):
                 '身份证姓名': leader_name,
                 '角色': '剪辑组长',
                 '项目ID': pid,
-                '项目类型': project_type_for(proj_name),
+                '项目类型': project.get('项目类型') or project_type_for(project.get('AI项目名称')),
                 'AI项目名称': project['AI项目名称'],
                 '开始日期': project['开始日期'],
                 '结束日期': project['结束日期'],
@@ -844,6 +857,20 @@ def _auto_fit_sheet(ws, data_start, last_row):
         pass
 
 
+def _fmt_resign_remark(rd):
+    """离职日期 → 备注文案：'8.19离职'（月.日）或原样。"""
+    s = str(rd or '').strip()
+    if not s:
+        return ''
+    m = re.match(r'^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', s)
+    if m:
+        return '%d.%d离职' % (int(m.group(2)), int(m.group(3)))
+    m = re.match(r'^(\d{1,2})[-/月](\d{1,2})', s)
+    if m:
+        return '%d.%d离职' % (int(m.group(1)), int(m.group(2)))
+    return s
+
+
 def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
                         data_font, center_align, center_wrap, full_border, opts=None):
     """按人员合并B-C列和M-T列，并填入汇总数据
@@ -991,6 +1018,11 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
             overtime_notes.append(f'项目{pid}: 集{eps_str}超4分(+{r["超时集数"]}集)')
 
     remark_parts = []
+    # 离职人员：备注中显示离职日期（opts['resigned'] = {姓名: 'YYYY-MM-DD'}）
+    _resigned = opts.get('resigned') or {}
+    _rd = _resigned.get(name)
+    if _rd:
+        remark_parts.append(_fmt_resign_remark(_rd))
     if group_bonus > 0:
         remark_parts.append(f"组内项目提成 +{group_bonus}")
     if overtime_notes:
@@ -1000,6 +1032,16 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
         c = ws.cell(start, 20, '\n'.join(remark_parts))
         c.font = Font(name='宋体', size=9, bold=False)
         c.alignment = center_wrap; c.border = full_border
+
+    # 离职人员：姓名/职位区标红（在最后覆盖样式，避免被前面的角色底色覆盖）
+    if _rd:
+        try:
+            _red = Font(name='宋体', size=11, bold=True, color='CC0000')
+            for _rr in range(start, end + 1):
+                ws.cell(_rr, 2).font = _red
+                ws.cell(_rr, 3).font = _red
+        except Exception:
+            pass
 
 
 # ===================== 统计简报 (Sheet2) =====================

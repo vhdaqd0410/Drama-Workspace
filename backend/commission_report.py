@@ -189,6 +189,56 @@ def validate_report_data(records, df, project_file, db=None, month=None):
     return issues
 
 
+def _load_domestic_projects(db, month=None):
+    """读工作台 DB 中标了「国内」（is_domestic=1）的项目，返回 (ids, names)。"""
+    ids, names = set(), set()
+    if db is None:
+        return ids, names
+    try:
+        for p in db.get_all_projects():
+            if month and (p.get("project_month") or "") and (p.get("project_month") or "") != month:
+                continue
+            if int(p.get("is_domestic") or 0) == 1:
+                nm = (p.get("name") or "").strip()
+                if nm:
+                    names.add(nm)
+                    import re as _re
+                    nums = [m for m in _re.findall(r"\d+", nm) if not m.startswith("0")]
+                    if nums:
+                        ids.add(max(nums, key=lambda x: (len(x), int(x))))
+    except Exception as e:
+        logger.warning("读取国内标记项目失败: %s", e)
+    return ids, names
+
+
+def _load_resigned_members(db):
+    """读团队表里填了离职日期（resign_date）的成员，返回 {姓名: 日期}。"""
+    out = {}
+    if db is None:
+        return out
+    try:
+        with db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT name, resign_date FROM team_members "
+                "WHERE resign_date IS NOT NULL AND resign_date != ''"
+            ).fetchall()
+        for r in rows:
+            try:
+                d = dict(r) if not isinstance(r, dict) else r
+                nm = (d.get("name") or "").strip()
+                rd = (d.get("resign_date") or "").strip()
+            except Exception:
+                try:
+                    nm = (r[0] or "").strip(); rd = (r[1] or "").strip()
+                except Exception:
+                    continue
+            if nm and rd:
+                out[nm] = rd
+    except Exception as e:
+        logger.warning("读取离职成员失败: %s", e)
+    return out
+
+
 def build_report(month, output_dir=None, db=None):
     """生成月度提成表，返回 {ok, path, month, title, records, people, projects, error}。
 
@@ -256,7 +306,12 @@ def build_report(month, output_dir=None, db=None):
     except Exception:
         pass
 
-    records, group_pids = gc.parse_projects(df, default_year=year)
+    # 工作台数据传导：国内标记（项目类型→AI真人）、离职成员（标红+备注）
+    dom_ids, dom_names = _load_domestic_projects(db, month=month)
+    resigned = _load_resigned_members(db)
+
+    records, group_pids = gc.parse_projects(df, default_year=year,
+                                            domestic_ids=dom_ids, domestic_names=dom_names)
     if not records:
         return {"ok": False, "error": "项目文件未解析到有效记录：%s" % os.path.basename(project_file)}
 
@@ -278,6 +333,7 @@ def build_report(month, output_dir=None, db=None):
         "full_role": True,       # 职位列用完整角色名（一卡剪辑/二卡剪辑/剪辑助理/剪辑组长）
         "use_rule_desc": True,   # 提成构成用配置原值（不带硬编码后缀）
         "highlight_roles": ["一卡剪辑"],  # 本月卡前（一卡剪辑）规则一律全标黄
+        "resigned": resigned,            # {姓名: 离职日期}，命中者标红+备注写离职日期
     }
     # 只产出这张 xlsx（不生成仪表盘 HTML，避免桌面多余文件）
     _orig_html = getattr(gc, "generate_html_dashboard", None)
