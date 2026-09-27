@@ -124,6 +124,7 @@ async function loadReportTab(){
     <button class="btn btn-sm btn-primary" onclick="_loadReportData();if(typeof renderWorkloadBoard==='function')renderWorkloadBoard('reportWorkloadBoard')">🔍 查看报告</button>
     <button class="btn btn-sm" id="btnCommission" onclick="showCommissionReport()" style="background:#af52de;color:#fff" title="从分集数据计算本月每人绩效与提成">💰 提成/绩效</button>
     <button class="btn btn-sm" id="btnPersonCards" onclick="showPersonCards()" style="background:#0071e3;color:#fff" title="年度每人工作量卡片与趋势">👥 个人卡片</button>
+    <button class="btn btn-sm" onclick="exportCommissionReport()" style="background:#ff9500;color:#fff" title="按分集数据生成月度最终提成表（Excel）">📊 生成提成表</button>
     <button class="btn btn-sm" onclick="_downloadExcel()" style="background:#34c759;color:#fff">📥 下载 Excel</button>
   </div>
   <div id="reportWorkloadBoard" style="margin-bottom:20px"></div>
@@ -393,4 +394,25 @@ function _downloadExcel(){
   const key = window.__API_KEY__ || '';
   const url = '/api/report/monthly/export?month=' + month + (key ? '&key=' + encodeURIComponent(key) : '');
   window.open(url, '_blank');
+}
+
+// 生成月度最终提成表（复用提成工具的生成规律，直接在工作台产出 Excel）
+async function exportCommissionReport(){
+  const month = document.getElementById('reportMonth')?.value || '';
+  if(!month){ toast && toast('请先选择月份','warning'); return; }
+  const msg = '正在按分集数据生成 ' + month + ' 月度提成表...';
+  if(typeof toast === 'function') toast(msg, 'info');
+  try{
+    const d = await api('POST', '/api/commission/report', {month: month, open: 1});
+    if(!d || !d.ok){
+      alert('生成失败：' + ((d && (d.error || d.message)) || '未知错误'));
+      return;
+    }
+    const info = '✅ 已生成：' + d.path + '\n人员 ' + d.people + ' 人 · 项目 ' + d.projects + ' 部 · '
+               + '全组提成 ' + (d.total_commission||0) + ' 元';
+    if(typeof toast === 'function') toast('已生成并打开提成表', 'success');
+    alert(info);
+  }catch(e){
+    alert('生成失败：' + e.message);
+  }
 }

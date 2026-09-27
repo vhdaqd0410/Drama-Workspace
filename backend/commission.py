@@ -233,6 +233,38 @@ def register_routes(app, db):
             return jsonify({"ok": False, "message": str(e)}), 500
 
 
+    @app.route("/api/commission/report", methods=["GET", "POST"])
+    def commission_report():
+        """月度最终提成报表（功能）：直接在工作台生成提成表 xlsx。
+
+        ?month=YYYY-MM（默认当月）。生成到桌面，返回文件路径。
+        ?open=1 时同时用系统默认程序打开。
+        """
+        from datetime import datetime
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+        else:
+            body = request.args
+        month = (body.get("month") or "") or datetime.now().strftime("%Y-%m")
+        do_open = str(body.get("open") or "").lower() in ("1", "true", "yes")
+        out_dir = (body.get("dir") or "").strip() or None
+        try:
+            from commission_report import build_report
+            res = build_report(month, output_dir=out_dir, db=db)
+            if not res.get("ok"):
+                res = dict(res)
+                res.setdefault("message", res.get("error") or "生成失败")
+                return jsonify(res), 400
+            if do_open:
+                try:
+                    os.startfile(res["path"])
+                except Exception as oe:
+                    logger.warning("打开提成表失败: %s", oe)
+            return jsonify(res)
+        except Exception as e:
+            logger.exception("生成月度提成报表失败: %s", e)
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @app.route("/api/commission/launch", methods=["POST"])
     def commission_launch():
         """启动提成工具 GUI（子进程，新窗口打开，保留全部功能）。"""

@@ -559,7 +559,17 @@ def compute_commission(records, group_pids):
 
 # ===================== Excel生成 =====================
 
-def generate_excel(records, commission_data, template_path, output_path, auto_open=True):
+def generate_excel(records, commission_data, template_path, output_path, auto_open=True, opts=None):
+    """生成提成表。
+
+    opts（可选，用于工作台“月度最终报表”）：
+      - title: 覆盖主标题（如 '制作部AI剪辑一组2026年08月提成表'）
+      - group_label: A列组别文案（默认 '剪辑一组'）
+      - swap_pr: True 时把 P/R 两列内容对调——
+                 P（超额提成）填提成合计的数值，R（提成合计）填计算过程公式。
+    不传 opts 时行为与旧版完全一致。
+    """
+    opts = opts or {}
     print(f"\n📝 正在生成Excel...")
 
     # 复制模板
@@ -576,11 +586,15 @@ def generate_excel(records, commission_data, template_path, output_path, auto_op
     ws = wb.active
 
     # 更新 Excel 主标题月份为数据文件真实月份（如 '后期剪辑部2026年07月提成表' → 八月）
+    # 工作台可传 opts['title'] 覆盖整条标题（如 '制作部AI剪辑一组2026年08月提成表'）
     try:
         title_cell = ws.cell(1, 2)
         if title_cell.value:
-            title_cell.value = re.sub(
+            _title = re.sub(
                 r'\d+年\d+月', TEMPLATE_DATE, str(title_cell.value))
+            if opts.get('title'):
+                _title = str(opts['title'])
+            title_cell.value = _title
     except Exception:
         pass
 
@@ -641,9 +655,10 @@ def generate_excel(records, commission_data, template_path, output_path, auto_op
         ws.cell(ri, 2).font = data_font
         ws.cell(ri, 2).alignment = center_align
 
-        # C: 职位
+        # C: 职位（opts['full_role'] 时用完整角色名，如“一卡剪辑”；否则用缩写“卡前”）
         if is_first:
-            ws.cell(ri, 3, display_role(r['角色']))
+            _disp = r['角色'] if opts.get('full_role') else display_role(r['角色'])
+            ws.cell(ri, 3, _disp)
         ws.cell(ri, 3).font = data_font
         ws.cell(ri, 3).alignment = center_align
 
@@ -716,9 +731,9 @@ def generate_excel(records, commission_data, template_path, output_path, auto_op
         ws.delete_rows(last_row + 1, ws.max_row - last_row)
 
     # ---- 合并单元格 ----
-    # A列：全部合并为"剪辑一组"
+    # A列：全部合并为组别文案（默认"剪辑一组"，工作台可传 group_label）
     ws.merge_cells(f'A{data_start}:A{last_row}')
-    ws.cell(data_start, 1, '剪辑一组')
+    ws.cell(data_start, 1, opts.get('group_label') or '剪辑一组')
     ws.cell(data_start, 1).font = data_font
     ws.cell(data_start, 1).alignment = center_align
     ws.cell(data_start, 1).border = full_border
@@ -733,7 +748,8 @@ def generate_excel(records, commission_data, template_path, output_path, auto_op
                 person_end = data_start + idx - 1
                 _apply_person_merge(ws, merge_start, person_end, cur_person,
                                     sorted_records, commission_data,
-                                    data_font, center_align, center_wrap, full_border)
+                                    data_font, center_align, center_wrap, full_border,
+                                    opts=opts)
             cur_person = r['身份证姓名']
             merge_start = data_start + idx
 
@@ -741,7 +757,8 @@ def generate_excel(records, commission_data, template_path, output_path, auto_op
     if cur_person:
         _apply_person_merge(ws, merge_start, last_row, cur_person,
                             sorted_records, commission_data,
-                            data_font, center_align, center_wrap, full_border)
+                            data_font, center_align, center_wrap, full_border,
+                            opts=opts)
 
     ws.freeze_panes = 'A4'
     _auto_fit_sheet(ws, data_start, last_row)
@@ -828,8 +845,12 @@ def _auto_fit_sheet(ws, data_start, last_row):
 
 
 def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
-                        data_font, center_align, center_wrap, full_border):
-    """按人员合并B-C列和M-T列，并填入汇总数据"""
+                        data_font, center_align, center_wrap, full_border, opts=None):
+    """按人员合并B-C列和M-T列，并填入汇总数据
+
+    opts['swap_pr']=True 时对调 P/R：P（超额提成）填提成合计数值，R（提成合计）填计算过程公式。
+    """
+    opts = opts or {}
     if end > start:
         # B/C列合并（A列已在外部全局合并）
         for col_letter in ['B', 'C']:
@@ -883,6 +904,7 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
         c.font = data_font; c.alignment = center_align; c.border = full_border
 
     # P: 超额提成（字段对调：此栏改填计算公式）
+    swap_pr = bool(opts.get('swap_pr'))
     if role == '剪辑组长':
         eps_price = rule.get('每集单价', 20)
         proj_price = rule.get('组内每部提成', 100)
@@ -895,27 +917,61 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
         else:
             short_price = rule.get('缺集每集扣', 50)
             p_value = f'-({quota}-{total_ep})×{short_price}'
-    c = ws.cell(start, 16, p_value)
-    c.font = Font(name='宋体', size=8, bold=False)
-    c.alignment = center_wrap; c.border = full_border
+    if swap_pr:
+        # P列填提成合计数值
+        c = ws.cell(start, 16, total_comm)
+        c.font = data_font; c.alignment = center_align; c.border = full_border
+        try:
+            if total_comm > 0:
+                c.fill = PatternFill('solid', fgColor='E6F7F0')
+            elif total_comm < 0:
+                c.fill = PatternFill('solid', fgColor='FEF0F0')
+                c.font = Font(name='宋体', size=14, bold=False, color='CC0000')
+        except Exception:
+            pass
+    else:
+        c = ws.cell(start, 16, p_value)
+        c.font = Font(name='宋体', size=8, bold=False)
+        c.alignment = center_wrap; c.border = full_border
 
     # Q: 提成构成（本月规则变动需标黄；文案按职位口径组长/卡前/卡后）
-    c = ws.cell(start, 17, commission_desc(role))
+    # opts['use_rule_desc'] 时直接用配置里的「提成构成描述」原值（不带硬编码后缀）
+    q_value = commission_desc(role)
+    if opts.get('use_rule_desc'):
+        q_value = (rule.get('提成构成描述') or q_value)
+    c = ws.cell(start, 17, q_value)
     c.font = Font(name='宋体', size=8, bold=False)
     c.alignment = center_wrap; c.border = full_border
 
-    # R: 提成合计（字段对调：此栏改填纯数字结果）
-    c = ws.cell(start, 18, total_comm)
-    c.font = data_font; c.alignment = center_align; c.border = full_border
-    # F: 条件格式 —— 提成合计为正标绿、为负标红
-    try:
-        if total_comm > 0:
-            c.fill = PatternFill('solid', fgColor='E6F7F0')
-        elif total_comm < 0:
-            c.fill = PatternFill('solid', fgColor='FEF0F0')
-            c.font = Font(name='宋体', size=14, bold=False, color='CC0000')
-    except Exception:
-        pass
+    # R: 提成合计（字段对调时改填计算过程公式文本）
+    if swap_pr:
+        if role == '剪辑组长':
+            eps_price = rule.get('每集单价', 20)
+            proj_price = rule.get('组内每部提成', 100)
+            r_value = f'{total_ep}×{eps_price}+{project_count}×{proj_price}={total_comm}'
+        else:
+            quota = rule.get('基准集数', 40 if role == '一卡剪辑' else 120)
+            if total_ep >= quota:
+                over_price = rule.get('超额每集', 20)
+                r_value = f'({total_ep}-{quota})×{over_price}={total_comm}'
+            else:
+                short_price = rule.get('缺集每集扣', 50)
+                r_value = f'-({quota}-{total_ep})×{short_price}={total_comm}'
+        c = ws.cell(start, 18, r_value)
+        c.font = Font(name='宋体', size=8, bold=False)
+        c.alignment = center_wrap; c.border = full_border
+    else:
+        c = ws.cell(start, 18, total_comm)
+        c.font = data_font; c.alignment = center_align; c.border = full_border
+        # F: 条件格式 —— 提成合计为正标绿、为负标红
+        try:
+            if total_comm > 0:
+                c.fill = PatternFill('solid', fgColor='E6F7F0')
+            elif total_comm < 0:
+                c.fill = PatternFill('solid', fgColor='FEF0F0')
+                c.font = Font(name='宋体', size=14, bold=False, color='CC0000')
+        except Exception:
+            pass
 
     # S: 奖/罚（不填，留空）
 
