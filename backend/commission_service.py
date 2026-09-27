@@ -95,15 +95,25 @@ def sync_team_titles_to_commission(db):
 
     工作台报告以团队称号(team_members.title)为准，但独立的提成工具 GUI
     生成 Excel 时读的是 config.json「人员角色」。此函数让两者口径一致：
-    有称号的成员写回 config.json，无称号的成员从「人员角色」移除。
-    在团队增/删/改成员后调用。返回成功写入的角色数。
+    把有称号的成员按团队称号写入 config.json 的「人员角色」。
+
+    采用「合并」而非整体重建：只覆盖/新增团队里有称号的人，保留
+    config.json 原有角色（包括已不在团队但被「小组/人员排序/模板」引用的
+    成员），避免破坏配置完整性导致校验失败。
+    在团队增/删/改成员后调用。返回写入的角色数。
     """
     roles = _team_title_roles(db)
+    if not roles:
+        return 0
     try:
         with open(_PLUGIN_CFG, "r", encoding="utf-8") as f:
             cfg = json.load(f) or {}
-        # 「人员角色」以团队称号为准，整体重建
-        cfg["人员角色"] = dict(roles)
+        person_roles = cfg.get("人员角色", {}) or {}
+        if not isinstance(person_roles, dict):
+            person_roles = {}
+        # 合并：团队称号覆盖同名人，保留其他人（不删）
+        person_roles.update(roles)
+        cfg["人员角色"] = person_roles
         dir_path = os.path.dirname(_PLUGIN_CFG)
         import tempfile as _tf
         with _tf.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",

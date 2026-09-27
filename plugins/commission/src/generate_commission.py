@@ -585,7 +585,7 @@ def generate_excel(records, commission_data, template_path, output_path, auto_op
         pass
 
     data_font = copy(ws.cell(4, 2).font) if ws.cell(4, 2).font else Font(name='宋体', size=11)
-    date_fmt = 'yyyy"年"m"月"d"日";@'
+    date_fmt = 'yyyy-mm-dd'
     thin = Side(style='thin')
     full_border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=False)
