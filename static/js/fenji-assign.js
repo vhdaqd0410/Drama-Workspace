@@ -764,9 +764,10 @@ function fjRestoreSession(){
     if(s.total) $('fjTotal').value = s.total;
     if(Array.isArray(s.selected)) fjSelected = s.selected.filter(p => fjPersons.includes(p));
     if(s.ranges && typeof s.ranges === 'object'){
-      // 恢复上次的集数分配（之前这里被错误清空导致历史/会话丢失）
+      // 恢复上次的集数分配；只保留仍在团队/手动名单内的人（离职者不再带回）
       fjRanges = {};
-      Object.entries(s.ranges).forEach(([p,r]) => { if(r) fjRanges[p] = String(r); });
+      const _allow = function(p){ return !fjPersons.length || fjPersons.indexOf(p) >= 0; };
+      Object.entries(s.ranges).forEach(([p,r]) => { if(r && _allow(p)) fjRanges[p] = String(r); });
     }
     if(s.htOn){ $('fjHeadTailOn').checked = true; fjRenderHeadTail(); }
     if(s.htPerson) setTimeout(() => { $('fjHeadTailPerson').value = s.htPerson; }, 50);
