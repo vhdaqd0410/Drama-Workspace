@@ -150,11 +150,19 @@ a{color:var(--blue);text-decoration:none}
 .fj-hist-label{font-weight:600}
 .fj-hist-bar select{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:13px}
 .fj-section-title{font-size:12px;font-weight:600;color:var(--text-sec);margin:14px 0 6px;letter-spacing:.5px}
-.fj-chip-wrap{display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:8px;border:1px dashed var(--border);border-radius:8px;background:#fafafa;margin-bottom:6px}
+.fj-chip-wrap{display:flex;flex-direction:column;gap:2px;min-height:32px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px;background:#fafafa;margin-bottom:6px}
 .fj-chip{padding:5px 12px;border-radius:16px;background:#f0f1f3;color:var(--text-sec);font-size:13px;cursor:pointer;user-select:none;transition:all .15s;border:1px solid transparent}
 .fj-chip:hover{background:#e5e5ea}
 .fj-chip.selected{background:var(--blue);color:#fff;border-color:var(--blue)}
 .fj-chip-actions{display:flex;gap:8px;align-items:center;margin-bottom:4px}
+.fj-chip-group{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px dashed #ececf0}
+.fj-chip-group:last-child{border-bottom:none;padding-bottom:0}
+.fj-chip-group-label{flex:0 0 46px;text-align:center;font-size:12px;font-weight:700;padding:4px 0;border-radius:6px;color:#fff;margin-top:2px}
+.fj-chip-group-label.fj-role-ld{background:#c0453b}
+.fj-chip-group-label.fj-role-c1{background:#2f7ed8}
+.fj-chip-group-label.fj-role-c2{background:#3a9d5d}
+.fj-chip-group-label.fj-role-other{background:#8e8e93}
+.fj-chip-group-items{flex:1;display:flex;flex-wrap:wrap;gap:6px}
 .fj-add-person{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px}
 .fj-headrow{display:flex;gap:8px;align-items:center;margin:14px 0 8px;flex-wrap:wrap;position:sticky;top:95px;z-index:20;background:#fff;padding:8px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .fj-headtail{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-sec);margin-left:auto}
@@ -1786,8 +1794,8 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/project.js?v=20260815r"></script>
 <script src="/static/js/tabs.js?v=20260820a"></script>
 <script src="/static/js/episode.js?v=20260828del"></script>
-<script src="/static/js/fenji-init.js?v=20260905seq"></script>
-<script src="/static/js/fenji-assign.js?v=20260905add2"></script>
+<script src="/static/js/fenji-init.js?v=20260927team"></script>
+<script src="/static/js/fenji-assign.js?v=20260927team"></script>
 <script src="/static/js/qa.js?v=20260815d"></script>
 <script src="/static/js/team.js?v=20260818a"></script>
 <script src="/static/js/deliverables.js?v=20260905fix"></script>

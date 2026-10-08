@@ -21,13 +21,46 @@ async function loadFenjiProjects(targetName){
   var _seq = (window._fjLoadSeq || 0) + 1;
   window._fjLoadSeq = _seq;
   var _isLatest = function(){ return window._fjLoadSeq === _seq; };
-  // 问题5：始终合并团队设置里的所有成员到剪辑师列表，避免缺人
+  // 以「团队成员配置」为准重建剪辑师列表：离职移除、新人加入、按角色排序（组长→卡前→卡后）
   try{
     const td = await api('GET','/api/team/members');
-    const names = ((td && td.members) || []).map(function(m){ return (m && m.name) || ''; }).filter(Boolean);
-    names.forEach(function(n){ if(!fjPersons.includes(n)) fjPersons.push(n); });
+    const _roleOf = function(m){
+      var t = (m && m.title) || '';
+      if(t.indexOf('组长') >= 0) return '组长';
+      if(t.indexOf('卡前') >= 0 || t.indexOf('一卡') >= 0) return '卡前';
+      return '卡后';
+    };
+    // 已离职的不进列表：精确到日则到期即移除；只填到月则当月视为离职
+    var _curYM = (function(){ var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+    var _today = (function(){ var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); })();
+    const _isResigned = function(m){
+      var rd = String((m && m.resign_date) || '').trim();
+      if(!rd) return false;
+      if(rd.length <= 7) return rd <= _curYM;
+      return rd <= _today;
+    };
+    const _ROLE_ORDER = {'组长':0, '卡前':1, '卡后':2};
+    const team = ((td && td.members) || []).filter(function(m){ return m && m.name && !_isResigned(m); }).map(function(m){
+      return { name: m.name, role: _roleOf(m) };
+    });
+    team.sort(function(a,b){
+      var d = (_ROLE_ORDER[a.role]||9) - (_ROLE_ORDER[b.role]||9);
+      if(d) return d;
+      return a.name > b.name ? 1 : (a.name < b.name ? -1 : 0);
+    });
+    window._teamRole = {};
+    team.forEach(function(x){ window._teamRole[x.name] = x.role; });
+    var teamNames = team.map(function(x){ return x.name; });
+    window._teamNames = teamNames;
+    // 手动新增的额外人员（不在团队里）单独记录，避免每次重建被冲掉
+    var manual = [];
+    try{ manual = JSON.parse(localStorage.getItem('wb_fj_manual') || '[]'); }catch(e){ manual = []; }
+    if(!Array.isArray(manual)) manual = [];
+    manual = manual.filter(function(n){ return n && teamNames.indexOf(n) < 0; });
+    window._fjManual = manual;
+    fjPersons = teamNames.concat(manual);
+    fjSelected = fjSelected.filter(function(p){ return fjPersons.indexOf(p) >= 0; });
     fjSave(FJ_KEY_PERSONS, fjPersons);
-    window._teamNames = names;
   }catch(_){}
   try{
     const data = await api('GET','/api/projects/light');

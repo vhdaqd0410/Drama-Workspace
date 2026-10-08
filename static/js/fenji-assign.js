@@ -6,12 +6,31 @@ function fjRenderChips(){
   if(fjPersons.length === 0){
     wrap.innerHTML = '<div style="color:var(--text-sec);font-size:12px">暂无人员，在下方添加</div>';
   } else {
-    wrap.innerHTML = fjPersons.map(p => {
-      const sel = fjSelected.includes(p) ? 'selected' : '';
-      return `<div class="fj-chip ${sel}" onclick="fjToggle('${jsq(p)}')" title="${p}">${p}</div>`;
-    }).join('');
+    // 按角色分组排版：组长 / 卡前 / 卡后（额外人员归“其他”）
+    const roleMap = window._teamRole || {};
+    const order = ['组长','卡前','卡后','其他'];
+    const groups = {};
+    fjPersons.forEach(function(p){
+      const r = roleMap[p] || '其他';
+      (groups[r] = groups[r] || []).push(p);
+    });
+    let html = '';
+    order.forEach(function(r){
+      const list = groups[r];
+      if(!list || !list.length) return;
+      var _cls = r === '组长' ? 'ld' : (r === '卡前' ? 'c1' : (r === '卡后' ? 'c2' : 'other'));
+      html += '<div class="fj-chip-group">'
+        + '<div class="fj-chip-group-label fj-role-' + _cls + '">' + r + '</div>'
+        + '<div class="fj-chip-group-items">'
+        + list.map(function(p){
+            const sel = fjSelected.includes(p) ? 'selected' : '';
+            return '<div class="fj-chip ' + sel + '" onclick="fjToggle(\'' + jsq(p) + '\')" title="' + p + '">' + p + '</div>';
+          }).join('')
+        + '</div></div>';
+    });
+    wrap.innerHTML = html;
   }
-  $('fjSelCount').textContent = `(已选 ${fjSelected.length} 人)`;
+  $('fjSelCount').textContent = '(已选 ' + fjSelected.length + ' 人)';
 }
 function fjToggle(p){
   const i = fjSelected.indexOf(p);
@@ -98,6 +117,14 @@ function fjAddPerson(){
   if(!v) return;
   if(fjPersons.includes(v)){ toast('已存在','warning'); input.value=''; return; }
   fjPersons.push(v);
+  // 手动人员单独记录，团队重建时保留
+  try{
+    var _man = JSON.parse(localStorage.getItem('wb_fj_manual') || '[]');
+    if(!Array.isArray(_man)) _man = [];
+    if(_man.indexOf(v) < 0) _man.push(v);
+    localStorage.setItem('wb_fj_manual', JSON.stringify(_man));
+    window._fjManual = _man;
+  }catch(e){}
   fjSave(FJ_KEY_PERSONS, fjPersons);
   input.value = '';
   // 新增人员默认自动勾选，直接进入分配顺序，避免"加了却没反应"
@@ -627,15 +654,15 @@ function fjRestoreHist(idx){
   fjHistSelect = h;
 }
 function fjRestoreHistEntry(h){
-  // Extract persons & ranges from assign
+  // 恢复历史分配；但不覆盖团队剪辑师列表（离职者不再带回来）
   const ranges = h.assign || {};
-  fjPersons = Object.keys(ranges);
+  const _known = (typeof fjPersons !== 'undefined' && fjPersons) ? fjPersons : [];
+  const _keep = function(p){ return !_known.length || _known.indexOf(p) >= 0; };
   fjRanges = {};
-  Object.entries(ranges).forEach(([p, r]) => fjRanges[p] = r);
+  Object.keys(ranges).forEach(function(p){ if(_keep(p)) fjRanges[p] = ranges[p]; });
   // 勾选顺序按起始集号排序，表格/分配顺序直观
   fjSelected = Object.keys(fjRanges).sort(
     (a, b) => fjGetStartEpisode(fjRanges[a]) - fjGetStartEpisode(fjRanges[b]));
-  fjSave(FJ_KEY_PERSONS, fjPersons);
   const projSel = $('fjProject');
   if(projSel && h.path){
     // Try to match by name in select options
@@ -774,8 +801,14 @@ async function readFromProject(){
     // 合并团队成员到现有人员列表（不直接覆盖，避免丢掉用户手动添加的人员）
     const _team = (window._teamNames && window._teamNames.length ? window._teamNames : []);
     _team.forEach(function(n){ if(n && !fjPersons.includes(n)) fjPersons.push(n); });
+    // 项目里已分配到、但已不在团队（如离职）的人：保留其分集用于查看，
+    // 但不加入可选剪辑师列表（避免离职者被重新勾选）。
+    const _teamSet = {};
+    _team.forEach(function(n){ _teamSet[n] = 1; });
     Object.entries(byEditor).forEach(([name,eps]) => {
-      if(!fjPersons.includes(name)) fjPersons.push(name);
+      if(_team.length === 0 || _teamSet[name]){
+        if(!fjPersons.includes(name)) fjPersons.push(name);
+      }
       eps.sort((a,b)=>a-b);
       let s=eps[0],prev=eps[0],parts=[];
       for(let i=1;i<eps.length;i++){ if(eps[i]===prev+1)prev=eps[i]; else{ parts.push(s===prev?`${s}`:`${s}-${prev}`); s=prev=eps[i]; } }
