@@ -916,21 +916,36 @@ def api_local_project_progress(project_name):
 @app.route("/api/project/<path:project_name>/local_materials", methods=["GET"])
 def api_local_materials(project_name):
     """返回最近一次创建的本地剪辑项目的素材文件列表（供 CEP 导入 PR 素材箱）。
-    从 _local_project_tasks 的 result.material_target 目录递归收集视频/音频文件。"""
+    从 _local_project_tasks 的 result.material_target（01原素材）递归收集视频/音频文件；
+    同时返回 result.rough_target（02粗剪）下的粗剪文件，供「📥 素材」一并导入。"""
     import glob as _glob
     with sync_engine._lock:
         t = sync_engine._local_project_tasks.get(project_name, {})
     result = (t.get("result") or {}) if isinstance(t, dict) else {}
     mat_dir = result.get("material_target", "")
+    rough_dir = result.get("rough_target", "")
     prproj = result.get("prproj_path", "")
-    files = []
-    if mat_dir and os.path.isdir(mat_dir):
-        exts = ('.mp4', '.mov', '.mxf', '.avi', '.m4v', '.webm', '.wav', '.aiff', '.mp3', '.mts', '.m2ts')
-        for root, dirs, fnames in os.walk(mat_dir):
-            for fn in fnames:
-                if fn.lower().endswith(exts):
-                    files.append(os.path.join(root, fn))
-    return jsonify({"ok": True, "material_dir": mat_dir, "prproj_path": prproj, "files": files})
+    exts = ('.mp4', '.mov', '.mxf', '.avi', '.m4v', '.webm', '.wav', '.aiff', '.mp3', '.mts', '.m2ts')
+
+    def _collect(d):
+        out = []
+        if d and os.path.isdir(d):
+            for root, dirs, fnames in os.walk(d):
+                for fn in fnames:
+                    if fn.lower().endswith(exts):
+                        out.append(os.path.join(root, fn))
+        return out
+
+    # 兼容旧任务：没记 rough_target 时，按 01原素材 的兄弟目录 02粗剪 推断
+    if not rough_dir and mat_dir:
+        cand = os.path.join(os.path.dirname(mat_dir), "02粗剪")
+        if os.path.isdir(cand):
+            rough_dir = cand
+
+    files = _collect(mat_dir)
+    rough_files = _collect(rough_dir)
+    return jsonify({"ok": True, "material_dir": mat_dir, "prproj_path": prproj,
+                    "files": files, "rough_dir": rough_dir, "rough_files": rough_files})
 
 
 @app.route("/api/project/<path:project_name>/set_episodes", methods=["POST"])
