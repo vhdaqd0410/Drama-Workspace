@@ -130,6 +130,30 @@ class RegressionTests(unittest.TestCase):
         total = sum(c["total_commission"] for c in commission.values())
         self.assertEqual(total, 900)  # 任显翔 800 + 组长 1部×100
 
+    def test_leader_desc_says_first_10_episodes(self):
+        """组长提成构成文案：'20元/集，一部提成100元（只能剪前10集）'。"""
+        desc = gc.commission_desc("剪辑组长")
+        self.assertIn("只能剪前10集", desc)
+        self.assertNotIn("前十集", desc)
+
+    def test_mid_month_resignee_not_penalized_when_below_quota(self):
+        """当月中途离职且未达标：不扣缺集款（total=0, shortage=0）。"""
+        frame = pd.DataFrame([
+            ["4444-丙", None, None, "9.1下午18点交"],
+            [None, None, "任显翔：1-2", None],
+        ])
+        records, groups = gc.parse_projects(frame, default_year=2026)
+        # 任显翔本月只剪 2 集（远低于一卡 40 集基准）
+        resigned = {"任显翔": "2026-09-22"}
+        comm = gc.compute_commission(records, groups, resigned=resigned, month="2026-09")
+        self.assertEqual(comm["任显翔"]["total_commission"], 0)
+        self.assertEqual(comm["任显翔"]["shortage_penalty"], 0)
+        self.assertTrue(comm["任显翔"].get("mid_month_resigned"))
+        # 对照：非当月离职（往月）仍按缺集扣
+        comm2 = gc.compute_commission(records, groups,
+                                      resigned={"任显翔": "2026-08-10"}, month="2026-09")
+        self.assertLess(comm2["任显翔"]["total_commission"], 0)
+
     def test_overtime_is_explicit_input(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8", delete=False) as f:
             json.dump({"1111": [1, 2]}, f)

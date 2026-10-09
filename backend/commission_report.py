@@ -339,7 +339,8 @@ def build_report(month, output_dir=None, db=None):
     if issues:
         logger.warning("提成表数据校验发现 %d 处问题", len(issues))
 
-    commission_data = gc.compute_commission(records, group_pids)
+    commission_data = gc.compute_commission(records, group_pids,
+                                            resigned=resigned, month=month)
 
     opts = {
         "title": title,

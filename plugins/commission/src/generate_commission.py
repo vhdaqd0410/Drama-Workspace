@@ -183,7 +183,7 @@ def commission_desc(role):
     if role == '剪辑组长':
         eps_price = rule.get('每集单价', 20)
         proj_price = rule.get('组内每部提成', 100)
-        return f'{eps_price}元/集，一部提成{proj_price}元（只能剪前十集）'
+        return f'{eps_price}元/集，一部提成{proj_price}元（只能剪前10集）'
     quota = rule.get('基准集数', 120)
     over = rule.get('超额每集', 20)
     short = rule.get('缺集每集扣', 50)
@@ -513,15 +513,27 @@ def self_check(records):
 
 # ===================== 提成计算 =====================
 
-def compute_commission(records, group_pids):
+def compute_commission(records, group_pids, resigned=None, month=None):
     """
     提成计算（基准/单价均取当前 rules 配置，可设置）：
     - 一卡/二卡/剪辑助理：(总集数-基准)×超额单价，不足则-(基准-集数)×缺集扣
     - 组长：总集数×每集单价 + 全组去重项目数×组内每部提成
+
+    resigned: {姓名: 离职日期}（如 {'王田田': '2026-09-22'}）
+    month:    报表月份 'YYYY-MM'
+    当离职月份与报表月份相同时（= 当月中途离职），未完成任务不扣缺集款。
     """
     person_episodes = defaultdict(int)
     for r in records:
         person_episodes[r['身份证姓名']] += r['单项目数/集数']
+
+    # 当月中途离职的人：未达标不扣款
+    mid_month_resigned = set()
+    if resigned and month:
+        for nm, rd in (resigned or {}).items():
+            rd = str(rd or '').strip()
+            if rd and rd[:7] == str(month)[:7]:
+                mid_month_resigned.add(nm)
 
     # 全组去重项目数（所有小组的项目ID取并集）
     global_pids = {r['项目ID'] for r in records if r.get('项目ID')}
@@ -564,6 +576,18 @@ def compute_commission(records, group_pids):
                     'overtime_bonus': overtime, 'shortage_penalty': 0,
                     'group_project_bonus': 0, 'project_count': 0,
                     'total_commission': overtime,
+                    'desc': rule['提成构成描述'],
+                }
+            elif name in mid_month_resigned:
+                # 当月中途离职且未达标：不扣缺集款
+                # （中途离职不是个人绩效不达标，按 0 计，不适用「缺一集扣 XX 元」）
+                result[name] = {
+                    'total_episodes': total, 'role': role, 'rule': rule,
+                    'quota': quota, 'is_complete': '否',
+                    'overtime_bonus': 0, 'shortage_penalty': 0,
+                    'group_project_bonus': 0, 'project_count': 0,
+                    'total_commission': 0,
+                    'mid_month_resigned': True,
                     'desc': rule['提成构成描述'],
                 }
             else:
@@ -950,11 +974,16 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
     #   例：'-(120-119)×50=-50'
     # P: 任务超额提成金额 —— 达标时填计算过程
     #   例：'(155-40)×20=2300' / 组长 '32×20+30×100=3640'
+    # 当月中途离职：未达标也不扣款，O/P 均留空（不算「缺集」）
     total_comm_num = total_comm
-    if role == '剪辑组长':
+    mid_resigned = bool(cd.get('mid_month_resigned'))
+    if mid_resigned:
+        calc_text = ''
+    elif role == '剪辑组长':
         eps_price = rule.get('每集单价', 20)
         proj_price = rule.get('组内每部提成', 100)
         calc_expr = f'{total_ep}×{eps_price}+{project_count}×{proj_price}'
+        calc_text = f'{calc_expr}={total_comm_num}'
     else:
         quota = rule.get('基准集数', 40 if role == '一卡剪辑' else 120)
         if total_ep >= quota:
@@ -963,9 +992,12 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
         else:
             short_price = rule.get('缺集每集扣', 50)
             calc_expr = f'-({quota}-{total_ep})×{short_price}'
-    calc_text = f'{calc_expr}={total_comm_num}'
+        calc_text = f'{calc_expr}={total_comm_num}'
 
-    if shortage > 0:
+    if mid_resigned:
+        # 当月中途离职且未达标：不扣款，O/P 都留空（空白即无扣无奖）
+        pass
+    elif shortage > 0:
         # 未达标 → O 填计算过程
         c = ws.cell(start, 15, calc_text)
         c.font = Font(name='宋体', size=8, bold=False)
@@ -992,12 +1024,18 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
     c.alignment = center_wrap; c.border = full_border
 
     # R: 提成合计 —— 填数值本身（负数表示缺集扣款），正绿负红
-    c = ws.cell(start, 18, total_comm_num)
-    c.font = data_font; c.alignment = center_align; c.border = full_border
+    # 当月中途离职且未达标：不扣款，R 留空（写 0 会让人误读为“提成为 0”），
+    # 原因写进 T 备注。
+    if mid_resigned:
+        c = ws.cell(start, 18, None)
+        c.alignment = center_align; c.border = full_border
+    else:
+        c = ws.cell(start, 18, total_comm_num)
+        c.font = data_font; c.alignment = center_align; c.border = full_border
     try:
-        if total_comm_num > 0:
+        if not mid_resigned and total_comm_num > 0:
             c.fill = PatternFill('solid', fgColor='E6F7F0')
-        elif total_comm_num < 0:
+        elif not mid_resigned and total_comm_num < 0:
             c.fill = PatternFill('solid', fgColor='FEF0F0')
             c.font = Font(name='宋体', size=14, bold=False, color='CC0000')
     except Exception:
@@ -1020,6 +1058,9 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
     _rd = _resigned.get(name)
     if _rd:
         remark_parts.append(_fmt_resign_remark(_rd))
+    # 当月中途离职且未达标：注明不扣款原因
+    if mid_resigned and total_comm_num == 0 and shortage <= 0:
+        remark_parts.append('当月离职，未达标不扣除')
     if group_bonus > 0:
         remark_parts.append(f"组内项目提成 +{group_bonus}")
     if overtime_notes:
