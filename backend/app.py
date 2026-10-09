@@ -915,17 +915,19 @@ def api_local_project_progress(project_name):
 
 @app.route("/api/project/<path:project_name>/local_materials", methods=["GET"])
 def api_local_materials(project_name):
-    """返回最近一次创建的本地剪辑项目的素材文件列表（供 CEP 导入 PR 素材箱）。
-    从 _local_project_tasks 的 result.material_target（01原素材）递归收集视频/音频文件；
-    同时返回 result.rough_target（02粗剪）下的粗剪文件，供「📥 素材」一并导入。"""
+    """返回本地剪辑项目的素材文件列表（供 CEP 导入 PR 素材箱）。
+
+    返回两组：01原素材 -> files，02粗剪 -> rough_files，插件分别导入「原素材 / 粗剪」两个素材箱。
+
+    定位策略（内存优先，磁盘兜底）：
+      1) 优先读 _local_project_tasks 记录的目标路径；
+      2) 内存里没有（进程重启后必然为空）时，按 local_project_root 扫描
+         「序号-项目名」目录，命中项目名后取其 01原素材 / 02粗剪。
+    早期实现只依赖内存态，重开工作台后连原素材都取不到，粗剪更取不到。
+    """
     import glob as _glob
-    with sync_engine._lock:
-        t = sync_engine._local_project_tasks.get(project_name, {})
-    result = (t.get("result") or {}) if isinstance(t, dict) else {}
-    mat_dir = result.get("material_target", "")
-    rough_dir = result.get("rough_target", "")
-    prproj = result.get("prproj_path", "")
-    exts = ('.mp4', '.mov', '.mxf', '.avi', '.m4v', '.webm', '.wav', '.aiff', '.mp3', '.mts', '.m2ts')
+
+    exts = (".mp4", ".mov", ".mxf", ".avi", ".m4v", ".webm", ".wav", ".aiff", ".mp3", ".mts", ".m2ts")
 
     def _collect(d):
         out = []
@@ -936,11 +938,56 @@ def api_local_materials(project_name):
                         out.append(os.path.join(root, fn))
         return out
 
-    # 兼容旧任务：没记 rough_target 时，按 01原素材 的兄弟目录 02粗剪 推断
+    with sync_engine._lock:
+        task = sync_engine._local_project_tasks.get(project_name, {})
+    result = (task.get("result") or {}) if isinstance(task, dict) else {}
+    mat_dir = result.get("material_target", "") or ""
+    rough_dir = result.get("rough_target", "") or ""
+    prproj = result.get("prproj_path", "") or ""
+
+    # ---- 磁盘兜底：按项目名在本地项目盘里找「序号-项目名」 ----
+    if not (mat_dir and os.path.isdir(mat_dir)) or not (rough_dir and os.path.isdir(rough_dir)):
+        try:
+            root = (db.get_setting("local_project_root", "") or "").strip()
+        except Exception:
+            root = ""
+        if root and os.path.isdir(root):
+            cands = []
+            try:
+                for name in os.listdir(root):
+                    full = os.path.join(root, name)
+                    if not os.path.isdir(full):
+                        continue
+                    stripped = re.sub(r"^\d+\s*[-_.、]\s*", "", name).strip()
+                    if name == project_name or stripped == project_name or project_name in name:
+                        exact = 0 if (name == project_name or stripped == project_name) else 1
+                        cands.append((exact, full))
+            except Exception:
+                cands = []
+            cands.sort(key=lambda x: x[0])
+            if cands:
+                base = cands[0][1]
+                if not (mat_dir and os.path.isdir(mat_dir)):
+                    p1 = os.path.join(base, "01原素材")
+                    if os.path.isdir(p1):
+                        mat_dir = p1
+                if not (rough_dir and os.path.isdir(rough_dir)):
+                    p2 = os.path.join(base, "02粗剪")
+                    if os.path.isdir(p2):
+                        rough_dir = p2
+                if not prproj:
+                    try:
+                        hits = _glob.glob(os.path.join(base, "工程文件", "*.prproj"))
+                        if hits:
+                            prproj = hits[0]
+                    except Exception:
+                        pass
+
+    # 兼容：material_dir 存在时，按兄弟目录推断 02粗剪
     if not rough_dir and mat_dir:
-        cand = os.path.join(os.path.dirname(mat_dir), "02粗剪")
-        if os.path.isdir(cand):
-            rough_dir = cand
+        cand2 = os.path.join(os.path.dirname(mat_dir), "02粗剪")
+        if os.path.isdir(cand2):
+            rough_dir = cand2
 
     files = _collect(mat_dir)
     rough_files = _collect(rough_dir)
