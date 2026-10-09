@@ -10,10 +10,12 @@
   2) 找不到对应月份的项目文件时，回退用工作台 DB 的 episode_plan 现构一张等价的项目表。
 
 生成逻辑复用 plugins/commission/src/generate_commission.py（不复制实现，避免两处漂移），
-并按工作台的“月度最终报表”口径输出：
-  - 主标题：制作部 + AI剪辑一组 + X月份 + 提成表
+并按最新模板「AI后期剪辑提成表模板.xlsx」的月度最终报表口径输出：
+  - 主标题：后期剪辑部 + YYYY年MM月 + 剪辑X组 + 提成表
   - A列组别：AI剪辑一组
-  - P列（超额提成）填提成合计数值；R列（提成合计）填计算过程公式
+  - O列（任务未完成扣除金额）填计算过程（未达标时）
+  - P列（任务超额提成金额）填计算过程（达标时）
+  - R列（提成合计）填数值
 """
 import os
 import re
@@ -212,10 +214,21 @@ def _load_domestic_projects(db, month=None):
 
 
 def _load_resigned_members(db):
-    """读团队表里填了离职日期（resign_date）的成员，返回 {姓名: 日期}。"""
+    """读团队表里填了离职日期（resign_date）的成员，返回 {姓名: 日期}。
+
+    同时并入已归档的离职成员（团队表里已被次月清理掉、但历史报表仍需标注的），
+    在册数据优先（同名以当前在册值为准）。
+    """
     out = {}
     if db is None:
         return out
+    # 1) 归档（先取，随后被在册数据覆盖）
+    try:
+        if hasattr(db, "get_resigned_archive"):
+            out.update(db.get_resigned_archive() or {})
+    except Exception as e:
+        logger.warning("读离职成员归档失败: %s", e)
+    # 2) 在册成员里带离职日期的
     try:
         with db.get_conn() as conn:
             rows = conn.execute(
@@ -268,10 +281,12 @@ def build_report(month, output_dir=None, db=None):
     cn_month = data_cn if data_cn else _CN_MONTHS[m_num]
     out_month_num = data_month_num if data_month_num else m_num
 
-    # 组别与标题（工作台“月度最终报表”口径）
-    # 标题：后期剪辑部 + YYYY年MM月 + 提成表（如：后期剪辑部2026年09月提成表）
+    # 组别与标题（最新模板口径）
+    # 主标题：后期剪辑部 + YYYY年MM月 + 剪辑一组 + 提成表
+    #         （模板 B1 为「后期剪辑部2026年09月剪辑X组提成表」，X→一）
+    # A列组别：AI剪辑一组（模板 A4 为「A\nI\n剪\n辑\nx\n组」）
     group_label = "AI剪辑一组"
-    title = "后期剪辑部%04d年%02d月提成表" % (year, out_month_num)
+    title = "后期剪辑部%04d年%02d月剪辑一组提成表" % (year, out_month_num)
 
     # 输出文件
     if not output_dir:
@@ -329,7 +344,6 @@ def build_report(month, output_dir=None, db=None):
     opts = {
         "title": title,
         "group_label": group_label,
-        "swap_pr": True,
         "full_role": False,      # 职位列显示 组长/卡前/卡后（三种口径）
         "use_rule_desc": True,   # 提成构成用配置原值（不带硬编码后缀）
         "highlight_roles": ["一卡剪辑"],  # 本月卡前（一卡剪辑）规则一律全标黄

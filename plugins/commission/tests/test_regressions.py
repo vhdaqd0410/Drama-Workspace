@@ -108,9 +108,27 @@ class RegressionTests(unittest.TestCase):
 
             sheet = load_workbook(output).active
             self.assertEqual(sheet["M4"].value, 80)
-            # P列是算式文本（一卡：超额(80-40)×20），R列是结果数字
-            self.assertEqual(sheet["P4"].value, "(80-40)×20")
+            # 新模板口径：P列（任务超额提成金额）= 计算过程，R列（提成合计）= 数值
+            self.assertEqual(sheet["P4"].value, "(80-40)×20=800")
             self.assertEqual(sheet["R4"].value, 800)
+
+    def test_people_without_records_are_not_charged_shortage(self):
+        """本月无任何记录的人不应被按缺集扣款（否则汇总会出现幽灵负数）。"""
+        frame = pd.DataFrame([
+            ["3333-甲", None, None, "7.3下午18点交"],
+            [None, None, "任显翔：1-80", None],
+        ])
+        records, groups = gc.parse_projects(frame, default_year=2025)
+        commission = gc.compute_commission(records, groups)
+        # 只有任显翔有记录
+        self.assertIn("任显翔", commission)
+        idle = [n for n in gc.NAME_ORDER if n not in commission]
+        self.assertTrue(idle, "应有人本月无记录")
+        for n in idle:
+            self.assertNotIn(n, commission, "%s 本月无记录，不应被计入缺集扣款" % n)
+        # 所有人合计 = 本月实得（组长含组内项目提成）
+        total = sum(c["total_commission"] for c in commission.values())
+        self.assertEqual(total, 900)  # 任显翔 800 + 组长 1部×100
 
     def test_overtime_is_explicit_input(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8", delete=False) as f:

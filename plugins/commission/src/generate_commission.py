@@ -530,7 +530,13 @@ def compute_commission(records, group_pids):
     total_unique_projects = len(global_pids)
 
     result = {}
+    # 只统计本月有记录的人
+    # （config 里的「人员角色」是全员花名册；本月未参与任何项目的人不应该
+    #   被按「缺集」扣款，否则汇总会出现 -6000 这类幽灵负数，与表内 R 列不一致）
+    names_with_records = {r['身份证姓名'] for r in records}
     for name in NAME_ORDER:
+        if name not in names_with_records:
+            continue
         total = person_episodes.get(name, 0)
         role = normalize_role(ROLE_MAP.get(name, '一卡剪辑'))
         rule = RULES.get(role, RULES['一卡剪辑'])
@@ -580,11 +586,19 @@ def generate_excel(records, commission_data, template_path, output_path, auto_op
     """生成提成表。
 
     opts（可选，用于工作台“月度最终报表”）：
-      - title: 覆盖主标题（如 '制作部AI剪辑一组2026年08月提成表'）
+      - title: 覆盖主标题（如 '后期剪辑部2026年09月剪辑一组提成表'）
       - group_label: A列组别文案（默认 '剪辑一组'）
-      - swap_pr: True 时把 P/R 两列内容对调——
-                 P（超额提成）填提成合计的数值，R（提成合计）填计算过程公式。
-    不传 opts 时行为与旧版完全一致。
+      - full_role: True 时 C 列用完整角色名（一卡剪辑），否则用缩写（卡前）
+      - use_rule_desc: True 时 Q 列用配置里的「提成构成描述」原值
+      - highlight_roles: 需要整格标黄的角色（本月规则变动者）
+      - resigned: {姓名: 离职日期}，命中者姓名/职位标红 + 备注写离职日期
+
+    填写口径（对齐最新模板 AI后期剪辑提成表模板.xlsx）：
+      - O（任务未完成扣除金额）：未达标时填计算过程，如 '(120-119)×50=50'
+      - P（任务超额提成金额）：达标时填计算过程，如 '(155-40)×20=2300'
+                                  组长填 '32×20+30×100=3640'
+      - R（提成合计）：填数值本身（负数表示缺集扣款）
+    不传 opts 时仅标题/组别/列填写口径按上述规则，其余与旧版一致。
     """
     opts = opts or {}
     print(f"\n📝 正在生成Excel...")
@@ -879,7 +893,10 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
                         data_font, center_align, center_wrap, full_border, opts=None):
     """按人员合并B-C列和M-T列，并填入汇总数据
 
-    opts['swap_pr']=True 时对调 P/R：P（超额提成）填提成合计数值，R（提成合计）填计算过程公式。
+    填写口径（对齐最新模板）：
+      O（任务未完成扣除金额）= 未达标时的计算过程，如 '-(120-119)×50=-50'
+      P（任务超额提成金额）= 达标时的计算过程，如 '(155-40)×20=2300'
+      R（提成合计）        = 数值本身
     """
     opts = opts or {}
     if end > start:
@@ -929,39 +946,33 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
     c = ws.cell(start, 14, is_complete)
     c.font = data_font; c.alignment = center_align; c.border = full_border
 
-    # O: 任务未完成扣除金额
-    if shortage > 0:
-        c = ws.cell(start, 15, shortage)
-        c.font = data_font; c.alignment = center_align; c.border = full_border
-
-    # P: 超额提成（字段对调：此栏改填计算公式）
-    swap_pr = bool(opts.get('swap_pr'))
+    # O: 任务未完成扣除金额 —— 未达标时填计算过程（新模板口径）
+    #   例：'-(120-119)×50=-50'
+    # P: 任务超额提成金额 —— 达标时填计算过程
+    #   例：'(155-40)×20=2300' / 组长 '32×20+30×100=3640'
+    total_comm_num = total_comm
     if role == '剪辑组长':
         eps_price = rule.get('每集单价', 20)
         proj_price = rule.get('组内每部提成', 100)
-        p_value = f'{total_ep}×{eps_price}+{project_count}×{proj_price}'
+        calc_expr = f'{total_ep}×{eps_price}+{project_count}×{proj_price}'
     else:
         quota = rule.get('基准集数', 40 if role == '一卡剪辑' else 120)
         if total_ep >= quota:
             over_price = rule.get('超额每集', 20)
-            p_value = f'({total_ep}-{quota})×{over_price}'
+            calc_expr = f'({total_ep}-{quota})×{over_price}'
         else:
             short_price = rule.get('缺集每集扣', 50)
-            p_value = f'-({quota}-{total_ep})×{short_price}'
-    if swap_pr:
-        # P列填提成合计数值
-        c = ws.cell(start, 16, total_comm)
-        c.font = data_font; c.alignment = center_align; c.border = full_border
-        try:
-            if total_comm > 0:
-                c.fill = PatternFill('solid', fgColor='E6F7F0')
-            elif total_comm < 0:
-                c.fill = PatternFill('solid', fgColor='FEF0F0')
-                c.font = Font(name='宋体', size=14, bold=False, color='CC0000')
-        except Exception:
-            pass
+            calc_expr = f'-({quota}-{total_ep})×{short_price}'
+    calc_text = f'{calc_expr}={total_comm_num}'
+
+    if shortage > 0:
+        # 未达标 → O 填计算过程
+        c = ws.cell(start, 15, calc_text)
+        c.font = Font(name='宋体', size=8, bold=False)
+        c.alignment = center_wrap; c.border = full_border
     else:
-        c = ws.cell(start, 16, p_value)
+        # 达标（含组长）→ P 填计算过程
+        c = ws.cell(start, 16, calc_text)
         c.font = Font(name='宋体', size=8, bold=False)
         c.alignment = center_wrap; c.border = full_border
 
@@ -980,35 +991,17 @@ def _apply_person_merge(ws, start, end, name, sorted_records, comm_data,
     c.font = Font(name='宋体', size=8, bold=False)
     c.alignment = center_wrap; c.border = full_border
 
-    # R: 提成合计（字段对调时改填计算过程公式文本）
-    if swap_pr:
-        if role == '剪辑组长':
-            eps_price = rule.get('每集单价', 20)
-            proj_price = rule.get('组内每部提成', 100)
-            r_value = f'{total_ep}×{eps_price}+{project_count}×{proj_price}={total_comm}'
-        else:
-            quota = rule.get('基准集数', 40 if role == '一卡剪辑' else 120)
-            if total_ep >= quota:
-                over_price = rule.get('超额每集', 20)
-                r_value = f'({total_ep}-{quota})×{over_price}={total_comm}'
-            else:
-                short_price = rule.get('缺集每集扣', 50)
-                r_value = f'-({quota}-{total_ep})×{short_price}={total_comm}'
-        c = ws.cell(start, 18, r_value)
-        c.font = Font(name='宋体', size=8, bold=False)
-        c.alignment = center_wrap; c.border = full_border
-    else:
-        c = ws.cell(start, 18, total_comm)
-        c.font = data_font; c.alignment = center_align; c.border = full_border
-        # F: 条件格式 —— 提成合计为正标绿、为负标红
-        try:
-            if total_comm > 0:
-                c.fill = PatternFill('solid', fgColor='E6F7F0')
-            elif total_comm < 0:
-                c.fill = PatternFill('solid', fgColor='FEF0F0')
-                c.font = Font(name='宋体', size=14, bold=False, color='CC0000')
-        except Exception:
-            pass
+    # R: 提成合计 —— 填数值本身（负数表示缺集扣款），正绿负红
+    c = ws.cell(start, 18, total_comm_num)
+    c.font = data_font; c.alignment = center_align; c.border = full_border
+    try:
+        if total_comm_num > 0:
+            c.fill = PatternFill('solid', fgColor='E6F7F0')
+        elif total_comm_num < 0:
+            c.fill = PatternFill('solid', fgColor='FEF0F0')
+            c.font = Font(name='宋体', size=14, bold=False, color='CC0000')
+    except Exception:
+        pass
 
     # S: 奖/罚（不填，留空）
 

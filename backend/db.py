@@ -875,6 +875,9 @@ class Database:
 
         离职日期格式 YYYY-MM 或 YYYY-MM-DD；仅当 resign_date 非空且不晚于当前月
         才删除（次月自动删除的语义：填了上个月或更早的离职日期即删除）。
+
+        删除前会把「姓名 → 离职日期」写进 app_settings 的 resigned_archive，
+        这样清理后补做历史月份提成表时，仍能标红并写上离职日期。
         返回被删除的成员姓名列表。
         """
         from datetime import datetime as _dt
@@ -882,6 +885,7 @@ class Database:
         cur_ym = now.strftime("%Y-%m")
         removed = []
         try:
+            archive = self.get_resigned_archive()
             with self.get_conn() as conn:
                 rows = conn.execute(
                     "SELECT name, resign_date FROM team_members "
@@ -899,10 +903,24 @@ class Database:
                 if ym and ym < cur_ym:
                     with self.get_conn() as conn:
                         conn.execute("DELETE FROM team_members WHERE name=?", (name,))
+                    archive[name] = rd
                     removed.append(name)
+            if removed:
+                self.set_setting("resigned_archive", archive)
         except Exception:
             pass
         return removed
+
+    def get_resigned_archive(self):
+        """已归档的离职成员 {姓名: 离职日期}（已被自动清理、但历史报表仍需标注的）。"""
+        raw = self.get_setting("resigned_archive", "")
+        if not raw:
+            return {}
+        try:
+            d = json.loads(raw) if isinstance(raw, str) else raw
+            return {str(k): str(v) for k, v in d.items()} if isinstance(d, dict) else {}
+        except Exception:
+            return {}
 
     def update_member(self, name, **kwargs):
         if not kwargs:

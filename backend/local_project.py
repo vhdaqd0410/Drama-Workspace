@@ -8,6 +8,7 @@
 """
 import os
 import re
+import sys
 import json
 import shutil
 import logging
@@ -159,6 +160,19 @@ def _copy_file_robust(src, dst, unc_map=None):
         return False
 
 
+def _is_test_env():
+    """是否运行在测试进程中。
+
+    测试（pytest / unittest fixture）会直接调用 create_local_project 造临时工程，
+    真实启动 Premiere 会污染用户的「最近使用项目」并堆出一屏测试工程窗口。
+    这里做一道兜底：测试进程里永不拉起 PR（显式开关优先）。"""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    if "pytest" in sys.modules or "unittest" in sys.modules:
+        return True
+    return False
+
+
 def _find_pr_exe():
     """探测 Premiere Pro 可执行文件，优先 2025（用户指定用 PR2025）。"""
     candidates = [
@@ -220,10 +234,11 @@ def _has_files_except(src_dir, skip_name):
     return False
 
 
-def create_local_project(sync_engine, project_name, progress_cb=None):
+def create_local_project(sync_engine, project_name, progress_cb=None, auto_open_pr=True):
     """创建本地剪辑项目并拉取素材。返回 (ok, message, stats)。
 
     progress_cb(stage, done, total) 可选，用于进度上报。
+    auto_open_pr: 复制完工程模板后是否自动用 PR 打开。测试必须传 False。
     """
     def _prog(stage, done, total):
         if progress_cb:
@@ -432,14 +447,19 @@ def create_local_project(sync_engine, project_name, progress_cb=None):
         prproj_dst = os.path.join(eng_dir, prproj_name)
         if _copy_file_robust(pr_template, prproj_dst, unc_map):
             stats["pr_copied"] = True
-            pr_exe = db.get_setting("pr_exe_path", "").strip() or _find_pr_exe()
-            if pr_exe and os.path.isfile(pr_exe):
-                try:
-                    subprocess.Popen([pr_exe, prproj_dst])
-                    stats["pr_opened"] = True
-                    logger.info("已用 PR 打开工程: %s", prproj_dst)
-                except Exception as e:
-                    logger.warning("打开 PR 工程失败: %s", e)
+            if not auto_open_pr:
+                logger.info("已复制 PR 模板（未自动打开，auto_open_pr=False）: %s", prproj_dst)
+            elif _is_test_env():
+                logger.warning("检测到测试环境，跳过自动打开 PR: %s", prproj_dst)
+            else:
+                pr_exe = db.get_setting("pr_exe_path", "").strip() or _find_pr_exe()
+                if pr_exe and os.path.isfile(pr_exe):
+                    try:
+                        subprocess.Popen([pr_exe, prproj_dst])
+                        stats["pr_opened"] = True
+                        logger.info("已用 PR 打开工程: %s", prproj_dst)
+                    except Exception as e:
+                        logger.warning("打开 PR 工程失败: %s", e)
 
     _prog("完成", len(my_episodes), len(my_episodes))
 
