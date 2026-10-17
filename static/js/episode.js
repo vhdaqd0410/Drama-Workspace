@@ -404,6 +404,58 @@ function _compactRange(nums) {
     return parts.join(', ');
   }
 
+/* 按剪辑人员分组集号：返回 { groups: {人名: [集号]}, unassigned: [集号] } */
+function _epGroupByEditor(eps, plan) {
+    var groups = {}, unassigned = [];
+    for (var i = 0; i < eps.length; i++) {
+      var raw = eps[i];
+      var ep = parseInt(raw, 10);
+      if (isNaN(ep)) { unassigned.push(raw); continue; }
+      var creator = (plan && (plan[String(ep)] || plan[ep])) || null;
+      if (creator) {
+        if (!groups[creator]) groups[creator] = [];
+        groups[creator].push(ep);
+      } else {
+        unassigned.push(ep);
+      }
+    }
+    return { groups: groups, unassigned: unassigned };
+  }
+
+/* 渲染一组「人名 + 集号区间」行 */
+function _epPersonRowsHtml(byEditor, rowClass, unassignedClass) {
+    var rows = [];
+    for (var name in byEditor.groups) {
+      if (!byEditor.groups.hasOwnProperty(name)) continue;
+      rows.push('<div class="ep-person-row ' + (rowClass || '') + '"><span class="ep-person-name">' + htm(name) + '</span><span class="ep-person-range">' + _compactRange(byEditor.groups[name]) + '</span></div>');
+    }
+    if (byEditor.unassigned.length > 0) {
+      rows.push('<div class="ep-person-row ' + (unassignedClass || 'ep-person-unassigned') + '"><span class="ep-person-name">未分配</span><span class="ep-person-range">' + _compactRange(byEditor.unassigned) + '</span></div>');
+    }
+    return rows.join('');
+  }
+
+/* 明细面板：先「已完成」（绿），后「缺集」（红） */
+function _epDetailBlocksHtml(present, missing, plan, unnamed) {
+    var html = '';
+    if (present && present.length) {
+      html += '<div class="ep-block ep-block-done">'
+        + '<div class="ep-block-head">已完成 ' + present.length + ' 集</div>'
+        + '<div class="ep-person-grid">' + _epPersonRowsHtml(_epGroupByEditor(present, plan), 'ep-done', 'ep-done') + '</div>'
+        + '</div>';
+    }
+    if (missing && missing.length) {
+      html += '<div class="ep-block ep-block-miss">'
+        + '<div class="ep-block-head">缺 ' + missing.length + ' 集</div>'
+        + '<div class="ep-person-grid">' + _epPersonRowsHtml(_epGroupByEditor(missing, plan), '', 'ep-person-unassigned') + '</div>'
+        + '</div>';
+    }
+    if (unnamed && unnamed.length) {
+      html += '<div class="ep-unnamed-tip">另有 ' + unnamed.length + ' 个文件未识别集号</div>';
+    }
+    return html;
+  }
+
 function buildEpSummaryHtml(data, projectName, dbFallback, customStatus) {
     if (!data || !data.ok) {
       if (dbFallback) {
@@ -439,6 +491,7 @@ function buildEpSummaryHtml(data, projectName, dbFallback, customStatus) {
     }
     var total = data.total || 0;
     var missing = data.missing || [];
+    var present = data.present || [];
     var unnamed = data.unnamed || [];
     var plan = data.editor_plan || {};
     var curCount = data.current_count || 0;
@@ -448,13 +501,18 @@ function buildEpSummaryHtml(data, projectName, dbFallback, customStatus) {
     }
     if (missing.length === 0) {
       var detailHint = ' <div style="margin-top:8px"><button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>' + (customStatus === '修改中' ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-revising" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#ff9500;color:#fff">📝 修改预览</button>' : '') + ((customStatus === '待交付' || customStatus === '交付中' || customStatus === '已交付' || customStatus === '已完成') ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-delivery" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#34c759;color:#fff">📦 交付预览</button>' : '') + '</div>';
+      var okDetailId = 'ep-missing-detail-' + projectName.replace(/[^a-zA-Z0-9_]/g, '_');
+      var okFoldLabel = '▼ 展开明细';
       return {
         className: 'ep-missing-summary ok',
-        html: '✅ ' + curCount + '/' + total + ' 集 全部输出完成' + detailHint
+        html: '✅ ' + curCount + '/' + total + ' 集 全部输出完成'
+          + '<button class="ep-detail-btn ep-fold-btn" id="' + okDetailId + '-btn" onclick="toggleEpMissingDetail(\'' + okDetailId + '\', this, \'' + okFoldLabel + '\')">' + okFoldLabel + '</button>'
+          + '<div id="' + okDetailId + '" style="display:none">' + _epDetailBlocksHtml(present, [], plan, unnamed) + '</div>'
+          + detailHint
       };
     }
 
-    // 按剪辑人员分组
+    // 按剪辑人员分组（缺集）
     var groups = {};
     var unassigned = [];
     for (var i = 0; i < missing.length; i++) {
@@ -468,22 +526,8 @@ function buildEpSummaryHtml(data, projectName, dbFallback, customStatus) {
       }
     }
 
-    // 每人一行：<div class="ep-person-row"><b>人名</b><span class="ep-person-range">01-04, 12</span></div>
-    var personRows = [];
-    for (var name in groups) {
-      if (!groups.hasOwnProperty(name)) continue;
-      personRows.push('<div class="ep-person-row"><span class="ep-person-name">' + htm(name) + '</span><span class="ep-person-range">' + _compactRange(groups[name]) + '</span></div>');
-    }
-    if (unassigned.length > 0) {
-      personRows.push('<div class="ep-person-row ep-person-unassigned"><span class="ep-person-name">未分配</span><span class="ep-person-range">' + _compactRange(unassigned) + '</span></div>');
-    }
-
     var tipHtml = '<b>缺 ' + missing.length + '/' + total + ' 集</b>';
     if (unassigned.length > 0) tipHtml += '（<span class="ep-unassigned-count">' + unassigned.length + ' 集未分配</span>）';
-    var unnamedHtml = '';
-    if (unnamed && unnamed.length > 0) {
-      unnamedHtml = '<div class="ep-unnamed-tip">另有 ' + unnamed.length + ' 个文件未识别集号</div>';
-    }
 
     // 缺集详情文本（用于成片按钮悬停 tooltip）
     var tipDetail = '缺 ' + missing.length + '/' + total + ' 集';
@@ -498,26 +542,30 @@ function buildEpSummaryHtml(data, projectName, dbFallback, customStatus) {
 
     var detailBtn = '<div style="margin-top:8px"><button class="ep-detail-btn" data-action="ep-refresh" data-project="' + htm(projectName) + '" data-btn="null">🔄 刷新进度</button><button class="ep-detail-btn ep-deliv-btn" data-action="ep-deliverables" data-project="' + htm(projectName) + '" title="' + htm(tipDetail) + '" style="margin-left:6px;background:#0071e3;color:#fff">🎬 成片</button>' + (customStatus === '修改中' ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-revising" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#ff9500;color:#fff">📝 修改预览</button>' : '') + ((customStatus === '待交付' || customStatus === '交付中' || customStatus === '已交付' || customStatus === '已完成') ? '<button class="ep-detail-btn ep-deliv-btn" data-action="ep-delivery" data-project="' + htm(projectName) + '" style="margin-left:6px;background:#34c759;color:#fff">📦 交付预览</button>' : '') + '</div>';
 
-    var personDetailHtml = '<div class="ep-person-grid">' + personRows.join('') + '</div>' + unnamedHtml;
-    // 折叠：仅折叠"每人缺集明细"，成片/刷新等按钮始终显示在折叠区域外，方便直接操作
+    // 明细：先已完成（绿），后缺集（红）
+    var personDetailHtml = _epDetailBlocksHtml(present, missing, plan, unnamed);
+    // 折叠：仅折叠明细，成片/刷新等按钮始终显示在折叠区域外，方便直接操作
     var detailId = 'ep-missing-detail-' + projectName.replace(/[^a-zA-Z0-9_]/g, '_');
     var foldBtnId = detailId + '-btn';
+    var foldLabel = '▼ 展开明细';
     return {
       className: 'ep-missing-summary has-missing',
       html: tipHtml
-        + '<button class="ep-detail-btn ep-fold-btn" id="' + foldBtnId + '" onclick="toggleEpMissingDetail(\'' + detailId + '\', this)">▼ 展开缺集明细</button>'
+        + '<button class="ep-detail-btn ep-fold-btn" id="' + foldBtnId + '" onclick="toggleEpMissingDetail(\'' + detailId + '\', this, \'' + foldLabel + '\')">' + foldLabel + '</button>'
         + '<div id="' + detailId + '" style="display:none">' + personDetailHtml + '</div>'
         + detailBtn
     };
   }
 
-// 缺集明细展开/收起切换
-function toggleEpMissingDetail(detailId, btn){
+// 明细展开/收起切换（defaultLabel 缺省为「▼ 展开明细」）
+function toggleEpMissingDetail(detailId, btn, defaultLabel){
   var el = document.getElementById(detailId);
   if(!el) return;
   var show = el.style.display === 'none';
   el.style.display = show ? '' : 'none';
-  if(btn) btn.textContent = show ? '▲ 收起明细' : '▼ 展开缺集明细';
+  var label = defaultLabel || '▼ 展开明细';
+  var opened = label.replace('▼', '▲').replace('展开', '收起');
+  if(btn) btn.textContent = show ? opened : label;
 }
 
 function fetchEpisodeStatus(projectName) {

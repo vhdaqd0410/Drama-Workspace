@@ -353,6 +353,21 @@ a{color:var(--blue);text-decoration:none}
 .ep-person-unassigned .ep-person-range { color: #6b6b70; font-weight: 500; }
 .ep-unassigned-count { color: #a16207; }
 .ep-unnamed-tip { font-size: 11px; color: #86868b; margin-top: 3px; }
+/* 明细分块：先已完成（绿），后缺集（红） */
+.ep-block { margin-top: 6px; padding: 6px 8px; border-radius: 6px; }
+.ep-block-done { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.ep-block-miss { background: #fff5f5; border: 1px solid #fecaca; }
+.ep-block-head { font-size: 11px; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.3px; }
+.ep-block-done .ep-block-head { color: #15803d; }
+.ep-block-miss .ep-block-head { color: #c5221f; }
+.ep-block-done .ep-person-name { background: #d1fae5; color: #065f46; font-weight: 600; }
+.ep-block-done .ep-person-range { color: #047857; }
+.ep-block-miss .ep-person-name { background: #fee2e2; color: #991b1b; font-weight: 600; }
+.ep-block-miss .ep-person-range { color: #b91c1c; }
+.ep-block-done .ep-person-unassigned .ep-person-name { background: #e5e7eb; color: #6b6b70; }
+.ep-block-done .ep-person-unassigned .ep-person-range { color: #6b6b70; }
+.ep-block-miss .ep-person-unassigned .ep-person-name { background: #e5e7eb; color: #6b6b70; }
+.ep-block-miss .ep-person-unassigned .ep-person-range { color: #6b6b70; }
 .ep-detail-btn { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid currentColor; background: transparent; cursor: pointer; margin-top: 4px; color: inherit; font-family: inherit; }
 .ep-detail-btn:hover { opacity: 0.8; }
 .ep-fold-btn { float: right; margin-top: 0 !important; padding: 0 6px !important; font-size: 10.5px !important; border-color: transparent !important; background: transparent !important; color: #c5221f !important; opacity: .85; }
