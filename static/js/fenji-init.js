@@ -21,9 +21,14 @@ async function loadFenjiProjects(targetName){
   var _seq = (window._fjLoadSeq || 0) + 1;
   window._fjLoadSeq = _seq;
   var _isLatest = function(){ return window._fjLoadSeq === _seq; };
+  // 并行发两个请求：团队成员 + 项目轻列表
+  // （原来串行 await，白白多等一个网络往返；打开分集页时会明显卡一下）
+  var _teamP = api('GET','/api/team/members').catch(function(){ return null; });
+  var _lightP = api('GET','/api/projects/light').catch(function(){ return null; });
   // 以「团队成员配置」为准重建剪辑师列表：离职移除、新人加入、按角色排序（组长→卡前→卡后）
   try{
-    const td = await api('GET','/api/team/members');
+    const td = await _teamP;
+    if(td){
     const _roleOf = function(m){
       var t = (m && m.title) || '';
       if(t.indexOf('组长') >= 0) return '组长';
@@ -61,11 +66,12 @@ async function loadFenjiProjects(targetName){
     fjPersons = teamNames.concat(manual);
     fjSelected = fjSelected.filter(function(p){ return fjPersons.indexOf(p) >= 0; });
     fjSave(FJ_KEY_PERSONS, fjPersons);
+    }   // end if(td)
   }catch(_){}
   try{
-    const data = await api('GET','/api/projects/light');
+    const data = await _lightP;
     if(!_isLatest()) return;   // 已被更新的调用取代，放弃写 DOM
-    fenjiLight = Array.isArray(data) ? data : (data.projects||[]);
+    fenjiLight = Array.isArray(data) ? data : ((data && data.projects) || []);
     // 目标项目可能不在 light 列表里（如已完成项目只在 group_completed 桶）：
     // 动态补进去，否则下拉选不中、后续 readFromProject 会拿到空项目名
     if(targetName && !fenjiLight.some(p => p && p.name === targetName)){
@@ -79,13 +85,18 @@ async function loadFenjiProjects(targetName){
     }
     if(fenjiLight.length > 0){
       const savedVal = targetName || $('fjProject').value;
-      $('fjProject').innerHTML = '<option value="">— 选择项目 —</option>' +
-        fenjiLight.map(p => `<option value="${p.name}">${p.name} (${p.total_episodes||'?'}集)</option>`).join('');
+      const _opts = fenjiLight.map(function(p){
+        return '<option value="' + String(p.name).replace(/"/g, '&quot;') + '">'
+          + p.name + ' (' + (p.total_episodes || '?') + '集)</option>';
+      }).join('');
+      $('fjProject').innerHTML = '<option value="">— 选择项目 —</option>' + _opts;
       if(savedVal) $('fjProject').value = savedVal;
       // Also update headTailPerson dropdown
       const sel = $('fjHeadTailPerson');
       if(sel){
-        sel.innerHTML = '<option value="">选一位...</option>' + fjPersons.map(p => `<option value="${p}">${p}</option>`).join('');
+        sel.innerHTML = '<option value="">选一位...</option>' + fjPersons.map(function(p){
+          return '<option value="' + String(p).replace(/"/g, '&quot;') + '">' + p + '</option>';
+        }).join('');
       }
     }
   }catch(e){ if(!_isLatest()) return; updateLightLists(); }

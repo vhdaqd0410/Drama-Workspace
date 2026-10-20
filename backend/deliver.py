@@ -307,7 +307,7 @@ class DeliverMixin:
 
         self.db.update_project_status(
             project_name, delivery_status="delivering",
-            sync_progress="已发起 Shell 批量复制 ({} 个文件) — 看系统进度对话框".format(len(file_map)))
+            sync_progress="回传 0/%d 文件" % len(file_map))
 
         # 每个源目录独立发起一次批量 Shell.CopyHere
         errors = []
@@ -1434,7 +1434,13 @@ class DeliverMixin:
                     logger.warning("finish_deliver_run 失败: %s", _e)
 
     def _poll_deliver_progress(self, project_name):
-        """独立后台线程：周期性 os.walk 目标目录更新进度（不在 API 请求里做，避免卡死）"""
+        """独立后台线程：周期性统计目标目录文件数，实时更新进度。
+
+        口径统一：进度文案固定写成「回传 N/M 文件」。
+        批量回传（_poll_batch_copy_progress）、整目录交付、前端进度条
+        都按这一口径解析，避免三处显示不一致。
+        用 os.scandir 逐层计数（不取文件属性），比 os.walk + getsize 轻。
+        """
         for _ in range(240):  # 最多 240*2=480s
             _time.sleep(2)
             with self._lock:
@@ -1444,18 +1450,36 @@ class DeliverMixin:
                 if task.get("status") not in ("running", "starting"):
                     break
                 dst = task.get("dst", "")
+                total = task.get("total", 0) or 0
             if not dst:
                 continue
             try:
                 cur = 0
-                for _, _, files in os.walk(dst):
-                    cur += len(files)
+                stack = [dst]
+                while stack:
+                    d = stack.pop()
+                    try:
+                        with os.scandir(d) as it:
+                            for e in it:
+                                try:
+                                    if e.is_dir(follow_symlinks=False):
+                                        stack.append(e.path)
+                                    else:
+                                        cur += 1
+                                except OSError:
+                                    pass
+                    except OSError:
+                        pass
                 with self._lock:
                     task["current"] = cur
-                    if task["total"] > 0:
-                        task["pct"] = min(round(cur / task["total"] * 100), 99)
+                    if total > 0:
+                        task["pct"] = min(round(cur / total * 100), 99)
                     else:
                         task["pct"] = 0
+                if total > 0:
+                    self.db.update_project_status(
+                        project_name,
+                        sync_progress="回传 %d/%d 文件" % (min(cur, total), total))
             except OSError:
                 pass
 
@@ -1464,7 +1488,8 @@ class DeliverMixin:
             task = self._deliver_tasks.get(project_name, {})
             task["status"] = "running"
             task["message"] = "正在复制..."
-        self.db.update_project_status(project_name, sync_progress="正在复制 000交付 到制作部（请查看系统复制进度对话框）")
+            _total = task.get("total", 0) or 0
+        self.db.update_project_status(project_name, sync_progress="回传 0/%d 文件" % _total)
         try:
             # 使用和同步素材完全相同的 _copy_dir 逻辑：
             # 1. 桌面版优先 pywin32 COM 直调 Shell.Application.CopyHere → 弹系统进度对话框
@@ -1485,7 +1510,7 @@ class DeliverMixin:
                     delivery_status="delivered",
                     last_delivered_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     custom_status="已完成",
-                    sync_progress="交付完成（系统复制）",
+                    sync_progress="回传 %d/%d 文件（交付完成）" % (_total, _total),
                 )
                 # 交付完成后把项目归档到组内NAS的 00已完成 目录，
                 # 使其出现在首页"已完成"分组（而不是因"已完成"状态被过滤而消失）
@@ -2115,7 +2140,7 @@ class DeliverMixin:
 
         self.db.update_project_status(
             project_name, delivery_status="delivering",
-            sync_progress="已发起 Shell 批量复制 ({} 个文件) — 看系统进度对话框".format(len(existing)))
+            sync_progress="回传 0/%d 文件" % len(existing))
 
         errors = []
         try:
@@ -2266,7 +2291,7 @@ class DeliverMixin:
 
         self.db.update_project_status(
             project_name, delivery_status="delivering",
-            sync_progress="已发起 Shell 批量复制 ({} 个文件夹) — 看系统进度对话框".format(len(valid_pairs)))
+            sync_progress="回传 0/%d 文件" % len(valid_pairs))
 
         errors = []
         last_dst = None

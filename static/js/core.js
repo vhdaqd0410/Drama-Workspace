@@ -71,6 +71,7 @@ function initDesktopSSE(){
             if(payload.mode === 'delivery'){
               setTimeout(function(){
                 if(typeof _showDeliverDoneModal === 'function'){
+                  // 传递 mode，让弹窗用 POST 精确定位本次回传的交付目录
                   _showDeliverDoneModal(payload.project, { mode:'delivery', subpath:'', folder:'' });
                 }
               }, 300);
@@ -451,7 +452,13 @@ function jumpToProject(name){
   if(name==='fenji'){
     // 若正由 openFenjiFor/_openFenjiCore 指定项目打开，则跳过这里的无参加载，
     // 避免并发把目标项目覆盖掉（_openFenjiCore 会自己 loadFenjiProjects(name)）
-    if(!window._fjPendingTarget){
+    // 注意：_fjPendingTarget 可能存在一段时间，用“调用前刚置位”的短窗口判断，
+    // 否则从分集页切走再切回时会永远不加载。
+    var _skipLoad = false;
+    try{
+      if(window._fjSkipAutoLoadUntil && Date.now() < window._fjSkipAutoLoadUntil) _skipLoad = true;
+    }catch(_){}
+    if(!window._fjPendingTarget && !_skipLoad){
       loadFenjiProjects();
     }
     if(typeof fjUpdateTplBadge==='function')fjUpdateTplBadge();

@@ -122,10 +122,20 @@ async function deliverFolders(){
       try{
         var d = await api('GET', '/api/projects');
         if(_folderDone) return;
-        var flat = (d.production || []).concat(d.group_all || []);
+        var flat = (d.production || []).concat(d.group_all || []).concat(d.group_completed || []);
         var target = flat.find(function(x){ return x.name === name; });
-        if(target){
-          var sp = target.sync_progress || '';
+        // 同批量路径：找不到 target 时也继续（回退查回传任务状态）
+        var sp = target ? (target.sync_progress || '') : '';
+        if(!target){
+          try{
+            var dsx2 = await api('GET', '/api/deliver_status/' + encodeURIComponent(name));
+            if(dsx2 && dsx2.task){
+              sp = dsx2.task.message || sp;
+              if(dsx2.task.status === 'done' && !sp) sp = '回传完成';
+            }
+          }catch(_){}
+        }
+        if(target || sp){
           var pct = 0;
           var label = sp;
           var m = sp.match(/回传\s*(\d+)\s*\/\s*(\d+)/);
@@ -144,7 +154,7 @@ async function deliverFolders(){
           if(barFill) barFill.style.width = Math.max(2, pct) + '%';
           if(barText) barText.textContent = label || (pct + '%');
 
-          if(sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0){
+          if(sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0 || sp.indexOf('回传完成') >= 0){
             _keepGoing = false;
             _clearDelivPoll('folder');
             var barEl3 = document.getElementById(progBarId);
@@ -155,9 +165,9 @@ async function deliverFolders(){
             }
             setTimeout(function(){
               toast('✅ 文件夹回传完成', 'success');
-              refreshDeliverablesList();
+              try{ refreshDeliverablesList(); }catch(_1){}
               if(typeof renderDashboard === 'function') renderDashboard();
-              _showDeliverDoneModal(name);
+              try{ _showDeliverDoneModal(name, { mode: _deliverablesState.mode || 'editing' }); }catch(_2){}
             }, 500);
           } else if(sp.indexOf('失败') >= 0 || sp.indexOf('超时') >= 0 || sp.indexOf('异常') >= 0){
             _keepGoing = false;
@@ -273,10 +283,22 @@ async function deliverBatch(){
         try{
           var d = await api('GET', '/api/projects');
           if(_batchDone) return;
-          var flat = (d.production || []).concat(d.group_all || []);
+          var flat = (d.production || []).concat(d.group_all || []).concat(d.group_completed || []);
           var target = flat.find(function(x){ return x.name === name; });
-          if(target){
-            var sp = target.sync_progress || '';
+          // 回传完成后项目可能被归档进 00已完成 / 状态切换，
+          // 以前在列表里找不到 target 就整段跳过 → “回传完了不弹窗、状态也不改”。
+          // 现在找不到也能继续走完成判定（下面会回退查 /api/deliver_status）。
+          var sp = target ? (target.sync_progress || '') : '';
+          if(!target){
+            try{
+              var dsx = await api('GET', '/api/deliver_status/' + encodeURIComponent(name));
+              if(dsx && dsx.task){
+                sp = dsx.task.message || sp;
+                if(dsx.task.status === 'done' && !sp) sp = '回传完成';
+              }
+            }catch(_){}
+          }
+          if(target || sp){
             var label = sp;
             var pct = 0;
             var m = sp.match(/回传\s*(\d+)\s*\/\s*(\d+)/);
@@ -294,9 +316,16 @@ async function deliverBatch(){
             if(barFill) barFill.style.width = pct + '%';
             if(barText) barText.textContent = label || (pct + '%');
 
-            var st = target.delivery_status || target.sync_status || '';
+            var st = (target && (target.delivery_status || target.sync_status)) || '';
             var isDone = sp.indexOf('批量回传完成') >= 0 || sp.indexOf('交付完成') >= 0
+              || sp.indexOf('回传完成') >= 0
               || (st === 'delivered' && sp.indexOf('回传') !== 0);
+            if(!isDone){
+              try{
+                var ds2 = await api('GET', '/api/deliver_status/' + encodeURIComponent(name));
+                if(ds2 && ds2.task && ds2.task.status === 'done') isDone = true;
+              }catch(_){}
+            }
             if(isDone){
               _keepGoing = false;
               _clearDelivPoll('batch');
@@ -306,17 +335,22 @@ async function deliverBatch(){
               if(txt2){ txt2.style.color = '#006100'; txt2.textContent = '✅ ' + (sp || '回传完成'); }
               setTimeout(function(){
                 toast('✅ 批量回传完成', 'success');
-                refreshDeliverablesList();
-                _showDeliverDoneModal(name);
+                // 先弹窗（里面可复制路径/打开目录），再刷新与改状态；
+                // 每一步独立 try，互不拖累（以前抛错会连带不弹窗/不改状态）。
+                try{ _showDeliverDoneModal(name, { mode: (typeof _deliverablesState !== 'undefined' && _deliverablesState.mode) || 'editing' }); }catch(_e1){}
+                try{ refreshDeliverablesList(); }catch(_e2){}
                 try{
                   var mode2 = _deliverablesState.mode || 'editing';
                   if(mode2 === 'revising'){
                     if(typeof submitRevisionSetStatus === 'function') submitRevisionSetStatus(name);
                   } else {
                     api('POST','/api/project/'+encodeURIComponent(name)+'/custom_status',{custom_status:'审核中'})
-                      .then(function(){ if(typeof loadProjects==='function') loadProjects(); });
+                      .then(function(){ if(typeof loadProjects==='function') loadProjects(); })
+                      .catch(function(){});
                   }
-                }catch(_){}
+                }catch(_){} finally {
+                  window._afterDeliverBatch = null;
+                }
               }, 500);
             }
           }
@@ -335,7 +369,10 @@ async function deliverBatch(){
 }
 
 // ===== 回传完成弹窗：打开回传目录 + 复制回传目录路径 =====
-async function _showDeliverDoneModal(projectName){
+// opts: { mode: 'editing'|'revising'|'delivery', onCopied: function }
+// 复制路径后可自动推进状态（默认批量回传后 → 审核中）
+async function _showDeliverDoneModal(projectName, opts){
+  opts = opts || {};
   // 去重保护：同一项目短时间内只弹一次（防止轮询/SSE 多路径重复触发）
   window._deliverDoneShown = window._deliverDoneShown || {};
   var _prev = window._deliverDoneShown[projectName];
@@ -347,12 +384,34 @@ async function _showDeliverDoneModal(projectName){
   var _exist = document.querySelector('.modal-overlay[data-deliver-done="' + (window.CSS && CSS.escape ? CSS.escape(projectName) : projectName) + '"]');
   if(_exist) return;
 
-  // 获取目标目录（制作部上映单集版）
+  // 获取目标目录（制作部上映单集版 / 交付目录）
+  // 用 POST 带 mode，才能精确定位到本次回传的真实目标目录。
+  // GET 旧逻辑只按项目名猜，整目录交付（delivery）会拿到错目录。
   let dst = '';
   try{
-    const d = await api('GET', '/api/project/' + encodeURIComponent(projectName) + '/deliver_dst');
+    const d = await api('POST', '/api/project/' + encodeURIComponent(projectName) + '/deliver_dst',
+      { mode: opts.mode || (_deliverablesState && _deliverablesState.mode) || 'editing',
+        subpath: opts.subpath || '', folder: opts.folder || '' });
     if(d && d.ok && d.path) dst = d.path;
   }catch(_){}
+  if(!dst){
+    try{
+      const d2 = await api('GET', '/api/project/' + encodeURIComponent(projectName) + '/deliver_dst');
+      if(d2 && d2.ok && d2.path) dst = d2.path;
+    }catch(_){}
+  }
+
+  // 复制路径后是否自动推进状态（默认：批量回传完成 → 审核中）
+  var _advance = (typeof opts.onCopied === 'function') ? opts.onCopied : function(){
+    try{
+      api('POST','/api/project/'+encodeURIComponent(projectName)+'/custom_status',{custom_status:'审核中'})
+        .then(function(){ if(typeof loadProjects==='function') loadProjects(); })
+        .catch(function(){});
+    }catch(_){}
+  };
+  var _projKey = String(projectName).replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, '_');
+  window.__deliverDoneCopyHandler = window.__deliverDoneCopyHandler || {};
+  window.__deliverDoneCopyHandler[_projKey] = { dst: dst, advance: _advance };
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay active';
@@ -369,12 +428,52 @@ async function _showDeliverDoneModal(projectName){
       ${dstHtml}
     </div>
     <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
-      ${dst ? `<button class="btn btn-sm btn-primary" onclick="openDeliverDst('${jsq(dst)}')">📂 打开回传目录</button>
-      <button class="btn btn-sm" onclick="copyDeliverDst('${jsq(dst)}')">📋 复制路径</button>` : ''}
+      ${dst ? `<button class="btn btn-sm btn-primary" onclick="deliverDoneAction('${_projKey}','open')">📂 打开回传目录</button>
+      <button class="btn btn-sm btn-primary" onclick="deliverDoneAction('${_projKey}','copy')">📋 复制路径（并进入审核中）</button>
+      <button class="btn btn-sm" onclick="deliverDoneAction('${_projKey}','copyonly')">仅复制路径</button>` : ''}
       <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove()">关闭</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
+}
+
+// 弹窗按钮统一入口：open = 打开目录 / copy = 复制路径+推进状态 / copyonly = 仅复制路径
+function deliverDoneAction(projKey, action){
+  var ctx = (window.__deliverDoneCopyHandler || {})[projKey] || {};
+  var dst = ctx.dst || '';
+  if(action === 'open'){
+    if(!dst){ toast('未获取到回传目录', 'error'); return; }
+    openDeliverDst(dst);
+    return;
+  }
+  if(action === 'copy' || action === 'copyonly'){
+    if(!dst){ toast('未获取到回传目录', 'error'); return; }
+    var _after = function(){
+      if(action === 'copy' && typeof ctx.advance === 'function'){
+        try{ ctx.advance(); }catch(_){}
+        toast('📋 已复制路径，项目已进入审核中', 'success');
+      }
+      // 关闭弹窗
+      try{
+        var ov = document.querySelector('.modal-overlay[data-deliver-done]');
+        if(ov) ov.remove();
+      }catch(_){}
+    };
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(dst).then(function(){
+          toast('📋 已复制路径: ' + dst, 'success');
+          _after();
+        }).catch(function(){
+          _copyFallback(dst);
+          _after();
+        });
+      } else {
+        _copyFallback(dst);
+        _after();
+      }
+    }catch(e){ _copyFallback(dst); _after(); }
+  }
 }
 
 // 打开回传目录（后端 open_folder，弹系统资源管理器）

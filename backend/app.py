@@ -1253,7 +1253,12 @@ def api_scan():
 @app.route("/api/projects/light", methods=["GET"])
 def api_projects_light():
     try:
-        enriched = sync_engine.get_projects_enriched()
+        # 走短 TTL 缓存：此接口被分集页/下拉框高频调用，
+        # get_projects_enriched() 每次都全量遍历 NAS，会让“打开分集”卡很久。
+        try:
+            enriched = sync_engine.get_projects_enriched_cached()
+        except Exception:
+            enriched = sync_engine.get_projects_enriched()
         result = []
         seen = set()
         for bucket in ("production", "group_all"):

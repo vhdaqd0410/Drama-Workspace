@@ -243,7 +243,24 @@ async function openFenmiaozhen(name){
   }
 }
 
-async function openFenjiFor(name){switchTab('fenji');await loadFenjiProjects();$('fjProject').value=name;readFromProject()}
+// 打开分集页并定位到指定项目
+// 优化：直接传 name（避免目标项目不在列表时再发一次 episodes_plan 请求），
+// 并先把 Tab 切过去让页面立即有反馈，再等数据回来填下拉。
+async function openFenjiFor(name){
+  // 告诉 switchTab 不要自己再发一次无参加载（否则两次串行请求 → 打开卡很久）
+  window._fjSkipAutoLoadUntil = Date.now() + 4000;
+  switchTab('fenji');
+  try{
+    await loadFenjiProjects(name);
+    var sel = $('fjProject');
+    if(sel){ sel.value = name; }
+    readFromProject();
+  }catch(e){
+    if(typeof toast === 'function') toast('打开分集失败: ' + (e && e.message || e), 'error');
+  } finally {
+    window._fjSkipAutoLoadUntil = 0;
+  }
+}
 async function qaStartFor(name){
   switchTab('qa');
   // 调用后端获取项目目录（优先 000交付 文件夹）
