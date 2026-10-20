@@ -399,6 +399,8 @@ class ScanMixin:
         group_root = self.nas["group_root"]
         production = []
         group_all = []
+        # group_path 已回写过一次的项目（避免前端轮询时反复写库）
+        _gp_synced_once = self.__dict__.setdefault("_gp_synced_once", set())
 
         # 从数据库获取所有项目，建立名称索引
         db_projects = {}
@@ -604,12 +606,16 @@ class ScanMixin:
                         entry["source_department"] = source_dept
                     # 关键修复：手动拖入 00已完成 的项目，DB 的 group_path 可能还是旧路径
                     # （旧目录已被移走不存在），回写为磁盘实际位置，保证"组内NAS/已完成"按钮能打开
+                    # 注意：这是"修一次就好"的幂等回写。以前每次 /api/projects 都重新写库+打日志，
+                    # 前端轮询频繁时会变成写库风暴（每轮数十次 UPDATE）。
                     try:
                         old_gp = (db_proj.get("group_path") or "").rstrip("\\/")
                         new_gp = full.rstrip("\\/")
                         if old_gp and old_gp != new_gp:
-                            self.db.update_project_status(name, group_path=full)
-                            logger.info("已完成项目 group_path 已同步: %s -> %s", name, full)
+                            if name not in _gp_synced_once:
+                                self.db.update_project_status(name, group_path=full)
+                                _gp_synced_once.add(name)
+                                logger.info("已完成项目 group_path 已同步: %s -> %s", name, full)
                     except Exception:
                         pass
                 group_completed.append(entry)

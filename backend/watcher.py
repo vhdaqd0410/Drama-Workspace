@@ -80,6 +80,9 @@ class Watcher:
         else:
             self.observer = Observer()
         self._watched_dirs = {}
+        self._proj_scanned = set()
+        self._proj_list_cache = None
+        self._proj_list_cache_ts = 0.0
         self._timer = None
         self._retry_queue = []   # [(file_path, retry_count), ...]
         self._max_retries = 3
@@ -104,7 +107,7 @@ class Watcher:
             return  # 幂等：已启动则忽略
         self._started = True
         self._refresh_watches()
-        self._timer = threading.Timer(60, self._refresh_loop)
+        self._timer = threading.Timer(float(self.watcher_cfg.get("refresh_interval", 600)), self._refresh_loop)
         self._timer.daemon = True
         self._timer.start()
         self.observer.start()
@@ -123,32 +126,65 @@ class Watcher:
     def _refresh_loop(self):
         self._refresh_watches()
         self._process_retry_queue()
-        self._timer = threading.Timer(60, self._refresh_loop)
+        # 扫描间隔默认 600 秒（原 60 秒）：NAS 上高频递归会持续占用 SMB 会话
+        interval = float(self.watcher_cfg.get("refresh_interval", 600))
+        self._timer = threading.Timer(interval, self._refresh_loop)
         self._timer.daemon = True
         self._timer.start()
 
     def _refresh_watches(self):
-        """扫描组内 NAS，递归查找每个项目的 01上映单集版 目录并设置监听"""
+        """扫描组内 NAS，递归查找每个项目的 01上映单集版 目录并设置监听
+
+        性能约束（别在 NAS 上做高频全量递归）：
+          - 项目目录清单缓存 refresh_interval 秒（默认 600），到期才重扫根目录；
+          - 已监听的目录不重复 find_dir_recursive；
+          - 单轮最多新增 max_new_per_round 个监听（默认 20），剩下的下轮继续，
+            避免一次性堆几百个目录把 SMB 会话打满。
+        """
         group_root = self.nas["group_root"]
         if not os.path.isdir(group_root):
             return
 
-        for name in os.listdir(group_root):
+        now = time.time()
+        interval = float(self.watcher_cfg.get("refresh_interval", 600))
+        max_new = int(self.watcher_cfg.get("max_new_per_round", 20))
+
+        # 项目清单缓存：减少对 NAS 根目录的高频 listdir
+        if not getattr(self, "_proj_list_cache", None) or \
+                now - self._proj_list_cache_ts > interval:
+            try:
+                self._proj_list_cache = [n for n in os.listdir(group_root)
+                                         if os.path.isdir(os.path.join(group_root, n))]
+                self._proj_list_cache_ts = now
+            except OSError:
+                return
+
+        new_count = 0
+        for name in self._proj_list_cache:
+            if new_count >= max_new:
+                break
             proj_dir = os.path.join(group_root, name)
-            if not os.path.isdir(proj_dir):
+            # 该项目已监听过 → 不重复递归（除非项目被移走）
+            if name in getattr(self, "_proj_scanned", set()):
                 continue
 
             dir_name = self._get_output_dir_name(name)
             output_dirs = find_dir_recursive(proj_dir, dir_name)
 
             for od in output_dirs:
+                if new_count >= max_new:
+                    break
                 if od not in self._watched_dirs:
                     handler = DeliveryHandler(self)
                     watch = self.observer.schedule(
                         handler, od, recursive=True)
                     self._watched_dirs[od] = watch
-                    # debug 级别：每次启动会一次性监听数百个目录，用 info 会刷屏撑大日志
+                    new_count += 1
                     logger.debug("监听成片目录: %s", od)
+
+            if not self._proj_scanned:
+                self._proj_scanned = set()
+            self._proj_scanned.add(name)
 
     def _check_file(self, file_path):
         ext = os.path.splitext(file_path)[1].lower()

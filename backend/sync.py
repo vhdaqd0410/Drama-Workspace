@@ -273,8 +273,14 @@ class SyncMixin:
 
         os.makedirs(dst, exist_ok=True)
 
-        src_count, src_size = self._count_dir_stats(src)
-        if src_count == 0:
+        # 只判断“源目录是否为空”：用轻量顶层计数即可，
+        # 不再整目录递归（源也在 NAS 时，递归统计本身就是一次全盘遍历）
+        try:
+            with os.scandir(src) as _it:
+                has_any = any(True for _ in _it)
+        except OSError:
+            has_any = False
+        if not has_any:
             return True, "空目录无需复制"
 
         # 写 VBS 脚本到临时目录
@@ -312,14 +318,19 @@ class SyncMixin:
         logger.info(
             "已启动 VBS CopyHere (pid=%d), 等待复制完成...", proc.pid)
 
+        # 轻量等待：只比对顶层条目名 + 进度指纹，不递归统计
+        try:
+            src_names = set(os.listdir(src))
+        except OSError:
+            src_names = set()
+
         start_time = time.time()
         stable_count = 0
-        last_count = -1
-        last_size = -1
+        last_sig = None
 
         try:
             while True:
-                time.sleep(1.0)
+                time.sleep(2.0)
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
                     proc.kill()
@@ -327,34 +338,34 @@ class SyncMixin:
                     return False, "复制超时"
 
                 rc = proc.poll()
-                dst_count, dst_size = self._count_dir_stats(dst)
-
-                if dst_count == last_count and abs(dst_size - last_size) < 1024:
+                sig = self._quick_dst_signature(dst)
+                ready = bool(src_names) and self._all_items_in_dst(src, dst)
+                if ready and sig == last_sig:
                     stable_count += 1
                 else:
                     stable_count = 0
-                last_count = dst_count
-                last_size = dst_size
+                last_sig = sig
 
-                # 进程已退出 + 文件统计稳定 → 复制完成
+                # 进程已退出 + 条目齐 → 完成
                 if rc is not None:
-                    # 进程退出后再等一会儿，确保文件句柄释放
-                    for _ in range(3):
-                        time.sleep(0.5)
-                        nc, ns = self._count_dir_stats(dst)
-                        if nc == dst_count and ns == dst_size:
-                            break
-                        dst_count, dst_size = nc, ns
-                    if rc == 0:
-                        return True, "资源管理器复制完成 (%d 文件, %.1f MB)" % (
-                            dst_count, dst_size / 1024 / 1024)
-                    return False, "VBS 退出码 %d" % rc
+                    if ready:
+                        fc, fs = self._count_dir_stats(dst)
+                        if rc == 0:
+                            return True, "资源管理器复制完成 (%d 文件, %.1f MB)" % (
+                                fc, fs / 1024 / 1024)
+                        return False, "VBS 退出码 %d" % rc
+                    fc, fs = self._count_dir_stats(dst)
+                    return False, "VBS 退出码 %d（目标未齐，%d 文件）" % (rc, fc)
 
-                # 进程还活着，但文件数稳定了很久 → 可能 CopyHere 完成了
-                if dst_count >= src_count and stable_count >= 5:
-                    proc.terminate()
+                # 进程还活着，但条目齐且连续无变化 → CopyHere 已完成
+                if stable_count >= 3:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    fc, fs = self._count_dir_stats(dst)
                     return True, "资源管理器复制完成 (%d 文件, %.1f MB)" % (
-                        dst_count, dst_size / 1024 / 1024)
+                        fc, fs / 1024 / 1024)
 
         finally:
             try:
@@ -399,7 +410,13 @@ class SyncMixin:
 
     def _copy_desktop_com(self, src, dst, timeout=7200):
         """桌面版优化：直接 pywin32 COM 调 Shell.Application.CopyHere。
-        比 VBS 子进程更稳：同 Session、无进程存活轮询、无写临时文件。"""
+        比 VBS 子进程更稳：同 Session、无进程存活轮询、无写临时文件。
+
+        性能注意：等待期间只能用轻量探测（顶层条目名比对）。
+        绝不能每秒对目标目录跑 os.walk + 逐文件 getsize —— 目标在 NAS 上时
+        这相当于把整目录树重新拉一遍，会和拷贝进程抢 SMB 带宽，越拷越卡。
+        递归统计只在整个复制结束后做一次，仅用于回报文件数/大小。
+        """
         try:
             import pythoncom
             from win32com.client import Dispatch
@@ -421,27 +438,62 @@ class SyncMixin:
             item_count = items.Count
             logger.info("桌面 COM CopyHere: %s → %s (%d 项)", src, dst, item_count)
             folder_dst.CopyHere(items, 0)  # 0 = 默认（弹系统进度对话框）
-            # 等复制完成（轮询目标文件数稳定）
+
+            # 轻量等待：顶层条目齐 + 进度指纹多轮不变 → 完成
+            try:
+                src_names = set(os.listdir(src))
+            except OSError:
+                src_names = set()
             start = time.time()
             stable = 0
-            last_count, last_size = -1, -1
+            last_sig = None
             while True:
-                time.sleep(1.0)
+                time.sleep(2.0)          # 降频：2 秒一次即可
                 if time.time() - start > timeout:
                     return False, "COM 复制超时"
-                dc, ds = self._count_dir_stats(dst)
-                if dc == last_count and abs(ds - last_size) < 1024:
+                sig = self._quick_dst_signature(dst)
+                ready = bool(src_names) and self._all_items_in_dst(src, dst)
+                if ready and sig == last_sig:
                     stable += 1
+                    if stable >= 3:      # 顶层齐 + 连续 3 轮（≈6 秒）无变化
+                        fc, fs = self._count_dir_stats(dst)
+                        return True, f"桌面 COM 复制完成 ({fc} 文件, {fs/1024/1024:.1f} MB)"
                 else:
                     stable = 0
-                last_count, last_size = dc, ds
-                if dc >= item_count and stable >= 5:
-                    return True, f"桌面 COM 复制完成 ({dc} 文件, {ds/1024/1024:.1f} MB)"
-                # 源目录里的每个文件都出现在 dst 里 → 完成
-                if self._all_items_in_dst(src, dst):
-                    return True, f"桌面 COM 复制完成 ({dc} 文件)"
+                last_sig = sig
         finally:
             pythoncom.CoUninitialize()
+
+    def _quick_dst_signature(self, dst):
+        """轻量“目标目录进度指纹”：只看顶层，不递归。
+
+        返回 (顶层条目数, 顶层文件总字节, 子目录直接子项数合计)。
+        在 NAS 上代价 ≈ 顶层条目数的 stat 次数（几十），
+        比递归 os.walk + 逐文件 getsize 便宜两个数量级。
+
+        用途：判断 CopyHere 是否还在写（大文件写入时总字节会涨）。
+        """
+        files = 0
+        total = 0
+        children = 0
+        try:
+            with os.scandir(dst) as it:
+                for e in it:
+                    try:
+                        if e.is_file(follow_symlinks=False):
+                            files += 1
+                            total += e.stat(follow_symlinks=False).st_size
+                        elif e.is_dir(follow_symlinks=False):
+                            try:
+                                with os.scandir(e.path) as it2:
+                                    children += sum(1 for _ in it2)
+                            except OSError:
+                                pass
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        return (files, total, children)
 
     def _all_items_in_dst(self, src, dst):
         """检查 src 下的所有文件/子目录是否都在 dst 里出现了（快速完成判定）"""
