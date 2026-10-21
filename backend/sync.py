@@ -549,7 +549,14 @@ class SyncMixin:
                         break
 
     def sync_project(self, project_name):
-        """将单个项目完整从制作部 NAS 同步到组内 NAS"""
+        """将单个项目完整从制作部 NAS 同步到组内 NAS
+
+        状态收口保证（避免“永远卡在同步中”）：
+          - 任何异常 → sync_status 回到 pending + 失败文案
+          - 无论成败，最后都不会停留在 syncing
+          - 网络中断 / 进程被杀 / 用户关窗口 导致的半途中断，
+            由启动时的 _recover_stuck_sync 兼底修正。
+        """
         proj = self.db.get_project(project_name)
         if not proj:
             return False, "项目不存在"
@@ -557,6 +564,23 @@ class SyncMixin:
         src_root = proj["production_path"]
         dst_root = proj["group_path"]
 
+        try:
+            return self._sync_project_impl(project_name, proj, src_root, dst_root)
+        except Exception as e:
+            logger.exception("同步异常 %s: %s", project_name, e)
+            try:
+                self.db.update_project_status(
+                    project_name, sync_status="pending",
+                    sync_progress="同步失败: " + str(e)[:80])
+                self.db.add_sync_log(
+                    project_name, "同步异常", "production->group",
+                    status="error", message=str(e)[:200])
+            except Exception:
+                pass
+            return False, "同步异常: %s" % e
+
+    def _sync_project_impl(self, project_name, proj, src_root, dst_root):
+        """同步主体（外层已有异常兜底）。"""
         self.db.update_project_status(
             project_name, sync_status="syncing", sync_progress="5% 准备中...")
         self.db.add_sync_log(
@@ -647,6 +671,39 @@ class SyncMixin:
             except Exception as e:
                 logger.warning("同步后自动推断总集数失败: %s", e)
         return True, "同步完成"
+
+    def recover_stuck_sync(self):
+        """启动时修复“幽灵 syncing”：把残留的 syncing 状态收回 pending。
+
+        场景：进程被杀 / 工作台重启 / 网络断开，sync_project 没来得及写回终态，
+        库里就永久停在 syncing，前端一直显示“正在同步项目目录”。
+        启动时进程内不可能有正在跑的同步，所以这些 syncing 全部可安全重置。
+        返回修正条数。
+        """
+        fixed = 0
+        try:
+            rows = self.db.get_all_projects()
+        except Exception:
+            return 0
+        for p in rows:
+            try:
+                if (p.get("sync_status") or "") != "syncing":
+                    continue
+                name = p.get("name")
+                if not name:
+                    continue
+                self.db.update_project_status(
+                    name, sync_status="pending",
+                    sync_progress="上次同步被中断，请重新同步")
+                self.db.add_sync_log(
+                    name, "同步中断恢复", "production->group",
+                    status="error", message="工作台重启，上次同步未完成")
+                fixed += 1
+            except Exception:
+                continue
+        if fixed:
+            logger.info("启动时修正 %d 个卡在 syncing 的项目", fixed)
+        return fixed
 
     def get_dest_dir(self, project_name):
         """获取项目的成片回传目标目录（制作部NAS侧的01上映单集版）"""

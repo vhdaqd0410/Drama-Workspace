@@ -136,74 +136,115 @@ async function onStatusChange(pname, sel){
 }
 async function updateStatus(name,status){try{await api('POST',`/api/project/${encodeURIComponent(name)}/custom_status`,{custom_status:status});toast(`已更新 ${name} → ${status}`,'success');window._lastStatusChanged = name;await loadProjects();if(status==='待提交审核'&&typeof submitReview==='function')submitReview(name)}catch(e){toast('更新失败: '+e.message,'error')}}
 async function syncMaterial(name){
-    // 先检查项目是否已经在组盘（用户可能手动复制了）
-  try {
+  // 已在组盘上 → 只刷新状态，不重复同步
+  try{
     const check = await api('POST', `/api/project/${encodeURIComponent(name)}/check_on_group`);
     if (check && check.on_group) {
       toast(`✅ "${name}" 已在组盘上，状态已刷新`, 'success');
       await loadProjects();
       return;
     }
-  } catch(e) {}
-if(!confirm(`确认要将 "${name}" 从制作部NAS同步到组内NAS吗？\n（首次同步可能耗时较长）`))return;
+  }catch(e){}
+
+  if(!confirm(`确认要将 "${name}" 从制作部NAS同步到组内NAS吗？\n（首次同步可能耗时较长）`)) return;
+
   // 防重：同一项目已有轮询在跑则不重复启动
   window._syncPolling = window._syncPolling || {};
-  if(window._syncPolling[name]){ toast('该项目正在同步中...','info'); return; }
+  window._syncPollingAt = window._syncPollingAt || {};
+  // 旧锁超过 6 分钟视为失效（上次同步异常退出不会永久卡住按钮）
+  if(window._syncPolling[name]){
+    var _at = window._syncPollingAt[name] || 0;
+    if(Date.now() - _at < 360000){
+      toast('该项目正在同步中...','info');
+      return;
+    }
+    delete window._syncPolling[name];
+  }
+
   toast(`正在同步: ${name}...`,'info');
   window._syncPolling[name] = true;
+  window._syncPollingAt[name] = Date.now();
+
   try{
     const r = await api('POST', `/api/sync/${encodeURIComponent(name)}`);
-    if(r.ok){
-      toast('同步已启动，请关注进度','success');
-      await loadProjects();
-      const syncProgId = 'sync-prog-' + name.replace(/[^a-zA-Z0-9_]/g,'_');
-      // 修复：改串行递归 setTimeout（上一轮跑完才排下一轮），避免 setInterval+async 回调并发导致重复弹窗/重复跳转
-      let _syncDone = false;
-      const _syncStart = Date.now();
-      const _pollOnce = async () => {
+    if(!r || !r.ok){
+      delete window._syncPolling[name];
+      toast('同步失败: ' + ((r && r.message) || ''), 'error');
+      return;
+    }
+    toast('同步已启动，请关注进度','success');
+    await loadProjects();
+
+    const syncProgId = 'sync-prog-' + name.replace(/[^a-zA-Z0-9_]/g,'_');
+    let _syncDone = false;
+    const _syncStart = Date.now();
+
+    const _finish = async function(){
+      if(_syncDone) return;
+      _syncDone = true;
+      delete window._syncPolling[name];
+      toast(`✅ 同步完成: ${name}，自动进入分集`,'success');
+      try{ await loadProjects(); }catch(_){}
+      setTimeout(function(){ if(typeof openFenjiFor === 'function') openFenjiFor(name); }, 300);
+    };
+
+    const _pollOnce = async () => {
+      if(_syncDone) return;
+      try {
+        const d = await api('GET', '/api/projects');
         if(_syncDone) return;
-        try {
-          const d = await api('GET', '/api/projects');
-          if(_syncDone) return;
-          const flat = (d.production || []).concat(d.group_all || []);
-          const target = flat.find(x => x.name === name);
-          if(target){
-            const sp = target.sync_progress || '';
-            const m = sp.match(/^(\d+)%\s*(.*)$/);
-            const pct = m ? parseInt(m[1]) : 0;
-            const label = m ? m[2] : sp;
-            const bar = document.getElementById(syncProgId);
-            if (bar) {
-              const fill = bar.querySelector('.sync-fill');
-              const pctEl = bar.querySelector('.sync-pct');
-              const lblEl = bar.querySelector('.card-progress-text span');
-              if (fill) fill.style.width = pct + '%';
-              if (pctEl) pctEl.textContent = pct + '%';
-              if (lblEl) lblEl.textContent = '📦 ' + (label || '同步中...');
-            }
-            // 只有真正 synced 才算完成（避免首次同步前 pending 状态被误判为完成）
-            if(target.sync_status === 'synced'){
-              _syncDone = true;
-              if(window._syncPolling) delete window._syncPolling[name];
-              toast(`✅ 同步完成: ${name}，自动进入分集`,'success');
-              await loadProjects();
-              setTimeout(() => openFenjiFor(name), 300);
+        const flat = (d.production || []).concat(d.group_all || []).concat(d.group_completed || []);
+        const target = flat.find(x => x.name === name);
+        if(target){
+          const sp = target.sync_progress || '';
+          const m = sp.match(/^(\d+)%\s*(.*)$/);
+          const pct = m ? parseInt(m[1]) : 0;
+          const label = m ? m[2] : sp;
+          const bar = document.getElementById(syncProgId);
+          if (bar) {
+            const fill = bar.querySelector('.sync-fill');
+            const pctEl = bar.querySelector('.sync-pct');
+            const lblEl = bar.querySelector('.card-progress-text span');
+            if (fill) fill.style.width = pct + '%';
+            if (pctEl) pctEl.textContent = pct + '%';
+            if (lblEl) lblEl.textContent = '📦 ' + (label || '同步中...');
+          }
+          // 只有真正 synced 才算完成（避免首次同步前 pending 被误判）
+          if(target.sync_status === 'synced'){
+            await _finish();
+            return;
+          }
+          // 同步失败/中断 → 停止轮询并提示，不再空等
+          if(target.sync_status === 'pending' && sp && sp.indexOf('失败') >= 0){
+            _syncDone = true;
+            delete window._syncPolling[name];
+            toast('❌ 同步未完成: ' + sp, 'error');
+            return;
+          }
+        } else {
+          // 项目不在列表里：直接问同步任务状态，避免列表口径变化导致永远不跳转
+          try{
+            const st = await api('GET', '/api/sync_status/' + encodeURIComponent(name));
+            if(st && st.ok && (st.sync_status === 'synced' || st.status === 'done')){
+              await _finish();
               return;
             }
-          }
-        } catch(e){}
-        if(_syncDone) return;
-        if(Date.now() - _syncStart > 300000){ if(window._syncPolling) delete window._syncPolling[name]; return; }   // 超 5 分钟停止
-        setTimeout(_pollOnce, 2000);
-      };
+          }catch(_){}
+        }
+      } catch(e){}
+      if(_syncDone) return;
+      // 超 10 分钟停止（首次同步大项目可能很久）
+      if(Date.now() - _syncStart > 600000){
+        delete window._syncPolling[name];
+        toast('同步仍在进行中，可稍后手动刷新查看','warning');
+        return;
+      }
       setTimeout(_pollOnce, 2000);
-    } else {
-      if(window._syncPolling) delete window._syncPolling[name];
-      toast('同步失败: ' + (r.message || ''),'error');
-    }
-  } catch(e){
-    if(window._syncPolling) delete window._syncPolling[name];
-    toast('同步请求失败: '+e.message,'error');
+    };
+    setTimeout(_pollOnce, 2000);
+  }catch(e){
+    delete window._syncPolling[name];
+    toast('同步请求失败: ' + e.message,'error');
   }
 }
 async function openFenmiaozhen(name){

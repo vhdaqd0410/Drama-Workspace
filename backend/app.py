@@ -346,6 +346,24 @@ def api_sync(project_name):
     return jsonify({"ok": True, "message": "同步已启动"})
 
 
+@app.route("/api/sync_status/<path:project_name>", methods=["GET"])
+def api_sync_status(project_name):
+    """单项目同步状态（供前端在项目不在列表时仍能判定同步是否完成）。"""
+    try:
+        proj = sync_engine.db.get_project(project_name) or {}
+        st = (proj.get("sync_status") or "").strip()
+        return jsonify({
+            "ok": True,
+            "project_name": project_name,
+            "sync_status": st,
+            "sync_progress": proj.get("sync_progress") or "",
+            "last_synced_at": proj.get("last_synced_at") or "",
+        })
+    except Exception as e:
+        logger.error("sync_status failed: %s", e)
+        return jsonify({"ok": False, "message": str(e)}), 500
+
+
 @app.route("/api/deliver/<path:project_name>", methods=["POST"])
 def api_deliver(project_name):
     data = request.get_json(silent=True) or {}
@@ -1774,6 +1792,14 @@ def create_app():
         _removed = db.purge_resigned_members()
         if _removed:
             print("[OK] 已自动删除离职成员: %s" % "、".join(_removed))
+    except Exception:
+        pass
+    # 启动时修复“幽灵 syncing”：上次进程被杀/崩溃时状态留在 syncing，
+    # 前端会永远显示“正在同步项目目录”。启动时一律收回。
+    try:
+        _fixed = sync_engine.recover_stuck_sync()
+        if _fixed:
+            print("[OK] 已修正 %d 个卡住的同步任务" % _fixed)
     except Exception:
         pass
     # 启动时统一提成口径：团队称号(team_members.title)为唯一角色来源，
