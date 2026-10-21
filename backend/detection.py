@@ -19,7 +19,17 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
-import cv2
+try:
+    import cv2
+except Exception as _cv2_err:  # noqa: BLE001
+    # 重要：opencv 与 numpy 的 ABI 不匹配时（如 cv2 4.6 + numpy 2.x），
+    # import cv2 会直接抛 ImportError。以前这会让 qa_engine → app 整条
+    # 导入链崩掉，工作台根本启动不了（页面“无法访问此页面”）。
+    # 这里降级：cv2 不可用时后端照常启动，仅质检相关功能会明确报错。
+    cv2 = None
+    CV2_IMPORT_ERROR = str(_cv2_err)
+else:
+    CV2_IMPORT_ERROR = ""
 
 # ============================================================
 # 配置常量 — 全项目唯一定义处
@@ -326,6 +336,8 @@ def edge_density_opencv(video_path, timestamp, sub_y, sub_h,
     else:
         full_w = width
         full_h = height
+    if cv2 is None:
+        return 0.0   # opencv 不可用：返回 0，由调用方走其他判据
     if sub_w <= 0:
         sub_w = full_w
     frame = extract_subtitle_region_frame(video_path, timestamp, full_w, full_h,
@@ -356,6 +368,8 @@ def compute_ssim(img1, img2):
     """计算两帧灰度图的 SSIM（简化版，OpenCV 实现）"""
     if img1 is None or img2 is None:
         return 0.0
+    if cv2 is None:
+        return 0.0   # opencv 不可用：无法算 SSIM，交由其他指标判判
     C1 = (0.01 * 255) ** 2
     C2 = (0.03 * 255) ** 2
     mu1 = cv2.GaussianBlur(img1.astype(np.float64), (11, 11), 1.5)
