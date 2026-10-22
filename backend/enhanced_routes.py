@@ -166,8 +166,8 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
     @app.route("/api/project/<path:project_name>", methods=["DELETE"])
     def api_project_delete(project_name):
         """删除项目。body 可选 { mode: "soft"|"hard" }。
-        - soft（默认）：软移除，删数据库记录 + 加入忽略列表（扫描不再自动重新加入），保留 NAS 文件夹
-        - hard：彻底删除，删数据库记录 + 忽略列表 + 组内 NAS 项目文件夹（不可逆）
+        - soft（默认）：软移除，删数据库记录 + 加入忽略列表，保留 NAS 文件夹
+        - hard：彻底删除，删数据库记录 + 忽略列表 + 组内 NAS 项目文件夹
         """
         data = request.get_json(silent=True) or {}
         mode = (data.get("mode") or "soft").lower()
@@ -199,12 +199,68 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                     nas_error = str(_e)
 
         # 删除数据库记录 + 加入忽略列表（防止扫描重新加入）
-        # 即使 NAS 删除失败，这里也要成功，保证项目不再统计
+        # 但有一个重要例外：如果本次要求「彻底删除」但 NAS 文件夹没删成（
+        # 权限/被占用/网络盘异常），就不能加忽略清单。
+        # 否则目录还在 NAS 上，项目却被永久屏蔽，刷多少次都刷不出来。
         db.delete_project(project_name)
-        db.add_ignored_project(project_name)
+        if mode == "hard" and not deleted_nas:
+            # NAS 没删掉：不加忽略，下次扫描会重新把它扫回来
+            try:
+                db.remove_ignored_project(project_name)
+            except Exception:
+                pass
+            _logger.warning(
+                "彻底删除未清理 NAS 目录（%s），已跳过忽略标记，"
+                "避免项目在 NAS 上残留却无法被扫描到: %s",
+                nas_error or "未知原因", project_name)
+        else:
+            db.add_ignored_project(project_name)
 
         return jsonify({"ok": True, "deleted_nas": deleted_nas,
-                        "nas_error": nas_error})
+                        "nas_error": nas_error,
+                        "ignored": not (mode == "hard" and not deleted_nas)})
+
+    @app.route("/api/project/<path:project_name>/unignore", methods=["POST"])
+    def api_project_unignore(project_name):
+        """把一个被加入忽略清单的项目重新放回扫描范围。
+
+        场景：删项目时 NAS 目录没真删掉（权限/占用），但项目已进忽略清单，
+        导致目录还在 NAS 上、工作台却刷多少次都看不到。用这个接口恢复。
+        """
+        try:
+            was_ignored = project_name in (db.get_ignored_projects() or [])
+            db.remove_ignored_project(project_name)
+            # 让项目列表缓存立即失效，刷新即可看到
+            try:
+                sync_engine.invalidate_projects_cache()
+            except Exception:
+                pass
+            db.add_audit_log(project_name, "恢复项目", "从忽略清单移除")
+            return jsonify({"ok": True, "project": project_name, "was_ignored": was_ignored,
+                            "message": "已解除忽略，刷新后即可看到"})
+        except Exception as e:
+            _logger.error("unignore failed: %s", e)
+            return jsonify({"ok": False, "message": str(e)}), 500
+
+    @app.route("/api/ignored_projects", methods=["GET"])
+    def api_ignored_projects():
+        """列出当前被忽略（软删除）的项目名，供前端展示与恢复。"""
+        try:
+            names = db.get_ignored_projects()
+            group_root = (sync_engine.nas.get("group_root") or "") if sync_engine else ""
+            items = []
+            for n in names:
+                exists = False
+                try:
+                    if group_root:
+                        exists = _os.path.isdir(_os.path.join(group_root, n))
+                except Exception:
+                    exists = False
+                items.append({"name": n, "on_nas": exists})
+            return jsonify({"ok": True, "items": items})
+        except Exception as e:
+            _logger.error("ignored_projects failed: %s", e)
+            return jsonify({"ok": False, "message": str(e)}), 500
 
     # ============================================================
     # 新版 QA 路由（完全照搬独立视频质检工具的功能）
