@@ -1589,6 +1589,18 @@ a{color:var(--blue);text-decoration:none}
         <span id="commissionRulesStatus" style="font-size:12px;color:var(--text-sec)"></span>
       </div>
     </div>
+    <div class="panel settings-section" style="grid-column:1/-1">
+      <h3>🚫 已忽略项目（误删恢复）</h3>
+      <div style="font-size:11px;color:var(--text-sec);margin-bottom:8px">
+        这些项目被「删除项目」加入忽略清单，扫描时会被跳过。
+        <b>若「NAS上还在」显示为是，说明目录实际没删掉</b>，点「恢复」即可让它重新出现在项目列表。
+      </div>
+      <div id="ignoredProjList" style="font-size:12px">加载中...</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+        <button class="btn btn-sm" onclick="loadIgnoredProjects()">🔄 刷新清单</button>
+        <span id="ignoredProjStatus" style="font-size:12px;color:var(--text-sec)"></span>
+      </div>
+    </div>
     <div class="panel settings-section" style="grid-column:1/-1;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn" onclick="migrateOld()">📦 迁移旧数据</button>
       <button class="btn btn-primary" onclick="saveConfig()">🔄 保存设置</button>

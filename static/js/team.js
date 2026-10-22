@@ -50,6 +50,69 @@ async function _pathExists(path){
     return !!(d && d.ok && d.exists);
   }catch(_){ return true; }
 }
+// ===== 已忽略项目（误删恢复）面板 =====
+async function loadIgnoredProjects(){
+  var box = document.getElementById('ignoredProjList');
+  var status = document.getElementById('ignoredProjStatus');
+  if(!box) return;
+  box.innerHTML = '加载中...';
+  try{
+    var d = await api('GET', '/api/ignored_projects');
+    if(!d || !d.ok){
+      box.innerHTML = '<div style="color:var(--red)">加载失败: ' + htm((d && d.message) || '') + '</div>';
+      return;
+    }
+    var items = d.items || [];
+    if(!items.length){
+      box.innerHTML = '<div style="color:var(--text-sec);padding:8px 0">✅ 没有已忽略的项目</div>';
+      if(status) status.textContent = '';
+      return;
+    }
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:var(--bg);border-bottom:1px solid var(--border)">'
+      + '<th style="text-align:left;padding:6px 8px;font-weight:600">项目名</th>'
+      + '<th style="width:110px;padding:6px 8px;font-weight:600">NAS上还在</th>'
+      + '<th style="width:90px;padding:6px 8px;font-weight:600">操作</th>'
+      + '</tr></thead><tbody>';
+    for(var i=0;i<items.length;i++){
+      var it = items[i];
+      var onNas = it.on_nas === true;
+      var badge = onNas
+        ? '<span class="tb-tag" style="background:var(--orange);color:#fff">是（可恢复）</span>'
+        : '<span class="tb-tag" style="background:var(--bg);color:var(--text-sec)">否（已删除）</span>';
+      html += '<tr style="border-bottom:1px solid var(--border)">'
+        + '<td style="padding:6px 8px;word-break:break-all">' + htm(it.name) + '</td>'
+        + '<td style="padding:6px 8px;text-align:center">' + badge + '</td>'
+        + '<td style="padding:6px 8px;text-align:center">'
+        + '<button class="btn btn-sm btn-primary" onclick="unignoreProject(\'' + jsq(it.name) + '\')">恢复</button>'
+        + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    box.innerHTML = html;
+    if(status) status.textContent = '共 ' + items.length + ' 个已忽略项目';
+  }catch(e){
+    box.innerHTML = '<div style="color:var(--red)">加载失败: ' + htm(e.message||'') + '</div>';
+  }
+}
+
+async function unignoreProject(name){
+  if(!name) return;
+  if(!confirm('将从忽略清单移除：\n\n' + name + '\n\n移除后会重新出现在项目列表里，继续吗？')) return;
+  try{
+    var d = await api('POST', '/api/project/' + encodeURIComponent(name) + '/unignore', {});
+    if(d && d.ok){
+      if(typeof toast === 'function') toast(d.message || '已恢复，刷新后可见', 'success');
+      await loadIgnoredProjects();
+      // 项目列表也刷新一下，让恢复的项目尽快出现
+      try{ if(typeof loadProjects === 'function') await loadProjects(); }catch(_){}
+    }else{
+      if(typeof toast === 'function') toast('恢复失败: ' + ((d && d.message) || ''), 'error');
+    }
+  }catch(e){
+    if(typeof toast === 'function') toast('恢复失败: ' + e.message, 'error');
+  }
+}
+
 async function saveGroupRoot(){
   const input = document.getElementById('cfgGroupRoot');
   const path = (input.value||'').trim();
@@ -239,6 +302,8 @@ async function loadConfig(){
   }catch(e){}
   // 加载 NAS 路径列表（组内 + 制作部）
   try{ await loadNasPaths(); }catch(_){}
+  // 加载「已忽略项目」清单（误删恢复）
+  try{ await loadIgnoredProjects(); }catch(_){}
   // 加载快捷键配置 + 启动设置
   try{
     const d = await api('GET', '/api/settings');
