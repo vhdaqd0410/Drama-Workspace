@@ -439,7 +439,10 @@ class SyncMixin:
             logger.info("桌面 COM CopyHere: %s → %s (%d 项)", src, dst, item_count)
             folder_dst.CopyHere(items, 0)  # 0 = 默认（弹系统进度对话框）
 
-            # 轻量等待：顶层条目齐 + 进度指纹多轮不变 → 完成
+            # 关键：CopyHere 是异步的，Shell 在后台线程里拷。
+            # 当前线程是 STA，必须定期 PumpWaitingMessages()，
+            # 否则 Shell 的复制窗口收不到消息泵 → 复制会挂住不动
+            # （表现为日志只停在“桌面 COM CopyHere”一行，状态永远 10%）。
             try:
                 src_names = set(os.listdir(src))
             except OSError:
@@ -447,19 +450,32 @@ class SyncMixin:
             start = time.time()
             stable = 0
             last_sig = None
+            last_change = time.time()
             while True:
-                time.sleep(2.0)          # 降频：2 秒一次即可
+                # 泵消息：让 Shell 复制窗口能响应，这是不卡死的前提
+                try:
+                    pythoncom.PumpWaitingMessages()
+                except Exception:
+                    pass
+                time.sleep(0.5)
                 if time.time() - start > timeout:
                     return False, "COM 复制超时"
                 sig = self._quick_dst_signature(dst)
                 ready = bool(src_names) and self._all_items_in_dst(src, dst)
+                if sig != last_sig:
+                    last_change = time.time()
                 if ready and sig == last_sig:
                     stable += 1
-                    if stable >= 3:      # 顶层齐 + 连续 3 轮（≈6 秒）无变化
+                    if stable >= 6:      # 顶层齐 + 连续 6 轮（≈3 秒）无变化
                         fc, fs = self._count_dir_stats(dst)
                         return True, f"桌面 COM 复制完成 ({fc} 文件, {fs/1024/1024:.1f} MB)"
                 else:
                     stable = 0
+                # 死亡检测：进度指纹长时间（默认 15 分钟）完全不变且顶层未齐 →
+                # 复制已死（权限/网络/用户取消），主动返回失败，不无限挂住
+                if not ready and (time.time() - last_change) > 900:
+                    fc, fs = self._count_dir_stats(dst)
+                    return False, "COM 复制停滞（目标未齐，%d 文件）" % fc
                 last_sig = sig
         finally:
             pythoncom.CoUninitialize()
@@ -565,6 +581,12 @@ class SyncMixin:
         dst_root = proj["group_path"]
 
         try:
+            # 心跳：标记同步开始，并随进度刷新
+            try:
+                self._sync_heartbeat[project_name] = {
+                    "started": time.time(), "last": time.time()}
+            except Exception:
+                pass
             return self._sync_project_impl(project_name, proj, src_root, dst_root)
         except Exception as e:
             logger.exception("同步异常 %s: %s", project_name, e)
@@ -578,9 +600,25 @@ class SyncMixin:
             except Exception:
                 pass
             return False, "同步异常: %s" % e
+        finally:
+            # 无论成败都清心跳（前台可通过“心跳不存在 + 仍是 syncing”判为已死）
+            try:
+                self._sync_heartbeat.pop(project_name, None)
+            except Exception:
+                pass
 
     def _sync_project_impl(self, project_name, proj, src_root, dst_root):
         """同步主体（外层已有异常兜底）。"""
+        def _beat():
+            """刷新心跳：证明任务还活着。"""
+            try:
+                hb = self._sync_heartbeat.get(project_name)
+                if hb is not None:
+                    hb["last"] = time.time()
+            except Exception:
+                pass
+
+        _beat()
         self.db.update_project_status(
             project_name, sync_status="syncing", sync_progress="5% 准备中...")
         self.db.add_sync_log(

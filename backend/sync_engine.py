@@ -24,6 +24,9 @@ class SyncEngine(ScanMixin, SyncMixin, DeliverMixin, PreviewMixin):
         self._output_dir_cache = {}  # 缓存递归查找结果
         self._deliver_tasks = {}      # project_name -> {status, total, current, pct, started_at, message}
         self._local_project_tasks = {}  # project_name -> {status, stage, done, total, message, result}
+        # 同步任务心跳：project_name -> {'started': ts, 'last': ts}
+        # 用“最后活动时间”判断同步是否已静默死亡（进程还在、任务没了）。
+        self._sync_heartbeat = {}
         self._lock = threading.RLock()  # 保护上面两个共享字典
         self._dept_labels = config["nas"].get("production_labels", {})
         self._unc_map = config["nas"].get("unc_map", {})

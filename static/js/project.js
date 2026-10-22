@@ -221,13 +221,38 @@ async function syncMaterial(name){
             toast('❌ 同步未完成: ' + sp, 'error');
             return;
           }
+          // 项目还在列表里但一直 syncing：靠 /api/sync_status 的 alive 判断任务是否已死
+          if(target.sync_status === 'syncing'){
+            try{
+              const st = await api('GET', '/api/sync_status/' + encodeURIComponent(name));
+              if(st && st.ok){
+                if(st.sync_status === 'synced'){ await _finish(); return; }
+                if(st.alive === false){
+                  _syncDone = true;
+                  delete window._syncPolling[name];
+                  toast('⚠️ 同步已中断（任务已停止），请重新点同步', 'warning');
+                  try{ await loadProjects(); }catch(_){}
+                  return;
+                }
+              }
+            }catch(_){}
+          }
         } else {
           // 项目不在列表里：直接问同步任务状态，避免列表口径变化导致永远不跳转
           try{
             const st = await api('GET', '/api/sync_status/' + encodeURIComponent(name));
-            if(st && st.ok && (st.sync_status === 'synced' || st.status === 'done')){
-              await _finish();
-              return;
+            if(st && st.ok){
+              if(st.sync_status === 'synced' || st.status === 'done'){
+                await _finish();
+                return;
+              }
+              // 状态还是 syncing 但后端已无活跃任务 → 同步静默死亡，立即停止
+              if(st.sync_status === 'pending' && st.sync_progress && st.sync_progress.indexOf('中断') >= 0){
+                _syncDone = true;
+                delete window._syncPolling[name];
+                toast('⚠️ 上次同步已中断，请重新点同步', 'warning');
+                return;
+              }
             }
           }catch(_){}
         }

@@ -686,6 +686,20 @@ class DeliverMixin:
             return False, "项目不存在"
 
         old_status = proj.get("custom_status", "")
+        # 状态推进时清掉残留的同步进度文案。
+        # 否则同步中途挂住（如 COM 卡死）会留下“10% 完整同步项目目录...”，
+        # 即使后续手动分集、状态已改为剪辑中，界面仍一直显示那句同步中。
+        _old_prog = (proj.get("sync_progress") or "").strip()
+        _extra = {}
+        if _old_prog and ("同步" in _old_prog or "%" in _old_prog):
+            _extra["sync_progress"] = ""
+            # 若卡在 syncing，顺手把 sync_status 也收回来
+            if (proj.get("sync_status") or "") == "syncing":
+                _extra["sync_status"] = "synced"
+                if not proj.get("last_synced_at"):
+                    _extra["last_synced_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if _extra:
+            self.db.update_project_status(project_name, **_extra)
         self.db.update_project_status(project_name, custom_status=status)
         logger.info("项目状态变更: %s %s -> %s", project_name, old_status, status)
 

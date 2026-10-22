@@ -348,16 +348,43 @@ def api_sync(project_name):
 
 @app.route("/api/sync_status/<path:project_name>", methods=["GET"])
 def api_sync_status(project_name):
-    """单项目同步状态（供前端在项目不在列表时仍能判定同步是否完成）。"""
+    """单项目同步状态（供前端在项目不在列表时仍能判定同步是否完成）。
+
+    除当前状态外，附带 alive 字段：表示进程内是否真有同步任务在跑。
+    若状态还是 syncing 但心跳不存在（进程重启/任务静默死亡），
+    这里直接把它收回 pending，避免前端永远等下去。
+    """
     try:
         proj = sync_engine.db.get_project(project_name) or {}
         st = (proj.get("sync_status") or "").strip()
+        hb = None
+        try:
+            hb = (sync_engine._sync_heartbeat or {}).get(project_name)
+        except Exception:
+            hb = None
+        alive = bool(hb)
+
+        # 幽灵 syncing：库里说在同步，但进程里根本没有这个任务
+        if st == "syncing" and not alive:
+            try:
+                sync_engine.db.update_project_status(
+                    project_name, sync_status="pending",
+                    sync_progress="上次同步被中断，请重新同步")
+                sync_engine.db.add_sync_log(
+                    project_name, "同步中断恢复", "production->group",
+                    status="error", message="未发现活跃同步任务，状态已重置")
+                st = "pending"
+            except Exception:
+                pass
+
         return jsonify({
             "ok": True,
             "project_name": project_name,
             "sync_status": st,
             "sync_progress": proj.get("sync_progress") or "",
             "last_synced_at": proj.get("last_synced_at") or "",
+            "alive": alive,
+            "elapsed": (_time.time() - (hb or {}).get("started", _time.time())) if hb else 0,
         })
     except Exception as e:
         logger.error("sync_status failed: %s", e)
