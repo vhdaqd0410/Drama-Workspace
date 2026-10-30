@@ -466,13 +466,18 @@ class SyncMixin:
                     last_change = time.time()
                 if ready and sig == last_sig:
                     stable += 1
-                    if stable >= 6:      # 顶层齐 + 连续 6 轮（≈3 秒）无变化
+                    if stable >= 3:      # 顶层齐 + 连续 3 轮（≈1.5 秒）无变化
                         fc, fs = self._count_dir_stats(dst)
                         return True, f"桌面 COM 复制完成 ({fc} 文件, {fs/1024/1024:.1f} MB)"
                 else:
                     stable = 0
+                # 顶层名字已齐，只是指纹因元数据刷写而持续变化：
+                # 多等一会儿就认定完成，不要卡到超时（否则会误判失败 → 重复拷贝）
+                if ready and (time.time() - last_change) > 30 and stable >= 1:
+                    fc, fs = self._count_dir_stats(dst)
+                    return True, f"桌面 COM 复制完成 ({fc} 文件, {fs/1024/1024:.1f} MB)"
                 # 死亡检测：进度指纹长时间（默认 15 分钟）完全不变且顶层未齐 →
-                # 复制已死（权限/网络/用户取消），主动返回失败，不无限挂住
+                # 复制已死（权限/网络/用户取消），主动返回失败
                 if not ready and (time.time() - last_change) > 900:
                     fc, fs = self._count_dir_stats(dst)
                     return False, "COM 复制停滞（目标未齐，%d 文件）" % fc
@@ -520,12 +525,50 @@ class SyncMixin:
         except Exception:
             return False
 
+    def _dst_already_complete(self, src, dst):
+        """判断目标目录是否已经和源一致（顶层名字齐 + 文件大小不欠）。
+
+        用途：拷贝失败/超时后，先检查是不是其实已经拷完了。
+        以前不检查，COM 报失败就直接再走 VBS、再走 robocopy，
+        结果同一批文件被反复重拷（用户看到“同步完又执行一次复制”）。
+        """
+        try:
+            if not os.path.isdir(dst):
+                return False
+            src_names = set(os.listdir(src))
+            if not src_names:
+                return True
+            dst_names = set(os.listdir(dst))
+            if not src_names.issubset(dst_names):
+                return False
+            # 顶层文件大小逐个比对（只比顶层，不做递归）
+            for name in src_names:
+                sp = os.path.join(src, name)
+                dp = os.path.join(dst, name)
+                if os.path.isfile(sp):
+                    try:
+                        if os.path.getsize(sp) != os.path.getsize(dp):
+                            return False
+                    except OSError:
+                        return False
+            return True
+        except Exception:
+            return False
+
     def _copy_dir(self, src, dst, exclude_patterns):
         # 前置检查（桌面版）
         ok, msg = self._precheck_copy(src, dst)
         if not ok:
             logger.warning("前置检查失败: %s", msg)
             # 不是致命错误，继续尝试（用户可能有特殊情况）
+
+        # 已经是完整的 → 直接算成功，不做任何拷贝
+        if self._dst_already_complete(src, dst):
+            logger.info("目标已完整，跳过拷贝: %s", dst)
+            if exclude_patterns:
+                self._purge_excluded(dst, exclude_patterns)
+            return True, "目标已完整，无需复制"
+
         # 桌面版：优先用 pywin32 COM 直调
         if self._is_desktop_opt("CAN_COM"):
             ok, msg = self._copy_desktop_com(src, dst)
@@ -533,13 +576,26 @@ class SyncMixin:
                 if exclude_patterns:
                     self._purge_excluded(dst, exclude_patterns)
                 return True, msg
+            # COM 报失败，先核实是不是其实已经拷完了
+            if self._dst_already_complete(src, dst):
+                logger.info("COM 报失败但目标已完整，不再重拷: %s", dst)
+                if exclude_patterns:
+                    self._purge_excluded(dst, exclude_patterns)
+                return True, "复制完成（已校验）"
             logger.info("桌面 COM 不可用 (%s), fallback VBS", msg)
+
         # 原有逻辑：VBS 子进程
         ok, msg = self._copy_explorer(src, dst)
         if ok:
             if exclude_patterns:
                 self._purge_excluded(dst, exclude_patterns)
             return True, msg
+        # VBS 也报失败，再核实一次
+        if self._dst_already_complete(src, dst):
+            logger.info("VBS 报失败但目标已完整，不再重拷: %s", dst)
+            if exclude_patterns:
+                self._purge_excluded(dst, exclude_patterns)
+            return True, "复制完成（已校验）"
         logger.info("Explorer 复制不可用, fallback robocopy")
         return self._robocopy(src, dst, exclude_patterns)
 
@@ -580,13 +636,20 @@ class SyncMixin:
         src_root = proj["production_path"]
         dst_root = proj["group_path"]
 
-        try:
-            # 心跳：标记同步开始，并随进度刷新
+        # 防重：同一项目已在同步中就不重复启动。
+        # 否则重复点同步 / 前端重试会让多个任务对同一目标并发拷贝，
+        # 表现就是“同步完了又跑一次复制”。
+        hb = getattr(self, "_sync_heartbeat", None)
+        if hb is not None:
             try:
-                self._sync_heartbeat[project_name] = {
-                    "started": time.time(), "last": time.time()}
+                if project_name in hb:
+                    logger.info("同步已在进行中，忽略重复请求: %s", project_name)
+                    return True, "同步已在进行中"
+                hb[project_name] = {"started": time.time(), "last": time.time()}
             except Exception:
                 pass
+
+        try:
             return self._sync_project_impl(project_name, proj, src_root, dst_root)
         except Exception as e:
             logger.exception("同步异常 %s: %s", project_name, e)

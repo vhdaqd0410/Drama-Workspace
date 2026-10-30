@@ -63,7 +63,7 @@ class SyncHeartbeatTests(unittest.TestCase):
 
     def test_sync_writes_and_clears_heartbeat(self):
         src = read("backend/sync.py")
-        self.assertIn("_sync_heartbeat[project_name]", src, "同步未写心跳")
+        self.assertIn("hb[project_name] = {", src, "同步未写心跳")
         self.assertIn("_sync_heartbeat.pop", src, "同步结束未清心跳")
 
     def test_status_api_reports_alive_and_recovers(self):
