@@ -166,16 +166,24 @@ async function _loadPersonCards(){
   if(!el) return;
   el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-sec)">👥 正在加载个人卡片...</div>';
   try{
-    const d = await api('GET','/api/commission/person_cards');
+    // 跟随月度报告页选中的月份（默认当前月）
+    const monthSel = document.getElementById('reportMonth');
+    const month = monthSel ? (monthSel.value || '') : '';
+    let url = '/api/commission/person_cards';
+    const qs = [];
+    if(month){ qs.push('month=' + encodeURIComponent(month)); qs.push('year=' + encodeURIComponent(month.slice(0,4))); }
+    if(qs.length) url += '?' + qs.join('&');
+    const d = await api('GET', url);
     if(!d || !d.ok){ el.innerHTML = '<div style="color:var(--red);padding:12px">'+escHtml(d?.message||'加载失败')+'</div>'; return; }
     const cards = d.cards || [];
-    if(!cards.length){ el.innerHTML = '<div style="color:var(--text-sec);padding:20px;text-align:center">'+escHtml(d.year)+' 年暂无分集数据</div>'; return; }
-    // 全年月份序列
-    const months = ['01','02','03','04','05','06','07','08','09','10','11','12'].map(m=>d.year+'-'+m);
+    const focusMonth = d.month || month || '';
+    if(!cards.length){ el.innerHTML = '<div style="color:var(--text-sec);padding:20px;text-align:center">'+(focusMonth?escHtml(focusMonth):escHtml(d.year))+' 暂无分集数据</div>'; return; }
+    // 若指定了月份，就只展示该月；否则展示全年 12 个月
+    const months = focusMonth ? [focusMonth] : ['01','02','03','04','05','06','07','08','09','10','11','12'].map(m=>d.year+'-'+m);
     const maxTotal = Math.max(...cards.map(c=>c.annual_total), 1);
     let html = '<div style="background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:14px">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
-      + '<h4 style="margin:0;font-size:14px">👥 个人工作量卡片（'+escHtml(d.year)+' 年 · '+cards.length+' 人）</h4>'
+      + '<h4 style="margin:0;font-size:14px">👥 个人工作量卡片（'+(focusMonth?escHtml(focusMonth)+' 月 · ':escHtml(d.year)+' 年 · ')+cards.length+' 人）</h4>'
       + '<span style="font-size:11px;color:var(--text-sec)">点击上方按钮即可刷新 · 数据实时来自分集</span>'
       + '</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
     cards.forEach(c => {
@@ -189,7 +197,7 @@ async function _loadPersonCards(){
         + '<div style="display:flex;justify-content:space-between;align-items:center">'
         + '<span style="font-weight:700;font-size:14px">'+escHtml(c.name)+'</span>'
         + '<span style="font-size:11px;color:var(--text-sec)">'+escHtml(c.role)+'</span></div>'
-        + '<div style="font-size:11px;color:var(--text-sec);margin:6px 0">年度 <b style="color:#0071e3">'+c.annual_total+'</b> 集 · 参与 '+c.month_count+' 个月 · 峰值 <b>'+c.best_eps+'</b> 集('+escHtml(c.best_month||'—')+')</div>'
+        + '<div style="font-size:11px;color:var(--text-sec);margin:6px 0">'+(focusMonth?'本月 <b style="color:#0071e3">'+c.annual_total+'</b> 集':'年度 <b style="color:#0071e3">'+c.annual_total+'</b> 集 · 参与 '+c.month_count+' 个月 · 峰值 <b>'+c.best_eps+'</b> 集('+escHtml(c.best_month||'—')+')')+'</div>'
         + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
         + '<div style="flex:1;height:8px;background:#f0f2f5;border-radius:4px;overflow:hidden"><div style="width:'+barW+'%;height:100%;background:linear-gradient(90deg,#5ac8fa,#0071e3);border-radius:4px"></div></div>'
         + '</div>'

@@ -222,11 +222,12 @@ def register_routes(app, db):
 
     @app.route("/api/commission/person_cards", methods=["GET"])
     def commission_person_cards():
-        """个人工作量卡片（功能2）：年度逐月集数 + 角色 + 汇总。?year=YYYY"""
+        """个人工作量卡片（功能2）：年度逐月集数 + 角色 + 汇总。?year=YYYY&month=YYYY-MM"""
         year = request.args.get("year", "")
+        month = request.args.get("month", "").strip() or ""
         try:
             from commission_service import compute_person_cards
-            data = compute_person_cards(db, year=year)
+            data = compute_person_cards(db, year=year, month=month)
             return jsonify({"ok": True, **data})
         except Exception as e:
             import traceback; traceback.print_exc()

@@ -262,18 +262,23 @@ def compute_group_completed(db, month=None, cfg_path=None):
     return result
 
 
-def compute_person_cards(db, year=None, cfg_path=None):
+def compute_person_cards(db, year=None, cfg_path=None, month=None):
     """个人工作量卡片（功能2）：每人年度逐月集数 + 角色 + 汇总。
 
     db: 项目数据库
     year: 如 '2026'；默认当前年。
-    返回 [{'name','role','annual_total','month_count','best_month','best_eps',
-            'monthly': {'2026-01': n, ...}}]
+    month: 如 '2026-10'；指定时只统计该月（月度报告页选中某月时）。
+    返回 {'year','month','cards':[{'name','role','annual_total','month_count',
+           'best_month','best_eps','monthly':{'2026-01':n,...}}]}
     """
     from datetime import datetime
     from collections import defaultdict
     if not year:
         year = str(datetime.now().year)
+    if month and not month.startswith(year):
+        # month 可能是 '10' 或 '2026-10'
+        if len(str(month)) <= 2:
+            month = year + "-" + str(month).zfill(2)
     roles, _rules, _groups = load_config(cfg_path, db=db)
     # 逐月集数
     monthly = defaultdict(lambda: defaultdict(int))  # name -> month -> eps
@@ -284,6 +289,8 @@ def compute_person_cards(db, year=None, cfg_path=None):
     for p in projs:
         pm = (p.get("project_month") or "").strip()
         if not pm.startswith(year):
+            continue
+        if month and pm != month:
             continue
         plan = p.get("episode_plan") or ""
         if not plan or plan == "{}":
@@ -312,4 +319,4 @@ def compute_person_cards(db, year=None, cfg_path=None):
             "monthly": dict(by_month),
         })
     cards.sort(key=lambda c: -c["annual_total"])
-    return {"year": year, "cards": cards}
+    return {"year": year, "month": month, "cards": cards}

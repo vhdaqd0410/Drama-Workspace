@@ -252,6 +252,178 @@ def _load_resigned_members(db):
     return out
 
 
+def _parse_db_date(s, year):
+    """解析 DB 里的交片日期：兼容 ISO('2026-10-09')、'10.9'、'10/9' 等。"""
+    if not s:
+        return None
+    s = str(s).strip()
+    # ISO: YYYY-MM-DD
+    m = re.match(r'(\d{4})-(\d{1,2})-(\d{1,2})', s)
+    if m:
+        return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    # 兼容 '10.9' / '10/9'
+    m = re.search(r'(\d{1,2})[./](\d{1,2})', s)
+    if m:
+        return datetime.date(year, int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _records_from_db(db, month, gc, year, dom_ids, dom_names):
+    """直接从工作台 DB 构造提成表 records（以工作台分集为准，不再读项目文件）。
+
+    项目文件的弊端：分集写回可能失败（文件被 Excel 占用 / 项目块不在文件里），
+    导致“工作台已改成刘梦真、提成表却算给已离职的翟慧莲”。
+    这里彻底绕过项目文件，直接用 DB 的 episode_plan（权威）构造 records。
+
+    返回 (records, group_pids)。结构与 gc.parse_projects 的输出一致：
+      每条 record 含 身份证姓名/角色/项目ID/项目类型/AI项目名称/开始结束日期/
+      完成明细/单项目数集数/原始集数/超时集数/超时明细/参与剪辑。
+    """
+    records = []
+    project_catalog = {}
+    group_pids = {g: set() for g in (gc.GROUPS or {})}
+    _dom_ids = {str(x) for x in (dom_ids or [])}
+    _dom_names = {str(x).strip() for x in (dom_names or [])}
+
+    # 读当月项目
+    projects = []
+    if db is not None:
+        try:
+            for p in db.get_all_projects():
+                if (p.get("project_month") or "").strip() == month:
+                    projects.append(p)
+        except Exception as e:
+            logger.warning("读取 DB 项目失败: %s", e)
+
+    for p in projects:
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+        proj_id = gc.extract_project_id(name)
+        # 项目名称清洗（与 parse_projects 口径一致）
+        clean_name = gc.clean_project_name(name)
+        # 项目类型：国内标记优先，其次按名称
+        if proj_id and str(proj_id) in _dom_ids:
+            ptype = "AI真人"
+        elif name in _dom_names:
+            ptype = "AI真人"
+        elif int(p.get("is_domestic") or 0) == 1:
+            ptype = "AI真人"
+        else:
+            ptype = gc.project_type_for(clean_name)
+
+        # 交片日期
+        end_date = None
+        for k in ("delivered_date", "due_date"):
+            dt = _parse_db_date(p.get(k), year)
+            if dt:
+                end_date = dt
+                break
+        if not end_date:
+            end_date = _parse_db_date(p.get("last_delivered_at"), year)
+
+        # episode_plan → {集号: 剪辑师}
+        plan = p.get("episode_plan") or "{}"
+        try:
+            plan = json.loads(plan) if isinstance(plan, str) else plan
+        except Exception:
+            plan = {}
+
+        if proj_id and clean_name:
+            project_catalog[proj_id] = {
+                "项目ID": proj_id,
+                "AI项目名称": clean_name,
+                "开始日期": (end_date - datetime.timedelta(days=1)) if end_date else None,
+                "结束日期": end_date,
+                "项目类型": ptype,
+            }
+
+        # 按剪辑师聚合集号
+        by_editor = {}  # 剪辑师 -> 集号列表
+        for ep, who in (plan or {}).items():
+            w = (who or "").strip()
+            if not w:
+                continue
+            try:
+                epn = int(ep)
+            except Exception:
+                continue
+            by_editor.setdefault(w, []).append(epn)
+
+        for editor, eps in by_editor.items():
+            if editor not in gc.ROLE_MAP:
+                logger.warning("人员未配置角色，跳过: %s", editor)
+                continue
+            eps = sorted(set(eps))
+            cnt = len(eps)
+            detail = _compact_episodes(eps)
+            role = gc.normalize_role(gc.ROLE_MAP.get(editor, "一卡剪辑"))
+            records.append({
+                "身份证姓名": editor,
+                "角色": role,
+                "项目ID": proj_id,
+                "项目类型": ptype,
+                "AI项目名称": clean_name,
+                "开始日期": (end_date - datetime.timedelta(days=1)) if end_date else None,
+                "结束日期": end_date,
+                "完成明细": detail,
+                "单项目数/集数": cnt,
+                "原始集数": cnt,
+                "超时集数": 0,
+                "超时明细": [],
+                "参与剪辑": True,
+            })
+            # 统计组长所在组项目
+            for gname, ginfo in (gc.GROUPS or {}).items():
+                if editor in ginfo.get("成员", []) and proj_id:
+                    group_pids[gname].add(proj_id)
+
+    # 组长覆盖全组项目（未参与项目只展示信息，参与剪辑=False）
+    leader_names = [
+        n for n in (gc.NAME_ORDER or [])
+        if gc.normalize_role(gc.ROLE_MAP.get(n)) == "剪辑组长"
+    ]
+    assigned_pairs = {(r["身份证姓名"], r["项目ID"]) for r in records}
+    for leader in leader_names:
+        for pid, proj in project_catalog.items():
+            if (leader, pid) in assigned_pairs:
+                continue
+            records.append({
+                "身份证姓名": leader,
+                "角色": "剪辑组长",
+                "项目ID": pid,
+                "项目类型": proj.get("项目类型") or gc.project_type_for(proj.get("AI项目名称")),
+                "AI项目名称": proj["AI项目名称"],
+                "开始日期": proj.get("开始日期"),
+                "结束日期": proj.get("结束日期"),
+                "完成明细": "",
+                "单项目数/集数": 0,
+                "原始集数": 0,
+                "超时集数": 0,
+                "超时明细": [],
+                "参与剪辑": False,
+            })
+
+    return records, group_pids
+
+
+def _compact_episodes(eps):
+    """把集号列表 [1,2,3,5,6,9] 合并成逗号分隔的连续区间 '1-3,5-6,9'。"""
+    if not eps:
+        return ""
+    eps = sorted(set(int(e) for e in eps))
+    parts = []
+    start = prev = eps[0]
+    for e in eps[1:]:
+        if e == prev + 1:
+            prev = e
+        else:
+            parts.append(str(start) if start == prev else "%d-%d" % (start, prev))
+            start = prev = e
+    parts.append(str(start) if start == prev else "%d-%d" % (start, prev))
+    return ",".join(parts)
+
+
 def build_report(month, output_dir=None, db=None):
     """生成月度提成表，返回 {ok, path, month, title, records, people, projects, error}。
 
@@ -269,17 +441,18 @@ def build_report(month, output_dir=None, db=None):
     gc = _plugin_module()
     import pandas as pd
 
-    project_file = _resolve_project_file(month, db=db)
-    if not project_file:
-        return {"ok": False, "error": "未找到 %s 对应的项目文件（%s月），请先在分集页确认数据"
-                % (month, m_num)}
+    # 统一口径：提成表直接以工作台 DB 分集为准，不再读项目文件。
+    # （项目文件写回可能失败 → 残留旧分集，导致“工作台已改、提成表还按旧人算”）
+    cn_month = _CN_MONTHS[m_num]
+    out_month_num = m_num
 
-    # 读项目表 → 解析
-    df = pd.read_excel(project_file, header=None)
-    # 用数据文件真实月份覆盖（与插件 main() 一致）
-    data_cn, data_month_num = gc.get_month_from_data(df)
-    cn_month = data_cn if data_cn else _CN_MONTHS[m_num]
-    out_month_num = data_month_num if data_month_num else m_num
+    # 工作台数据传导：国内标记（项目类型→AI真人）、离职成员（标红+备注）
+    dom_ids, dom_names = _load_domestic_projects(db, month=month)
+    resigned = _load_resigned_members(db)
+
+    records, group_pids = _records_from_db(db, month, gc, year, dom_ids, dom_names)
+    if not records:
+        return {"ok": False, "error": "DB 中未找到 %s 月的分集数据，请先在分集页确认" % month}
 
     # 组别与标题（最新模板口径）
     # 主标题：后期剪辑部 + YYYY年MM月 + 剪辑一组 + 提成表
@@ -321,19 +494,10 @@ def build_report(month, output_dir=None, db=None):
     except Exception:
         pass
 
-    # 工作台数据传导：国内标记（项目类型→AI真人）、离职成员（标红+备注）
-    dom_ids, dom_names = _load_domestic_projects(db, month=month)
-    resigned = _load_resigned_members(db)
-
-    records, group_pids = gc.parse_projects(df, default_year=year,
-                                            domestic_ids=dom_ids, domestic_names=dom_names)
-    if not records:
-        return {"ok": False, "error": "项目文件未解析到有效记录：%s" % os.path.basename(project_file)}
-
     # 按「提成表填写注意事项」校验数据（不阻断生成，但把问题带回前端提示）
     issues = []
     try:
-        issues = validate_report_data(records, df, project_file, db=db, month=month)
+        issues = validate_report_data(records, None, None, db=db, month=month)
     except Exception as _ve:
         logger.warning("提成表数据校验异常: %s", _ve)
     if issues:
@@ -386,7 +550,7 @@ def build_report(month, output_dir=None, db=None):
         "month": month,
         "cn_month": cn_month,
         "title": title,
-        "source_file": project_file,
+        "source_file": "工作台DB分集（%s）" % month,
         "people": len(people),
         "projects": projects,
         "records": len(records),
