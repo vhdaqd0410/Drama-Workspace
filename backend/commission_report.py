@@ -356,7 +356,7 @@ def _records_from_db(db, month, gc, year, dom_ids, dom_names):
                 continue
             eps = sorted(set(eps))
             cnt = len(eps)
-            detail = _compact_episodes(eps)
+            detail = ",".join(str(e) for e in eps)   # 每集逗号分隔（与原来 parse_person_assignment 口径一致）
             role = gc.normalize_role(gc.ROLE_MAP.get(editor, "一卡剪辑"))
             records.append({
                 "身份证姓名": editor,
@@ -424,11 +424,13 @@ def _compact_episodes(eps):
     return ",".join(parts)
 
 
-def build_report(month, output_dir=None, db=None):
+def build_report(month, output_dir=None, db=None, highlight_card_rule=False):
     """生成月度提成表，返回 {ok, path, month, title, records, people, projects, error}。
 
     month: 'YYYY-MM'
     output_dir: 输出目录（默认桌面）
+    highlight_card_rule: True 时把「一卡剪辑/卡前」的提成构成整格标黄
+                        （仅当月卡前规则有变动时才需要）。
     """
     if not month:
         return {"ok": False, "error": "缺少月份"}
@@ -511,7 +513,7 @@ def build_report(month, output_dir=None, db=None):
         "group_label": group_label,
         "full_role": False,      # 职位列显示 组长/卡前/卡后（三种口径）
         "use_rule_desc": True,   # 提成构成用配置原值（不带硬编码后缀）
-        "highlight_roles": ["一卡剪辑"],  # 本月卡前（一卡剪辑）规则一律全标黄
+        "highlight_roles": ["一卡剪辑"] if highlight_card_rule else [],  # 仅当月卡前规则变动时标黄
         "resigned": resigned,            # {姓名: 离职日期}，命中者标红+备注写离职日期
     }
     # 只产出这张 xlsx（不生成仪表盘 HTML，避免桌面多余文件）

@@ -125,6 +125,9 @@ async function loadReportTab(){
     <button class="btn btn-sm" id="btnCommission" onclick="showCommissionReport()" style="background:#af52de;color:#fff" title="从分集数据计算本月每人绩效与提成">💰 提成/绩效</button>
     <button class="btn btn-sm" id="btnPersonCards" onclick="showPersonCards()" style="background:#0071e3;color:#fff" title="年度每人工作量卡片与趋势">👥 个人卡片</button>
     <button class="btn btn-sm" onclick="exportCommissionReport()" style="background:#ff9500;color:#fff" title="按分集数据生成月度最终提成表（Excel）">📊 生成提成表</button>
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-sec);cursor:pointer" title="仅当月卡前（一卡剪辑）规则有变动时勾选，勾选后卡前提成构成整格标黄">
+      <input type="checkbox" id="chkCardRuleChanged" style="width:15px;height:15px"> 本月卡前规则变动（标黄）
+    </label>
     <button class="btn btn-sm" onclick="_downloadExcel()" style="background:#34c759;color:#fff">📥 下载 Excel</button>
   </div>
   <div id="reportWorkloadBoard" style="margin-bottom:20px"></div>
@@ -417,10 +420,11 @@ function _downloadExcel(){
 async function exportCommissionReport(){
   const month = document.getElementById('reportMonth')?.value || '';
   if(!month){ toast && toast('请先选择月份','warning'); return; }
+  const highlight = document.getElementById('chkCardRuleChanged')?.checked ? true : false;
   const msg = '正在按分集数据生成 ' + month + ' 月度提成表...';
   if(typeof toast === 'function') toast(msg, 'info');
   try{
-    const d = await api('POST', '/api/commission/report', {month: month, open: 1});
+    const d = await api('POST', '/api/commission/report', {month: month, open: 1, highlight_card_rule: highlight});
     if(!d || !d.ok){
       alert('生成失败：' + ((d && (d.error || d.message)) || '未知错误'));
       return;

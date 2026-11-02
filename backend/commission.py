@@ -249,9 +249,11 @@ def register_routes(app, db):
         month = (body.get("month") or "") or datetime.now().strftime("%Y-%m")
         do_open = str(body.get("open") or "").lower() in ("1", "true", "yes")
         out_dir = (body.get("dir") or "").strip() or None
+        highlight = str(body.get("highlight_card_rule") or "").lower() in ("1", "true", "yes")
         try:
             from commission_report import build_report
-            res = build_report(month, output_dir=out_dir, db=db)
+            res = build_report(month, output_dir=out_dir, db=db,
+                               highlight_card_rule=highlight)
             if not res.get("ok"):
                 res = dict(res)
                 res.setdefault("message", res.get("error") or "生成失败")
