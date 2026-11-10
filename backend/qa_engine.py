@@ -678,6 +678,8 @@ class QAEngine:
             'folder_info': folder_info,
             'srt_folder': srt_folder,
             'cp_folder': folder_info.get('cp_folder'),
+            # 质检标准为「不判字幕」的版本：只查黑帧/时长/文件数
+            'skip_hardsub_folders': list(opts.get('skip_hardsub_folders') or []),
         }
 
         summary = {

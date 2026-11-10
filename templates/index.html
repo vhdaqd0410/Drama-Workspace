@@ -1325,10 +1325,15 @@ a{color:var(--blue);text-decoration:none}
         <label class="qa-label qa-label-wide">成片</label>
         <select id="qa2CpFolder" class="qa-input"></select>
       </div>
-      <div class="qa-row">
-        <label class="qa-label qa-label-wide">硬字幕版本</label>
-        <div id="qa2HardSubContainer" class="qa-hardsub-box">
-          <span style="color:var(--text-sec);font-size:13px">（选择目录后自动填充）</span>
+      <div class="qa-row" style="align-items:flex-start">
+        <label class="qa-label qa-label-wide" style="padding-top:6px">版本检测</label>
+        <div style="flex:1">
+          <div id="qa2HardSubContainer" class="qa-hardsub-box" style="display:block"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+            <select id="qa2AddVersionSel" class="qa-input" style="width:auto;min-width:150px"></select>
+            <button class="btn btn-sm qa-btn" onclick="qa2AddVersion()">＋ 加入检测</button>
+            <span style="font-size:11px;color:var(--text-sec)">可勾选是否参与检测，并逐版本选质检标准</span>
+          </div>
         </div>
       </div>
       <div class="qa-row">

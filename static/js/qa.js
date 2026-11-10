@@ -13,7 +13,8 @@ var qa2State = {
     currentSubRegion: null,// 当前匹配的 [x,y,w,h]
     firstVideoPath: null,  // 用于 /api/qa/preview_frame
     firstVideoInfo: null,  // {width,height,fps,...}
-    hardsubVars: {},       // {folderName: bool}
+    hardsubVars: {},       // {folderName: bool} 是否参与检测
+    versionRules: {},      // {folderName: 'cp'|'nohardsub'|'none'} 质检标准
     lastReportReady: false,// 是否有可下载的报告
     tmpProjectName: '',    // 临时存，方便导出时用
     tmpProjectPath: '',
@@ -211,10 +212,35 @@ function qa2ScanDir(dir) {
         });
         if (Object.keys(qa2State.hardsubVars).length === 0) {
             var hint = document.createElement('span');
+            hint.className = 'qa-version-empty';
             hint.style.color = 'var(--text-sec)';
             hint.style.fontSize = '13px';
             hint.textContent = '（无可用版本）';
             hardContainer.appendChild(hint);
+        }
+
+        // 初始化版本质检标准（优先后端 rules，其次已有的）
+        if (layout.version_rules_default && typeof layout.version_rules_default === 'object') {
+            qa2State.versionRules = qa2State.versionRules || {};
+            Object.keys(layout.version_rules_default).forEach(function (f) {
+                if (!(f in qa2State.versionRules)) {
+                    qa2State.versionRules[f] = layout.version_rules_default[f];
+                }
+            });
+        }
+
+        // 「加入检测」下拉：列出所有含视频的版本（已加入的也列，加入时会提示）
+        var addSel = $('qa2AddVersionSel');
+        if (addSel) {
+            addSel.innerHTML = '';
+            var _ph = document.createElement('option');
+            _ph.value = ''; _ph.textContent = '— 选择要加入的版本 —';
+            addSel.appendChild(_ph);
+            (layout.all_video_folders || layout.available_folders || []).forEach(function (f) {
+                var o = document.createElement('option');
+                o.value = f; o.textContent = f;
+                addSel.appendChild(o);
+            });
         }
 
         // 字幕文件标签
@@ -265,21 +291,93 @@ function qa2ScanDir(dir) {
 // 硬字幕版本复选框渲染（单条）
 function qa2RenderHardSubCheck(folder) {
     var container = $('qa2HardSubContainer');
-    var label = document.createElement('label');
-    label.className = 'qa-check';
-    label.style.marginRight = '4px';
-    var input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = !!qa2State.hardsubVars[folder];
-    input.addEventListener('change', function () {
-        qa2State.hardsubVars[folder] = input.checked;
-        qa2RefreshFileCheckLabel();  // 数量勾选变化 → 重算一致性
+    var row = document.createElement('div');
+    row.className = 'qa-version-row';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:3px 0;flex-wrap:wrap';
+    row.setAttribute('data-folder', folder);
+
+    // 1) 是否参与检测
+    var enabled = document.createElement('input');
+    enabled.type = 'checkbox';
+    enabled.title = '是否参与检测';
+    enabled.style.cssText = 'width:15px;height:15px';
+    enabled.checked = !!qa2State.hardsubVars[folder];
+    enabled.addEventListener('change', function () {
+        qa2State.hardsubVars[folder] = enabled.checked;
+        qa2RefreshFileCheckLabel();
     });
+
+    // 2) 版本名
     var span = document.createElement('span');
     span.textContent = folder;
-    label.appendChild(input);
-    label.appendChild(span);
-    container.appendChild(label);
+    span.style.cssText = 'min-width:140px;font-size:13px';
+
+    // 3) 质检标准
+    var sel = document.createElement('select');
+    sel.className = 'qa-input';
+    sel.style.cssText = 'width:auto;min-width:170px;font-size:12px';
+    [['cp', '成片（应有硬字幕）'],
+     ['nohardsub', '无字幕（应无硬字幕）'],
+     ['none', '不判字幕（仅查黑帧/时长）']].forEach(function (pair) {
+        var o = document.createElement('option');
+        o.value = pair[0]; o.textContent = pair[1];
+        sel.appendChild(o);
+    });
+    var cur = (qa2State.versionRules || {})[folder];
+    if (!cur) {
+        // 没配置过：按是否成片性质猜一个默认值
+        var cpLike = (qa2State.layout && qa2State.layout.cp_like_folders) || [];
+        cur = (cpLike.indexOf(folder) >= 0) ? 'cp' : 'nohardsub';
+    }
+    sel.value = cur;
+    sel.addEventListener('change', function () {
+        qa2State.versionRules = qa2State.versionRules || {};
+        qa2State.versionRules[folder] = sel.value;
+    });
+
+    // 4) 移除按钮
+    var del = document.createElement('button');
+    del.className = 'btn btn-sm qa-btn';
+    del.textContent = '✕';
+    del.title = '从检测清单移除';
+    del.style.cssText = 'padding:2px 7px;font-size:11px';
+    del.addEventListener('click', function () {
+        delete qa2State.hardsubVars[folder];
+        if (qa2State.versionRules) delete qa2State.versionRules[folder];
+        row.remove();
+        qa2RefreshFileCheckLabel();
+        if (!container.querySelector('.qa-version-row')) {
+            var hint = document.createElement('span');
+            hint.className = 'qa-version-empty';
+            hint.style.cssText = 'color:var(--text-sec);font-size:13px';
+            hint.textContent = '（无可用版本，请从下方下拉加入）';
+            container.appendChild(hint);
+        }
+    });
+
+    row.appendChild(enabled);
+    row.appendChild(span);
+    row.appendChild(sel);
+    row.appendChild(del);
+    var empty = container.querySelector('.qa-version-empty');
+    if (empty) empty.remove();
+    container.appendChild(row);
+}
+
+// 把一个目录加入检测清单（可重复添加已被移除的版本）
+function qa2AddVersion() {
+    var sel = $('qa2AddVersionSel');
+    var folder = sel ? sel.value : '';
+    if (!folder) { alert('请先选择一个版本文件夹'); return; }
+    qa2State.versionRules = qa2State.versionRules || {};
+    qa2State.hardsubVars = qa2State.hardsubVars || {};
+    if (qa2State.hardsubVars[folder] !== undefined) {
+        alert('该版本已在检测清单中');
+        return;
+    }
+    qa2State.hardsubVars[folder] = true;
+    qa2RenderHardSubCheck(folder);
+    qa2RefreshFileCheckLabel();
 }
 
 // 用户勾选硬字幕版本变化 → 重新计算一致性显示
@@ -546,17 +644,33 @@ function qa2Start() {
     var cpFolder = $('qa2CpFolder').value;
     if (!cpFolder) { toast('请指定成片文件夹', 'warning'); return; }
 
-    // 成片性质版本（成片 + 无码版等）：期望有硬字幕
-    var cpLikeFolders = [cpFolder];
-    ((qa2State.layout && qa2State.layout.cp_like_folders) || []).forEach(function (f) {
-        if (f && cpLikeFolders.indexOf(f) < 0) cpLikeFolders.push(f);
-    });
-    // 硬字幕版本：勾选的 + 成片性质版本
-    var hardsubFolders = cpLikeFolders.slice();
+    // 按用户逐版本配置的质检标准生成两组：
+    //   cpLikeFolders  → 应有硬字幕
+    //   hardsubFolders → 参与检测的版本（含成片）
+    // 标准为 'none' 的版本仍参与黑帧/时长/文件数检测，但不参与硬字幕判定。
+    var rules = qa2State.versionRules || {};
+    var cpLikeFolders = [];
+    var hardsubFolders = [];
+    // 成片始终算「应有硬字幕」
+    if (cpFolder) cpLikeFolders.push(cpFolder);
+
     Object.keys(qa2State.hardsubVars).forEach(function (f) {
-        if (qa2State.hardsubVars[f] && hardsubFolders.indexOf(f) < 0) hardsubFolders.push(f);
+        if (!qa2State.hardsubVars[f]) return;        // 未勾选参与检测
+        if (hardsubFolders.indexOf(f) < 0) hardsubFolders.push(f);
+        var r = rules[f];
+        if (r === 'cp') {
+            if (cpLikeFolders.indexOf(f) < 0) cpLikeFolders.push(f);
+        }
     });
+    // 成片若没在勾选列表里，也要参与检测
+    if (cpFolder && hardsubFolders.indexOf(cpFolder) < 0) hardsubFolders.unshift(cpFolder);
+
     var srtFolder = (qa2State.layout && qa2State.layout.srt_folder) || null;
+    // 不参与硬字幕判定的版本（标准选「不判字幕」）
+    var skipHs = [];
+    Object.keys(qa2State.hardsubVars).forEach(function (f) {
+        if (qa2State.hardsubVars[f] && rules[f] === 'none') skipHs.push(f);
+    });
 
     var workers = parseInt($('qa2Workers').value) || 4;
     var opts = {
@@ -565,6 +679,7 @@ function qa2Start() {
         cp_like_folders: cpLikeFolders,
         hardsub_folders: hardsubFolders,
         srt_folder: srtFolder,
+        skip_hardsub_folders: skipHs,
         opt_blackframes: !!$('qa2OptBlack').checked,
         opt_hardsubs: !!$('qa2OptHard').checked,
         opt_duration: !!$('qa2OptDur').checked,

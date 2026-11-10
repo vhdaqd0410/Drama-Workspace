@@ -153,8 +153,18 @@ def auto_detect_folders(base):
         has_video = any(x.endswith(VIDEO_EXTS) for x in files)
         has_srt = any(x.endswith('.srt') for x in files)
 
-        if has_srt or '字幕文件' in f or fl.startswith('3') or 'srt' in fl:
+        # 字幕目录：目录里只有字幕（有 srt 且没视频），或名字明确叫字幕文件/srt。
+        # 注意：不能再按「3 开头」粗暴归类——交付结构里「3.无音乐有字幕」
+        # 这类版本也以 3 开头，会被误当成字幕目录而漏检。
+        if (has_srt and not has_video) or '字幕文件' in f or 'srt' in fl:
             srt_match = f
+            continue
+        if not has_video:
+            continue   # 既无视频也无字幕，不参与
+        # 成片性质关键词：先于「无字幕」判断，避免「无音乐有字幕」被误归无字幕类
+        # （仅用于猜默认值，用户在界面上可改）
+        if ('有字幕' in f and '无字幕' not in f) or '硬字幕' in f:
+            cp_like_matches.append(f)
             continue
         # 无码版：与成片同类，期望有硬字幕（必须在"无字幕"判断之前，避免误归无字幕版）
         if '无码' in f or '去码' in f or '无马' in f:
@@ -234,6 +244,24 @@ def auto_detect_folders(base):
     for f in cp_like:
         out["hardsub_vars_default"][f] = True
     out["file_counts"] = file_counts
+
+    # 可编辑的版本清单：所有含视频的文件夹（按目录名自然顺序），
+    # 每个版本带一个质检标准，前端可改、可增删。
+    # 标准取值：
+    #   'cp'       成片（应有硬字幕）
+    #   'nohardsub' 无字幕（应无硬字幕）
+    #   'none'     不判硬字幕（仅查黑帧/时长/文件数）
+    # 默认值先按文件名猜，猜错了用户在前端改，不写死。
+    order = {f: i for i, f in enumerate(available)}
+    all_video_sorted = sorted(all_video_folders, key=lambda f: order.get(f, 999))
+    rules = {}
+    for f in all_video_sorted:
+        if f in cp_like:
+            rules[f] = "cp"
+        else:
+            rules[f] = "nohardsub"
+    out["version_rules_default"] = rules
+    out["all_video_folders"] = all_video_sorted
 
     all_vals = list(file_counts.values()) + ([out["srt_count"]] if srt_match else [])
     out["consistent"] = (len(set(all_vals)) == 1) if all_vals else False
@@ -388,7 +416,7 @@ def _sanitize_opts(opts):
         k: opts.get(k) for k in (
             'cp_folder', 'hardsub_folders', 'srt_folder',
             'opt_blackframes', 'opt_hardsubs', 'opt_duration',
-            'sub_region',
+            'sub_region', 'skip_hardsub_folders',
         ) if k in opts
     }
 
@@ -534,9 +562,13 @@ def generate_report_html(project_path, project_name, results, total,
         'fps_mismatch': [],
     }
     cp_like_set = set(cp_like_folders or [cp_folder])
+    # 不参与硬字幕判定的版本（用户设为「仅查黑帧/时长」）
+    skip_hs_set = set(extra_data.get('skip_hardsub_folders') or [])
     for r in results:
         vname = r.get('video', '')
         for folder, hs in (r.get('hard_sub') or {}).items():
+            if folder in skip_hs_set:
+                continue   # 该版本不判硬字幕
             has_hs = bool(hs.get('has_hardsub', False))
             is_cp_like = (folder in cp_like_set)
             if is_cp_like and not has_hs:
