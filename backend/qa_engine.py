@@ -479,6 +479,7 @@ class QAEngine:
                     progress_q, progress_callback, progress_data,
                     [], folder_info, t_start, file_counts, srt_count,
                     consistent, all_video_folders, srt_folder, workers,
+                    skip_hardsub_folders=opts.get('skip_hardsub_folders') or [],
                 )
                 return
 
@@ -601,6 +602,7 @@ class QAEngine:
                 progress_q, progress_callback, progress_data,
                 results, folder_info, t_start, file_counts, srt_count,
                 consistent, all_video_folders, srt_folder, workers,
+                skip_hardsub_folders=opts.get('skip_hardsub_folders') or [],
             )
 
         except Exception as e:
@@ -654,7 +656,8 @@ class QAEngine:
     def _finalize_run(self, run_id, project_name, project_path, cancel_token,
                       progress_q, progress_callback, progress_data,
                       results, folder_info, t_start, file_counts, srt_count,
-                      consistent, all_video_folders, srt_folder, workers):
+                      consistent, all_video_folders, srt_folder, workers,
+                      skip_hardsub_folders=None):
         """把质检收尾逻辑抽取出来（DB 更新、写 JSON、报告缓存、通知 done）。"""
         import qa_toolkits
 
@@ -679,7 +682,7 @@ class QAEngine:
             'srt_folder': srt_folder,
             'cp_folder': folder_info.get('cp_folder'),
             # 质检标准为「不判字幕」的版本：只查黑帧/时长/文件数
-            'skip_hardsub_folders': list(opts.get('skip_hardsub_folders') or []),
+            'skip_hardsub_folders': list(skip_hardsub_folders or []),
         }
 
         summary = {
