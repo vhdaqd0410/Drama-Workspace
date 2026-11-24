@@ -3,5 +3,5 @@
 Dim ws, appDir, cmd
 Set ws = CreateObject("WScript.Shell")
 appDir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
-cmd = "pythonw """ & appDir & "\main_desktop.py"""
+cmd = "pythonw """ & appDir & "\main_desktop.py"" --autostart"
 ws.Run cmd, 0, False

@@ -51,7 +51,7 @@ async function loadProjects(){
       window._skTimer = setTimeout(function(){
         window._skTimer = null;
         try{ showProjectsSkeleton(); }catch(_){}
-      }, 200);
+      }, 120);
     }
   }catch(_){}
   try{
@@ -94,8 +94,9 @@ async function loadProjects(){
       }catch(e2){}
     }
     updateDepartmentFilter();
-    hideProjectsSkeleton();
+    // 先渲染真实数据，再揭开骨架遮罩，避免中间闪一下空白
     renderDashboard();
+    hideProjectsSkeleton();
     updateLightLists();
     // 预填查剪辑缓存（searchEpisodeEditor 复用，避免每次点击都重复请求 /api/projects）
     window.__projectsCache = flat;

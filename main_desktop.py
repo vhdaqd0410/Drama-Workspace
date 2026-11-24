@@ -590,9 +590,19 @@ def _read_startup_settings():
 
 
 def _apply_startup_settings():
-    """根据设置执行启动行为：延迟后触发扫描 / 隐藏窗口。"""
+    """根据设置执行启动行为：延迟后触发扫描 / 隐藏窗口。
+
+    关键区分：min_to_tray 只对【开机自启】生效。
+    原因：该设置本意是开机时不弹窗打扰，但以前无论怎么启动都会隐藏窗口，
+    导致用户手动双击或托盘「重启软件」后窗口自动消失，还得再从托盘叫回来。
+    现在靠 --autostart 参数（由 start_desktop.vbs 传入）区分：
+      - 开机自启（--autostart）→ 按设置最小化到托盘
+      - 手动启动 / 托盘重启 → 直接正常显示窗口
+    """
     min_tray, auto_scan = _read_startup_settings()
-    print(f"[startup] 启动行为 → 最小化到托盘: {min_tray}, 自动扫描: {auto_scan}")
+    _is_autostart = "--autostart" in sys.argv
+    print(f"[startup] 启动行为 → 最小化到托盘: {min_tray} "
+          f"(本次是开机自启: {_is_autostart}), 自动扫描: {auto_scan}")
     # 自动扫描：等服务与界面就绪后延迟触发，避免阻塞首屏
     if auto_scan:
         def _scan():
@@ -600,13 +610,15 @@ def _apply_startup_settings():
             print("[startup] 按设置自动扫描 NAS...")
             _trigger_api("scan")
         threading.Thread(target=_scan, daemon=True).start()
-    # 最小化到托盘：延迟到窗口创建完成后执行
-    if min_tray:
+    # 最小化到托盘：仅开机自启时执行（延迟到窗口创建完成后）
+    if min_tray and _is_autostart:
         def _min():
             time.sleep(2)
             _hide_window()  # 内部按可见性变化触发节流菜单刷新
-            print("[startup] 已按设置最小化到托盘")
+            print("[startup] 已按设置最小化到托盘（开机自启）")
         threading.Thread(target=_min, daemon=True).start()
+    elif min_tray:
+        print("[startup] 本次为手动启动/重启，保持窗口显示（不隐藏到托盘）")
 
 
 # ============================================================

@@ -1700,59 +1700,102 @@ function sortProjects(list){
   });
 }
 
-// ==== 首屏骨架屏（加载中显示项目轮廓 + 扫光动画）====
-// 工作台冷启动时 /api/projects 要几秒（全量扫盘），先出占位不让界面空白。
-function showProjectsSkeleton(blocks, perBlock){
-  const container = $('projectGrid');
-  if(!container) return;
-  blocks = blocks || 3;
-  perBlock = perBlock || 6;
-  let html = '<div class="sk-wrap">';
-  for(let b=0;b<blocks;b++){
-    html += '<div class="sk-block">';
-    html += '<div class="sk-progress"></div>';
-    html += '<div class="sk-head">'
-          +   '<div class="sk-bar sk-title"></div>'
-          +   '<div class="sk-bar sk-badge"></div>'
-          + '</div>';
-    html += '<div class="sk-grid">';
-    for(let i=0;i<perBlock;i++){
-      html += '<div class="sk-card">'
-            +   '<div class="sk-bar sk-l1"></div>'
-            +   '<div class="sk-bar sk-l2"></div>'
-            +   '<div class="sk-chips">'
-            +     '<div class="sk-bar sk-chip"></div>'
-            +     '<div class="sk-bar sk-chip"></div>'
-            +     '<div class="sk-bar sk-chip"></div>'
-            +   '</div>'
-            +   '<div class="sk-bar sk-line"></div>'
-            +   '<div class="sk-bar sk-line short"></div>'
-            +   '<div class="sk-btns">'
-            +     '<div class="sk-bar sk-btn"></div>'
-            +     '<div class="sk-bar sk-btn"></div>'
-            +     '<div class="sk-bar sk-btn"></div>'
-            +   '</div>'
-            + '</div>';
-    }
-    html += '</div></div>';
-  }
-  html += '</div>';
-  container.innerHTML = html;
-  window._skeletonShown = true;
+// ==== 首屏骨架屏（加载中显示整页框架轮廓 + 扫光动画）====
+// 工作台冷启动时 /api/projects 要扫盘，先出完整骨架不让界面空白或只转 spinner。
+// 覆盖：统计卡片行 / 图表区 / 筛选栏 / 项目分区块，加载完一次性揭开显示真实数据。
 
-  // 顶部统计卡片也一起出骨架（避免加载时上方空白）
-  const statsRow = $('statsRow');
-  if(statsRow && !statsRow.querySelector('.stat-card')){
-    let sh = '';
-    for(let i=0;i<5;i++){
-      sh += '<div class="stat-card"><div class="sk-stat">'
-          +   '<div class="sk-bar sk-ico"></div>'
-          +   '<div><div class="sk-bar sk-num"></div><div class="sk-bar sk-tag"></div></div>'
-          + '</div></div>';
+function _skProjectBlocks(blocks, perBlock){
+  let h = '';
+  for(let b=0;b<blocks;b++){
+    h += '<div class="sk-block">'
+       +   '<div class="sk-progress"></div>'
+       +   '<div class="sk-head">'
+       +     '<div class="sk-bar sk-title"></div>'
+       +     '<div class="sk-bar sk-badge"></div>'
+       +   '</div>'
+       +   '<div class="sk-grid">';
+    for(let i=0;i<perBlock;i++){
+      h += '<div class="sk-card">'
+         +   '<div class="sk-bar sk-l1"></div>'
+         +   '<div class="sk-bar sk-l2"></div>'
+         +   '<div class="sk-chips">'
+         +     '<div class="sk-bar sk-chip"></div>'
+         +     '<div class="sk-bar sk-chip"></div>'
+         +     '<div class="sk-bar sk-chip"></div>'
+         +   '</div>'
+         +   '<div class="sk-bar sk-line"></div>'
+         +   '<div class="sk-bar sk-line short"></div>'
+         +   '<div class="sk-btns">'
+         +     '<div class="sk-bar sk-btn"></div>'
+         +     '<div class="sk-bar sk-btn"></div>'
+         +     '<div class="sk-bar sk-btn"></div>'
+         +   '</div>'
+         + '</div>';
     }
-    statsRow.innerHTML = sh;
-    window._statsSkeletonShown = true;
+    h += '</div></div>';
   }
+  return h;
+}
+
+function showProjectsSkeleton(){
+  const sk = $('dashSkeleton');
+  if(!sk){
+    // 没有遮罩容器时回退：至少给项目区填骨架
+    const container = $('projectGrid');
+    if(container) container.innerHTML = '<div class="sk-wrap">' + _skProjectBlocks(3, 6) + '</div>';
+    window._skeletonShown = true;
+    return;
+  }
+  if(sk.classList.contains('on')) return;   // 避免重复重建
+
+  let h = '';
+  // 1) 统计卡片行
+  h += '<div class="dash-sk-stats">';
+  for(let i=0;i<5;i++){
+    h += '<div class="dash-sk-stat">'
+       +   '<div class="sk-bar sk-ico"></div>'
+       +   '<div><div class="sk-bar sk-num"></div><div class="sk-bar sk-tag"></div></div>'
+       + '</div>';
+  }
+  h += '</div>';
+  // 2) 图表区（两张大卡）
+  h += '<div class="dash-sk-charts">';
+  for(let i=0;i<2;i++){
+    h += '<div class="dash-sk-chart">'
+       +   '<div class="sk-bar sk-line" style="width:34%"></div>'
+       +   '<div class="sk-bar dash-sk-area"></div>'
+       + '</div>';
+  }
+  h += '</div>';
+  // 3) 筛选栏
+  h += '<div class="dash-sk-filter">';
+  for(let i=0;i<4;i++){
+    h += '<div class="sk-bar sk-select"></div>';
+  }
+  h += '</div>';
+  // 4) 项目分区块
+  h += '<div class="sk-wrap">' + _skProjectBlocks(3, 6) + '</div>';
+
+  sk.innerHTML = h;
+  sk.classList.add('on');
+  window._skeletonShown = true;
+  window._skShownAt = Date.now();
+}
+
+// 真正移除遮罩
+function _doHideSkeleton(){
+  const sk = $('dashSkeleton');
+  if(sk){
+    sk.classList.remove('on');
+    sk.innerHTML = '';
+  }
+  // 兼容旧逻辑：项目区里可能直接填过骨架
+  const container = $('projectGrid');
+  if(container){
+    const old = container.querySelector('.sk-wrap');
+    if(old) old.remove();
+  }
+  window._skeletonShown = false;
 }
 
 function hideProjectsSkeleton(){
@@ -1762,12 +1805,16 @@ function hideProjectsSkeleton(){
     window._skTimer = null;
   }
   if(!window._skeletonShown) return;
-  const container = $('projectGrid');
-  if(container){
-    const sk = container.querySelector('.sk-wrap');
-    if(sk) sk.remove();
+
+  // 保持一个最短展示时长：扫光动画需要时间跑完一程，否则一闪而过看不见效果
+  const MIN_SHOW = 420;
+  const shown = window._skShownAt || 0;
+  const elapsed = shown ? (Date.now() - shown) : MIN_SHOW;
+  if(elapsed < MIN_SHOW){
+    setTimeout(_doHideSkeleton, MIN_SHOW - elapsed);
+    return;
   }
-  window._skeletonShown = false;
+  _doHideSkeleton();
 }
 
 function renderDashboard(){
