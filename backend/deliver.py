@@ -2020,6 +2020,7 @@ class DeliverMixin:
                     for _k, _v in _sorted[:len(_sorted) // 2]:
                         _cached.pop(_k, None)
                 _cached[project_name] = (time.time(), result)
+                self._delivery_stats_dirty = True
         except Exception:
             pass
         return result

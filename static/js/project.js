@@ -43,6 +43,17 @@ let _projectsLoading = false;
 async function loadProjects(){
   if(_projectsLoading) return;
   _projectsLoading = true;
+  // 冷启动时 /api/projects 要全量扫盘（几秒），先出骨架屏+扫光，避免空白转圈。
+  // 只在首次加载（还没有数据）时显示；延迟 200ms 触发，避免快加载时闪一下。
+  try{
+    if(!projects || !projects.length){
+      if(window._skTimer){ clearTimeout(window._skTimer); }
+      window._skTimer = setTimeout(function(){
+        window._skTimer = null;
+        try{ showProjectsSkeleton(); }catch(_){}
+      }, 200);
+    }
+  }catch(_){}
   try{
     const d = await api('GET','/api/projects');
     allSections=d.sections||[];
@@ -83,12 +94,14 @@ async function loadProjects(){
       }catch(e2){}
     }
     updateDepartmentFilter();
+    hideProjectsSkeleton();
     renderDashboard();
     updateLightLists();
     // 预填查剪辑缓存（searchEpisodeEditor 复用，避免每次点击都重复请求 /api/projects）
     window.__projectsCache = flat;
     await loadAllEpisodeSummary();
   }catch(e){
+    hideProjectsSkeleton();
     $('statsRow').innerHTML='<div style="color:var(--red);padding:20px;">加载失败: '+e.message+'</div>';
   }finally{ _projectsLoading = false; }
 }

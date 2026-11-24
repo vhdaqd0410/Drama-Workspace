@@ -1700,6 +1700,76 @@ function sortProjects(list){
   });
 }
 
+// ==== 首屏骨架屏（加载中显示项目轮廓 + 扫光动画）====
+// 工作台冷启动时 /api/projects 要几秒（全量扫盘），先出占位不让界面空白。
+function showProjectsSkeleton(blocks, perBlock){
+  const container = $('projectGrid');
+  if(!container) return;
+  blocks = blocks || 3;
+  perBlock = perBlock || 6;
+  let html = '<div class="sk-wrap">';
+  for(let b=0;b<blocks;b++){
+    html += '<div class="sk-block">';
+    html += '<div class="sk-progress"></div>';
+    html += '<div class="sk-head">'
+          +   '<div class="sk-bar sk-title"></div>'
+          +   '<div class="sk-bar sk-badge"></div>'
+          + '</div>';
+    html += '<div class="sk-grid">';
+    for(let i=0;i<perBlock;i++){
+      html += '<div class="sk-card">'
+            +   '<div class="sk-bar sk-l1"></div>'
+            +   '<div class="sk-bar sk-l2"></div>'
+            +   '<div class="sk-chips">'
+            +     '<div class="sk-bar sk-chip"></div>'
+            +     '<div class="sk-bar sk-chip"></div>'
+            +     '<div class="sk-bar sk-chip"></div>'
+            +   '</div>'
+            +   '<div class="sk-bar sk-line"></div>'
+            +   '<div class="sk-bar sk-line short"></div>'
+            +   '<div class="sk-btns">'
+            +     '<div class="sk-bar sk-btn"></div>'
+            +     '<div class="sk-bar sk-btn"></div>'
+            +     '<div class="sk-bar sk-btn"></div>'
+            +   '</div>'
+            + '</div>';
+    }
+    html += '</div></div>';
+  }
+  html += '</div>';
+  container.innerHTML = html;
+  window._skeletonShown = true;
+
+  // 顶部统计卡片也一起出骨架（避免加载时上方空白）
+  const statsRow = $('statsRow');
+  if(statsRow && !statsRow.querySelector('.stat-card')){
+    let sh = '';
+    for(let i=0;i<5;i++){
+      sh += '<div class="stat-card"><div class="sk-stat">'
+          +   '<div class="sk-bar sk-ico"></div>'
+          +   '<div><div class="sk-bar sk-num"></div><div class="sk-bar sk-tag"></div></div>'
+          + '</div></div>';
+    }
+    statsRow.innerHTML = sh;
+    window._statsSkeletonShown = true;
+  }
+}
+
+function hideProjectsSkeleton(){
+  // 清除尚未触发的延迟定时器（快速加载时骨架屏根本没出现，也不该闪一下）
+  if(window._skTimer){
+    clearTimeout(window._skTimer);
+    window._skTimer = null;
+  }
+  if(!window._skeletonShown) return;
+  const container = $('projectGrid');
+  if(container){
+    const sk = container.querySelector('.sk-wrap');
+    if(sk) sk.remove();
+  }
+  window._skeletonShown = false;
+}
+
 function renderDashboard(){
   renderStats();
   updateMonthFilter();

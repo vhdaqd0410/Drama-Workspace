@@ -631,13 +631,30 @@ class ScanMixin:
         group_completed.sort(key=lambda x: _natural_key(x["name"]))
 
         # 给待交付 / 已完成项目附加交付统计
+        # 关键性能修复：这里以前同步调 get_delivery_stats()，每个项目要 5~15 次 NAS 往返，
+        # 208 个已完成项目冷启动累积 40 秒以上，直接拖死首页。
+        # 现在只读缓存（秒出），缺的由后台线程预热，算完落盘，重启也不再卡。
+        _need_warm = []
         for bucket in (production, group_all, group_completed):
             for proj in bucket:
-                if proj.get("custom_status") in ("待交付", "已完成"):
-                    try:
-                        proj["delivery_stats"] = self.get_delivery_stats(proj["name"])
-                    except Exception:
-                        proj["delivery_stats"] = {"found": False, "total_episodes": 0, "items": [], "overall_pct": 0}
+                if proj.get("custom_status") not in ("待交付", "已完成"):
+                    continue
+                _cached = self.peek_delivery_stats(proj["name"])
+                if _cached is not None:
+                    proj["delivery_stats"] = _cached
+                else:
+                    # 无缓存：先给占位（标记 pending，前端不会拿到脏数据），
+                    # 后台算完通过 SSE 通知前端刷新
+                    proj["delivery_stats"] = {
+                        "found": False, "total_episodes": proj.get("total_episodes", 0) or 0,
+                        "items": [], "overall_pct": 0, "pending": True,
+                    }
+                    _need_warm.append(proj["name"])
+        if _need_warm:
+            try:
+                self.start_delivery_stats_warmup(_need_warm)
+            except Exception as _we:
+                logger.debug("启动交付统计预热失败: %s", _we)
 
         return {
             "production": production,
