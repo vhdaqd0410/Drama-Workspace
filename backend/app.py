@@ -655,6 +655,156 @@ def _resolve_completed_dir(project_name):
         return ""
 
 
+def _locate_production_dir(project_name):
+    """在已配置的制作部根目录下按项目名查找实际位置，返回候选路径列表。"""
+    roots = list(sync_engine.nas.get("production_roots") or [])
+    found = []
+    for root in roots:
+        try:
+            if not os.path.isdir(root):
+                continue
+        except OSError:
+            continue
+        try:
+            for entry in os.scandir(root):
+                if not entry.is_dir():
+                    continue
+                if entry.name == project_name:
+                    if entry.path not in found:
+                        found.append(entry.path)
+                    continue
+                try:
+                    for sub in os.scandir(entry.path):
+                        if sub.is_dir() and sub.name == project_name:
+                            if sub.path not in found:
+                                found.append(sub.path)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return found
+
+
+@app.route("/api/project/<path:project_name>/locate_production", methods=["POST"])
+def api_project_locate_production(project_name):
+    """在所有已配置的制作部根目录下，按项目名查找项目的实际位置。
+
+    用途：项目在制作部里换了位置（旧路径失效），自动找到新位置。
+    body 可选 { root: '只在该根下查' }，不传则遍历全部 production_roots。
+    返回 { ok, current, found: [路径...], message }
+    """
+    data = request.get_json(silent=True) or {}
+    only_root = (data.get("root") or "").strip()
+    proj = sync_engine.db.get_project(project_name) or {}
+    current = (proj.get("production_path") or "").strip()
+
+    roots = list(sync_engine.nas.get("production_roots") or [])
+    if only_root:
+        roots = [only_root]
+
+    found = []
+    for root in roots:
+        try:
+            if not os.path.isdir(root):
+                continue
+        except OSError:
+            continue
+        try:
+            for entry in os.scandir(root):
+                if not entry.is_dir():
+                    continue
+                # 先看直接子目录（根目录就是项目）
+                if entry.name == project_name:
+                    found.append(entry.path)
+                    continue
+                # 再看下一层（根/分类/项目）
+                try:
+                    for sub in os.scandir(entry.path):
+                        if sub.is_dir() and sub.name == project_name:
+                            found.append(sub.path)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+
+    # 去重、排除等于当前路径的
+    uniq = []
+    for p in found:
+        if p not in uniq:
+            uniq.append(p)
+
+    return jsonify({
+        "ok": True,
+        "project_name": project_name,
+        "current": current,
+        "current_exists": bool(current and os.path.isdir(current)),
+        "found": uniq,
+        "searched_roots": roots,
+        "message": ("找到 %d 处" % len(uniq)) if uniq else "未在已配置的制作部目录中找到该项目",
+    })
+
+
+@app.route("/api/project/<path:project_name>/relocate", methods=["POST"])
+def api_project_relocate(project_name):
+    """修改项目的制作部路径（重新定位）。
+
+    body: { production_path: '新路径', dry_run: bool }
+    - 校验新路径存在（不存在则拒绝，避免把交付指向空目录）
+    - 自动从新路径反推 source_root（已配置的根目录中最长匹配）与 department
+    返回 { ok, old, new, source_root, department, dry_run }
+    """
+    data = request.get_json(silent=True) or {}
+    new_path = (data.get("production_path") or "").strip().rstrip("\\/")
+    dry_run = bool(data.get("dry_run"))
+    if not new_path:
+        return jsonify({"ok": False, "message": "请填写新的制作部路径"}), 400
+
+    proj = sync_engine.db.get_project(project_name)
+    if not proj:
+        return jsonify({"ok": False, "message": "项目不存在"}), 404
+
+    if not os.path.isdir(new_path):
+        return jsonify({"ok": False, "message": "新路径不存在：" + new_path}), 400
+
+    old_path = (proj.get("production_path") or "").strip()
+
+    # 从已配置根目录中最长匹配反推 source_root
+    roots = [r.rstrip("\\/")
+             for r in (sync_engine.nas.get("production_roots") or []) if r]
+    norm = os.path.normpath(new_path)
+    matched_root = ""
+    for r in sorted(roots, key=len, reverse=True):
+        rn = os.path.normpath(r)
+        if norm == rn or norm.startswith(rn + os.sep):
+            matched_root = r
+            break
+
+    dept = sync_engine.db.extract_department(matched_root or norm) or ""
+    if dry_run:
+        return jsonify({"ok": True, "dry_run": True, "old": old_path,
+                        "new": new_path, "source_root": matched_root,
+                        "department": dept})
+
+    try:
+        sync_engine.db.update_project_paths(
+            project_name, production_path=new_path,
+            source_root=matched_root, department=dept)
+        sync_engine.db.add_audit_log(
+            project_name, "重新定位制作部路径",
+            "%s -> %s" % (old_path or "(空)", new_path))
+        try:
+            sync_engine.invalidate_projects_cache()
+        except Exception:
+            pass
+        logger.info("重新定位制作部路径: %s %s -> %s", project_name, old_path, new_path)
+        return jsonify({"ok": True, "old": old_path, "new": new_path,
+                        "source_root": matched_root, "department": dept,
+                        "message": "已更新制作部路径"})
+    except Exception as e:
+        logger.error("重新定位失败: %s", e)
+        return jsonify({"ok": False, "message": str(e)}), 500
+
+
 @app.route("/api/project/<path:project_name>/open_folder", methods=["POST"])
 def api_project_open_folder(project_name):
     data = request.get_json(silent=True) or {}
@@ -727,6 +877,47 @@ def api_project_open_folder(project_name):
                 path = proj["production_path"]
             else:
                 path, err = sync_engine.get_dest_dir(project_name)
+            # 制作部路径失效（项目被挪走了）→ 自动在已配置根目录下找新位置
+            if path and not os.path.isdir(path):
+                try:
+                    _hit = _locate_production_dir(project_name)
+                    if _hit:
+                        # 找到唯一候选：自动修正项目路径，下次直接用新路径
+                        if len(_hit) == 1:
+                            _newp = _hit[0]
+                            _roots = [r.rstrip("\\/") for r in
+                                      (sync_engine.nas.get("production_roots") or []) if r]
+                            _nm = os.path.normpath(_newp)
+                            _root = ""
+                            for _r in sorted(_roots, key=len, reverse=True):
+                                _rn = os.path.normpath(_r)
+                                if _nm == _rn or _nm.startswith(_rn + os.sep):
+                                    _root = _r
+                                    break
+                            _dept = sync_engine.db.extract_department(_root or _nm) or ""
+                            sync_engine.db.update_project_paths(
+                                project_name, production_path=_newp,
+                                source_root=_root, department=_dept)
+                            sync_engine.db.add_audit_log(
+                                project_name, "自动重定位制作部路径",
+                                "%s -> %s" % (path, _newp))
+                            try:
+                                sync_engine.invalidate_projects_cache()
+                            except Exception:
+                                pass
+                            path = _newp
+                        else:
+                            # 多个候选：不擅自选，返回给前端让用户确认
+                            return jsonify({
+                                "ok": False,
+                                "need_relocate": True,
+                                "old": path,
+                                "candidates": _hit,
+                                "message": "制作部路径已失效，在其他位置找到 %d 处同名项目，请确认"
+                                           % len(_hit),
+                            }), 200
+                except Exception as _le:
+                    logger.warning("自动重定位制作部失败: %s", _le)
     elif which == "prod_delivery":
         # 已完成项目：打开制作部对应项目的 000交付 目录
         _pp = (proj or {}).get("production_path", "") or ""
@@ -788,6 +979,10 @@ def api_project_open_folder(project_name):
             msg = "该项目还没有修改文件夹（找不到修改目录）"
         elif which == "delivery":
             msg = "该项目还没有交付/成片目录"
+        elif which in ("prod", "production"):
+            msg = "制作部目录不存在: " + str(path or "") + "（项目可能已换位置）"
+            return jsonify({"ok": False, "need_relocate": True,
+                            "old": str(path or ""), "message": msg}), 200
         else:
             msg = "目录不存在: " + str(path or "")
         return jsonify({"ok": False, "message": msg}), 200

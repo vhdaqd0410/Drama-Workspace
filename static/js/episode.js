@@ -295,11 +295,129 @@ async function loadTimeline(name){
     box.innerHTML=`<div style="color:var(--red);font-size:13px">加载时间轴失败</div>`;
   }
 }
+// ===== 重新定位制作部路径（手动保底入口）=====
+// 流程：先自动在当前配置的制作部目录下找同名项目，找到让用户选；找不到让手填
+async function relocateProduction(name){
+  var oldPath = '';
+  try{
+    var proj = (window.allProjects && (window.allProjects.production || []).concat(window.allProjects.group_all || []))
+      .find(function(x){ return x.name === name; });
+    oldPath = (proj && proj.production_path) || '';
+  }catch(_){}
+
+  var found = [];
+  try{
+    var d = await api('POST', '/api/project/' + encodeURIComponent(name) + '/locate_production', {});
+    if(d && d.ok){
+      oldPath = d.current || oldPath;
+      found = d.found || [];
+    }
+  }catch(e){}
+
+  var head = '项目：「' + name + '」\n当前制作部路径：\n' + (oldPath || '(空)') + '\n\n';
+
+  if(found.length){
+    var msg = head + '在已配置的制作部目录下找到 ' + found.length + ' 处同名项目：\n\n';
+    found.forEach(function(c, i){ msg += '  [' + (i+1) + '] ' + c + '\n'; });
+    msg += '\n输入序号选用该项；也可直接粘贴其他路径（留空取消）：';
+    var ans = prompt(msg, '1');
+    if(ans === null) return;
+    var idx = parseInt(ans, 10);
+    if(idx >= 1 && idx <= found.length) return await doRelocate(name, found[idx-1], {}, oldPath);
+    if(ans && ans.trim()) return await doRelocate(name, ans.trim(), {}, oldPath);
+    return;
+  }
+
+  // 没找到 → 手填
+  if(!confirm(head + '在已配置的制作部目录下没找到同名项目。\n\n要手动填写新路径吗？')) return;
+  var manual = prompt('请输入该项目在制作部的新完整路径：', oldPath || '');
+  if(manual && manual.trim()) await doRelocate(name, manual.trim(), {}, oldPath);
+}
+
 function openSmart(name, which){
-  api('POST', '/api/project/' + encodeURIComponent(name) + '/open_folder', { which: which }).then(function(data){
-    if(data.ok) toast('已打开: ' + (data.message || '成功'), 'success');
-    else toast(data.message || '打开失败', 'error');
-  }).catch(function(e){ toast('打开失败: ' + e.message, 'error'); });
+  api('POST', '/api/project/' + encodeURIComponent(name) + '/open_folder', { which: which })
+    .then(function(data){
+      if(data && data.ok){
+        toast('已打开: ' + (data.message || '成功'), 'success');
+        return;
+      }
+      // 制作部路径失效（项目被挪走）→ 自动检索并提示重定位
+      if(data && data.need_relocate){
+        locateAndRelocate(name, data.old || '', {
+          autoOpen: which,
+          candidates: data.candidates || []
+        });
+        return;
+      }
+      toast((data && data.message) || '打开失败', 'error');
+    })
+    .catch(function(e){ toast('打开失败: ' + e.message, 'error'); });
+}
+
+// 制作部路径失效时的自动检索 + 重定位流程
+// opts: { autoOpen: 打开方式(重定位成功后重试), candidates: 后端已找到的候选 }
+async function locateAndRelocate(name, oldPath, opts){
+  opts = opts || {};
+  var cands = opts.candidates || [];
+  var tried = false;
+  if(!cands.length){
+    try{
+      tried = true;
+      var d = await api('POST', '/api/project/' + encodeURIComponent(name) + '/locate_production', {});
+      cands = (d && d.found) || [];
+    }catch(e){}
+  }
+
+  var tip = '项目「' + name + '」的制作部路径已失效：\n' + (oldPath || '(空)') + '\n\n';
+  if(!cands.length){
+    // 自动没找到 → 让用户手动指定
+    if(confirm(tip + '在已配置的制作部目录里也没找到同名项目。\n\n要手动填写新路径吗？')){
+      var manual = prompt('请输入该项目在制作部的新完整路径：', oldPath || '');
+      if(manual && manual.trim()){
+        await doRelocate(name, manual.trim(), opts, oldPath);
+      }
+    }
+    return;
+  }
+
+  // 找到候选：让用户选
+  var msg = tip + '在其他位置找到 ' + cands.length + ' 处同名项目：\n\n';
+  cands.forEach(function(c, i){ msg += '  [' + (i+1) + '] ' + c + '\n'; });
+  msg += '\n输入序号使用该项（取消则手动输入路径）：';
+  var ans = prompt(msg, '1');
+  if(ans === null) return;
+  var idx = parseInt(ans, 10);
+  var chosen = '';
+  if(idx >= 1 && idx <= cands.length){
+    chosen = cands[idx - 1];
+  } else if(ans && ans.trim()){
+    chosen = ans.trim();  // 用户直接粘贴了路径
+  }
+  if(!chosen) return;
+  await doRelocate(name, chosen, opts, oldPath);
+}
+
+// 执行重定位；成功后若需要就重试打开
+async function doRelocate(name, newPath, opts, oldPath){
+  try{
+    var r = await api('POST', '/api/project/' + encodeURIComponent(name) + '/relocate',
+                      { production_path: newPath });
+    if(r && r.ok){
+      toast('✅ 制作部路径已更新', 'success');
+      if(typeof loadProjects === 'function'){ try{ await loadProjects(); }catch(_){} }
+      if(opts && opts.autoOpen){
+        api('POST', '/api/project/' + encodeURIComponent(name) + '/open_folder',
+            { which: opts.autoOpen }).then(function(d2){
+          if(d2 && d2.ok) toast('已打开: ' + (d2.message || '成功'), 'success');
+        }).catch(function(){});
+      }
+      return true;
+    }
+    toast('更新失败: ' + ((r && r.message) || '未知错误'), 'error');
+  }catch(e){
+    toast('更新失败: ' + e.message, 'error');
+  }
+  return false;
 }
 
 // 设置/清除项目负责人（功能5，审核流责任到人）

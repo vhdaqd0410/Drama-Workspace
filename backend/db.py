@@ -517,6 +517,31 @@ class Database:
             conn.execute("DELETE FROM projects WHERE name=?", (name,))
         _notify_projects_changed()
 
+    def update_project_paths(self, name, production_path=None,
+                             source_root=None, department=None):
+        """更新项目的路径相关字段（重新定位制作部位置用）。
+
+        只允许改这三个字段（白名单），避免任意字段名拼进 SQL。
+        """
+        sets = []
+        vals = []
+        if production_path is not None:
+            sets.append("production_path=?")
+            vals.append(production_path)
+        if source_root is not None:
+            sets.append("source_root=?")
+            vals.append(source_root)
+        if department is not None:
+            sets.append("department=?")
+            vals.append(department)
+        if not sets:
+            return
+        vals.append(name)
+        with self.get_conn() as conn:
+            conn.execute(
+                "UPDATE projects SET %s WHERE name=?" % ", ".join(sets), vals)
+        _notify_projects_changed()
+
     def update_project_status(self, name, **kwargs):
         if not kwargs:
             return

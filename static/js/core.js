@@ -1317,6 +1317,8 @@ function projectCardHTML(p){
     else if (status === '修改中') which2 = 'dest_revision';
     else if (status === '剪辑中' || status === '审核中') which2 = 'dest';
     openBtns += `<button class="btn btn-sm" onclick="openSmart('${pname}','${which2}')">🏢 制作部</button>`;
+    // 项目在制作部换了位置时，手动重定位入口（保底）
+    openBtns += `<button class="btn btn-sm" onclick="relocateProduction('${pname}')" title="修改该项目在制作部的位置（路径失效时可手动指定）">📍 重新定位</button>`;
   }
   openBtns += `<button class="btn btn-sm" onclick="toggleEpisodesPanel('${pname}', this)">📺 分集</button>`;
   openBtns += `<button class="btn btn-sm" onclick="refreshProjectStatus('${pname}', this)" title="扫描目录刷新进度">🔄 刷新</button>`;
