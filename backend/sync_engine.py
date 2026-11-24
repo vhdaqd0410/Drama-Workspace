@@ -144,6 +144,12 @@ class SyncEngine(ScanMixin, SyncMixin, DeliverMixin, PreviewMixin):
 
         def _worker():
             try:
+                # 错峰：先让首屏请求拿到 NAS 带宽（首次 /api/projects 要扫盘），
+                # 等几秒再开始预热，避免后台扫盘和首屏抢 I/O 把加载拖慢。
+                try:
+                    time.sleep(5)
+                except Exception:
+                    pass
                 done = 0
                 for name in todo:
                     try:
