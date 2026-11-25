@@ -286,6 +286,21 @@ async function syncMaterial(name){
     toast('同步请求失败: ' + e.message,'error');
   }
 }
+// 打开分秒帧：桌面版在软件内开独立窗口（登录态持久、不跳浏览器）；
+// 浏览器访问时仍走新标签页。项目传进去让后端把成片目录复制到剪贴板，
+// 方便在分秒帧的上传对话框里直接 Ctrl+V 定位目录。
+function openFenmiaozhenWindow(url, title, project){
+  if(window.__IS_DESKTOP__){
+    return fetch('/api/_self/fenmiaozhen', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url, title: title || '分秒帧', project: project || ''})
+    }).then(function(r){ return r.json(); });
+  }
+  window.open(url, '_blank');
+  return Promise.resolve({ok: true, external: true});
+}
+
 async function openFenmiaozhen(name){
   const enc = encodeURIComponent(name);
   const setBtn = (txt, disabled) => {
@@ -296,9 +311,15 @@ async function openFenmiaozhen(name){
   try {
     let d = await fetch(`/api/fenmiaozhen/link/${enc}`).then(r => r.json());
     if (d.ok && d.has_link) {
-      window.open(d.url, '_blank');
+      const _r = await openFenmiaozhenWindow(d.url, '分秒帧 - ' + name, name);
       setBtn('🔗 分秒帧', false);
-      toast('✅ 已打开分秒帧链接', 'success');
+      if(_r && _r.ok){
+        if(_r.path_copied) toast('✅ 已打开分秒帧，成片目录路径已复制（上传时可直接 Ctrl+V 粘贴）', 'success', 5000);
+        else toast('✅ 已在软件内打开分秒帧', 'success');
+      }else{
+        window.open(d.url, '_blank');
+        toast('已在浏览器打开分秒帧', 'info');
+      }
       return;
     }
     const entered = prompt('🔗 请输入该项目的分秒帧审核链接：', 'https://www.mediatrack.cn/');
@@ -310,9 +331,15 @@ async function openFenmiaozhen(name){
       body: JSON.stringify({url: entered})
     }).then(r => r.json());
     if (saved.ok) {
-      window.open(saved.url, '_blank');
+      const _r2 = await openFenmiaozhenWindow(saved.url, '分秒帧 - ' + name, name);
       setBtn('🔗 分秒帧', false);
-      toast('✅ 链接已保存，已打开分秒帧', 'success', 4000);
+      if(_r2 && _r2.ok){
+        if(_r2.path_copied) toast('✅ 链接已保存，成片目录路径已复制（上传时可直接 Ctrl+V 粘贴）', 'success', 5000);
+        else toast('✅ 链接已保存，已在软件内打开分秒帧', 'success', 4000);
+      }else{
+        window.open(saved.url, '_blank');
+        toast('✅ 链接已保存，已在浏览器打开', 'success', 4000);
+      }
     } else {
       setBtn('🔗 分秒帧', false);
       toast('❌ 保存失败: ' + (saved.msg || ''), 'error');

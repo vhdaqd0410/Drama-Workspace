@@ -141,6 +141,82 @@ except Exception as e:
 _window_ref = [None]
 _flask_app = [None]
 _tray_ref = [None]
+
+# 分秒帧内嵌窗口（软件内打开审片网页，不跳外部浏览器）
+# 用独立 WebView 窗口而非 iframe：分秒帧需要登录，iframe 属于第三方上下文，
+# Chrome 的 SameSite cookie 策略会把登录态挡掉；独立窗口是第一方，cookie 正常。
+_fm_window_ref = [None]
+_FM_ALLOW_HOSTS = ("mediatrack.cn",)
+
+
+def _fm_url_allowed(url):
+    """只允许分秒帧自家域名，避免通过该接口被钓鱼到任意网站。"""
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(url)
+        if u.scheme not in ("https", "http"):
+            return False
+        host = (u.hostname or "").lower()
+        return any(host == h or host.endswith("." + h) for h in _FM_ALLOW_HOSTS)
+    except Exception:
+        return False
+
+
+def _show_fm_window():
+    """把分秒帧窗口唤到前台。"""
+    w = _fm_window_ref[0]
+    if w is None:
+        return False
+    try:
+        if getattr(w, "minimized", False):
+            w.restore()
+        w.show()
+        return True
+    except Exception as e:
+        print(f"[fm] 唤回窗口失败: {e}")
+        return False
+
+
+def _open_fm_window(url, title="分秒帧"):
+    """在软件内打开/切换分秒帧窗口。
+
+    关键：pywebview 的 create_window 只在“非主线程且 GUI 已启动”时才立即创建窗口，
+    Flask 请求线程正好满足，所以这个函数必须从路由（或后台线程）调用。
+    """
+    if not _fm_url_allowed(url):
+        print(f"[fm] 拒绝非分秒帧地址: {url}")
+        return False, "只允许打开分秒帧网址"
+
+    w = _fm_window_ref[0]
+    if w is not None:
+        try:
+            w.load_url(url)
+            try:
+                w.set_title(title)
+            except Exception:
+                pass
+            _show_fm_window()
+            print(f"[fm] 复用已有窗口 → {url}")
+            return True, ""
+        except Exception as e:
+            print(f"[fm] 复用窗口失败，将重建: {e}")
+            _fm_window_ref[0] = None
+
+    try:
+        import webview as _wv
+        new_win = _wv.create_window(
+            title=title, url=url,
+            width=1280, height=860, min_size=(900, 600),
+            resizable=True, text_select=True,
+        )
+        if new_win is None:
+            return False, "窗口创建被取消"
+        _fm_window_ref[0] = new_win
+        print(f"[fm] 已新建分秒帧窗口 → {url}")
+        return True, ""
+    except Exception as e:
+        print(f"[fm] 创建窗口失败: {e}")
+        return False, str(e)
 _window_visible = [True]
 # 托盘操作串行化锁：pystray 的 update_menu/notify/stop 内部会操作 Win32 菜单/托盘句柄
 # （DestroyMenu/CreateMenu/Shell_NotifyIcon），且 pystray 无内部锁。若从热键线程、
@@ -935,6 +1011,86 @@ def _register_quit_api(flask_app):
             return '{"ok":false}', 200
 
 
+    # 分秒帧内嵌窗口：软件内打开审片网页（不跳外部浏览器）
+    # body: { url, title?, copy_path? }
+    #   copy_path：可选，传入项目成片目录路径时自动复制到剪贴板，
+    #   方便在分秒帧的上传对话框里直接 Ctrl+V 定位到目录。
+    @flask_app.route("/api/_self/fenmiaozhen", methods=["POST"])
+    def _api_self_fenmiaozhen():
+        try:
+            from flask import jsonify, request as _req
+        except ImportError:
+            return '{"ok":false}', 500
+        body = _req.get_json(silent=True) or {}
+        url = (body.get("url") or "").strip()
+        title = (body.get("title") or "分秒帧").strip() or "分秒帧"
+        project = (body.get("project") or "").strip()
+        if not url:
+            return jsonify({"ok": False, "message": "缺少 url"}), 400
+        if not _fm_url_allowed(url):
+            return jsonify({"ok": False, "message": "只允许打开分秒帧网址"}), 400
+
+        # 成片目录路径由后端自己解析（不接受前端传任意路径，防越权）
+        copy_path = ""
+        if project:
+            try:
+                from backend.app import sync_engine as _se
+                _proj = _se.db.get_project(project) or {}
+                _base = (_proj.get("group_path") or "").strip()
+                if not (_base and os.path.isdir(_base)):
+                    _base = (_proj.get("production_path") or "").strip()
+                if _base and os.path.isdir(_base):
+                    _dirs = _se._find_output_dirs(_base, project) or []
+                    _cand = _dirs[0] if _dirs else _base
+                    if os.path.isdir(_cand):
+                        copy_path = _cand
+            except Exception as _pe:
+                print(f"[fm] 解析成片目录失败: {_pe}")
+
+        copied = False
+        if copy_path:
+            try:
+                import ctypes as _ct
+                # 仅当目录真实存在才复制，避免把无效路径塞进剪贴板
+                if os.path.isdir(copy_path):
+                    _ct.windll.user32.OpenClipboard(0)
+                    _ct.windll.user32.EmptyClipboard()
+                    _data = copy_path.encode("utf-16-le") + b"\x00\x00"
+                    _ct.windll.kernel32.GlobalAlloc.restype = _ct.c_void_p
+                    _h = _ct.windll.kernel32.GlobalAlloc(0x0042, len(_data))
+                    _ct.windll.kernel32.GlobalLock.restype = _ct.c_void_p
+                    _p = _ct.windll.kernel32.GlobalLock(_h)
+                    _ct.windll.kernel32.RtlMoveMemory(_ct.c_void_p(_p), _data, len(_data))
+                    _ct.windll.kernel32.GlobalUnlock(_h)
+                    _ct.windll.user32.SetClipboardData(13, _ct.c_void_p(_h))
+                    _ct.windll.user32.CloseClipboard()
+                    copied = True
+            except Exception as _ce:
+                print(f"[fm] 复制路径失败: {_ce}")
+
+        # 创建/切换窗口必须在非主线程（Flask 请求线程满足条件）
+        ok, msg = _open_fm_window(url, title)
+        return jsonify({"ok": bool(ok), "message": msg,
+                        "path_copied": copied, "copy_path": copy_path if copied else ""})
+
+    # 关闭分秒帧窗口（不销毁主窗口）
+    @flask_app.route("/api/_self/fenmiaozhen/close", methods=["POST"])
+    def _api_self_fenmiaozhen_close():
+        try:
+            from flask import jsonify
+        except ImportError:
+            return '{"ok":false}', 500
+        w = _fm_window_ref[0]
+        if w is None:
+            return jsonify({"ok": True, "message": "窗口不存在"})
+        try:
+            w.destroy()
+        except Exception as e:
+            print(f"[fm] 关闭窗口失败: {e}")
+        _fm_window_ref[0] = None
+        return jsonify({"ok": True})
+
+
 # ============================================================
 # Flask + waitress
 # ============================================================
@@ -1041,8 +1197,25 @@ def _main():
     except Exception:
         pass
 
+    # WebView profile：必须持久化，否则分秒帧每次重启都要重新登录
+    # （pywebview 默认 private_mode=True，cookie/localStorage 全在内存里，退出即丢）
+    _profile_dir = os.path.join(BASE_DIR, "data", "webview_profile")
+    _private = True
     try:
-        webview.start(gui="edgechromium", debug=False)
+        os.makedirs(_profile_dir, exist_ok=True)
+        _probe = os.path.join(_profile_dir, ".writetest")
+        with open(_probe, "w", encoding="utf-8") as _pf:
+            _pf.write("ok")
+        os.remove(_probe)
+        _private = False
+        print(f"[webview] 使用持久化 profile: {_profile_dir}")
+    except Exception as _pe:
+        print(f"[webview] profile 目录不可用，回退到私密模式: {_pe}")
+
+    try:
+        webview.start(gui="edgechromium", debug=False,
+                      private_mode=_private,
+                      storage_path=(None if _private else _profile_dir))
     finally:
         print("👋 WebView 主线程退出，清理中...")
         if _mutex:
