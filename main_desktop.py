@@ -201,6 +201,16 @@ def _show_fm_window():
         return False
 
 
+# 说明（重要，别再加回“新窗口→同窗跳转”的注入）：
+#   曾尝试在分秒帧窗口每次加载后注入脚本，把 window.open / target=_blank 改成同窗跳转，
+#   想阻止登录页被丢给系统浏览器。实测结论：
+#     - 独立窗口原本就能正常登录（登录走同窗跳转，不靠弹窗），
+#       注入反而有风险：若登录依赖 window.open + opener 回调，同窗跳转会把它弄坏。
+#     - iframe 里的登录无法靠注入解决：跨域 iframe 的 window.open 会冒泡到顶层 WebView，
+#       是否外跳由 pywebview 全局设置决定，而全局关掉会把主窗口 14 处 window.open 一起带走。
+#   所以：登录与上传统一走独立窗口，板块里不再做 iframe 登录。
+
+
 def _open_fm_window(url, title="分秒帧"):
     """在软件内打开/切换分秒帧窗口。
 

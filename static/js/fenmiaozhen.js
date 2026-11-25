@@ -1,140 +1,151 @@
-// ===== 分秒帧板块 =====
-// 设计要点：
-//   1. tab 里用 iframe 内嵌分秒帧网页，点项目卡片的「🔗 分秒帧」会切到这里并定位。
-//   2. iframe 属于第三方上下文，登录可能被浏览器 cookie 策略挡住。所以同时保留
-//      「独立窗口」通道（pywebview 独立 WebView 窗口，第一方，登录态稳），
-//      一条路走不通还有另一条，不让用户卡死。
-//   3. 懒加载：首次进 tab 才给 iframe 设 src，避免启动就去拉外部网页拖慢首屏。
+// ===== 分秒帧板块（项目清单）=====
+// 为什么不用 iframe 内嵌：
+//   实测 iframe 里点登录必定跳系统浏览器 —— 跨域 iframe 的 window.open 会冒泡到顶层 WebView，
+//   而 pywebview 的处理是把新窗口交给系统浏览器。全局关掉该行为又会把主窗口 14 处
+//   window.open（质检报告下载等）一起带走。所以登录/上传统一走软件内的独立窗口
+//   （实测可正常登录，登录态持久化在 data/webview_profile）。
+//
+// 本板块的职责：把「哪个项目对应哪个分秒帧链接」列成清单，
+// 一键打开独立窗口，并自动把成片目录复制到剪贴板，减少上传时的找路径成本。
 
 (function () {
   var state = {
-    loaded: false,       // iframe 是否已设过 src
-    currentUrl: '',      // 当前加载的地址
-    projectName: '',     // 当前关联的项目名
-    timer: null
+    items: [],        // [{name, url}]
+    keyword: '',
+    currentUrl: '',
+    projectName: ''
   };
   window._fmState = state;
 
   function el(id) { return document.getElementById(id); }
 
-  function setStatus(text, kind) {
-    var s = el('fmStatus');
-    if (s) s.textContent = text;
-    var d = el('fmDot');
-    if (d) {
-      d.className = 'fm-dot' + (kind ? ' ' + kind : '');
-    }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function setProjectName(name) {
-    var p = el('fmProjName');
-    if (p) p.textContent = name ? '· ' + name : '';
-    state.projectName = name || '';
-  }
-
-  function showTip(html) {
-    var t = el('fmTip');
-    if (!t) return;
-    if (!html) { t.style.display = 'none'; t.innerHTML = ''; return; }
-    t.innerHTML = html;
-    t.style.display = 'block';
-  }
-
-  function hideEmpty() {
-    var e = el('fmEmpty');
-    if (e) e.style.display = 'none';
-    var f = el('fmFrame');
-    if (f) f.style.display = '';
-  }
-
-  // 加载指定地址到 iframe
-  window.fmLoad = function (url, projectName) {
-    url = (url || '').trim();
-    if (!url) url = 'https://www.mediatrack.cn/';
-    // 只允许分秒帧域名，防止被塞进任意网址
-    var okHost = false;
+  // 只允许分秒帧域名
+  function isFmUrl(url) {
     try {
       var u = new URL(url);
-      okHost = /(^|\.)mediatrack\.cn$/i.test(u.hostname);
-    } catch (e) { okHost = false; }
-    if (!okHost) {
-      toast('只允许加载分秒帧网址', 'error');
+      return /(^|\.)mediatrack\.cn$/i.test(u.hostname);
+    } catch (e) { return false; }
+  }
+
+  window.fmLoadList = async function () {
+    var wrap = el('fmListWrap');
+    if (wrap && !state.items.length) wrap.innerHTML = '<div class="fm-empty">正在加载…</div>';
+    try {
+      var d = await api('GET', '/api/fenmiaozhen/links');
+      state.items = (d && d.items) || [];
+    } catch (e) {
+      state.items = [];
+      if (wrap) wrap.innerHTML = '<div class="fm-empty">加载失败: ' + esc(e.message) + '</div>';
+      return;
+    }
+    window.fmRenderList();
+  };
+
+  window.fmFilterList = function () {
+    var inp = el('fmSearch');
+    state.keyword = ((inp && inp.value) || '').trim().toLowerCase();
+    window.fmRenderList();
+  };
+
+  window.fmRenderList = function () {
+    var wrap = el('fmListWrap');
+    if (!wrap) return;
+
+    var kw = state.keyword;
+    var list = state.items.filter(function (x) {
+      return !kw || String(x.name).toLowerCase().indexOf(kw) >= 0;
+    });
+
+    var st = el('fmStatus');
+    if (st) st.textContent = '已配置 ' + state.items.length + ' 个项目' + (kw ? '（筛选 ' + list.length + '）' : '');
+
+    if (!list.length) {
+      wrap.innerHTML = '<div class="fm-empty">'
+        + '<div style="font-size:32px;margin-bottom:10px">🔗</div>'
+        + (state.items.length ? '没有匹配的项目' :
+           '还没有项目配置分秒帧链接<br><span style="opacity:.75">在项目卡片上点「🔗 分秒帧」即可设置</span>')
+        + '</div>';
       return;
     }
 
-    var f = el('fmFrame');
-    if (!f) return;
-    var inp = el('fmUrlInput');
-    if (inp) inp.value = url;
-
-    setProjectName(projectName || '');
-    hideEmpty();
-    setStatus('加载中…', 'warn');
-    showTip('');
-
-    state.currentUrl = url;
-    state.loaded = true;
-    state.loadTimerAt = Date.now();
-
-    // 先清掉旧监听，避免多次绑定累积
-    f.onload = function () {
-      setStatus('已加载', 'on');
-      if (state.timer) { clearTimeout(state.timer); state.timer = null; }
-      // 首次加载后提示一次可能的登录问题（不打扰，只在顶部黄条）
-      if (!state.tipShown) {
-        state.tipShown = true;
-        showTip('如果页面里登录不上 / 登录后一刷新就掉，是浏览器对 iframe 的跨站 cookie 限制导致的。'
-              + '点右上角 <b>⧉ 独立窗口</b> 用独立窗口打开，登录态不会丢。');
-      }
-    };
-
-    f.src = url;
-
-    // 超时兜底：iframe 被拦时 onload 可能不触发
-    if (state.timer) clearTimeout(state.timer);
-    state.timer = setTimeout(function () {
-      if (f.getAttribute('src') === url) {
-        // 这里无法读取跨域内容，只能提示排查方向
-        setStatus('加载超时（可能被拦截）', 'warn');
-        showTip('页面 15 秒内没加载出来，通常是被站点或浏览器策略拦了。'
-              + '点右上角 <b>⧉ 独立窗口</b> 打开，成功率更高。');
-      }
-    }, 15000);
+    var html = '';
+    list.forEach(function (it) {
+      var nameEsc = esc(it.name);
+      var nameArg = esc(JSON.stringify(it.name));
+      html += '<div class="fm-row">'
+        +   '<div class="fm-row-name" title="' + nameEsc + '">' + nameEsc + '</div>'
+        +   '<div class="fm-row-url" title="' + esc(it.url) + '">' + esc(it.url) + '</div>'
+        +   '<div class="fm-row-acts">'
+        +     '<button class="btn btn-sm btn-primary" onclick="fmOpenFor(' + nameArg + ')">⧉ 打开</button>'
+        +     '<button class="btn btn-sm" onclick="fmSetLink(' + nameArg + ')">改链接</button>'
+        +     '<button class="btn btn-sm" onclick="fmRemoveLink(' + nameArg + ')">移除</button>'
+        +   '</div>'
+        + '</div>';
+    });
+    wrap.innerHTML = html;
   };
 
-  window.fmLoadFromInput = function () {
-    var inp = el('fmUrlInput');
-    window.fmLoad((inp && inp.value) || 'https://www.mediatrack.cn/', '');
+  // 打开某个项目的分秒帧（独立窗口 + 复制成片目录）
+  window.fmOpenFor = function (name) {
+    var it = state.items.filter(function (x) { return x.name === name; })[0];
+    if (!it) { toast('没有该项目的分秒帧链接', 'error'); return; }
+    state.currentUrl = it.url;
+    state.projectName = name;
+    var pn = el('fmProjName');
+    if (pn) pn.textContent = '· ' + name;
+    window.fmOpenWindow(it.url, name);
   };
 
-  window.fmReload = function () {
-    var f = el('fmFrame');
-    if (!f || !state.loaded) {
-      window.fmLoad((el('fmUrlInput') || {}).value || 'https://www.mediatrack.cn/', '');
-      return;
-    }
-    // 用 src 赋值而非 location.reload，跨域下更可控
-    var cur = state.currentUrl;
-    setStatus('刷新中…', 'warn');
-    f.src = 'about:blank';
-    setTimeout(function () { f.src = cur; }, 60);
+  window.fmSetLink = async function (name) {
+    var it = state.items.filter(function (x) { return x.name === name; })[0];
+    var cur = it ? it.url : '';
+    var u = prompt('分秒帧链接（' + name + '）：', cur || 'https://app.mediatrack.cn/');
+    if (!u) return;
+    u = u.trim();
+    if (!isFmUrl(u)) { toast('只允许分秒帧网址', 'error'); return; }
+    try {
+      var r = await api('POST', '/api/fenmiaozhen/link/' + encodeURIComponent(name), { url: u });
+      if (r && r.ok) { toast('✅ 链接已保存', 'success'); window.fmLoadList(); }
+      else toast((r && r.msg) || '保存失败', 'error');
+    } catch (e) { toast('保存失败: ' + e.message, 'error'); }
   };
 
-  // 在软件内开独立窗口（桌面版）
-  window.fmOpenWindow = function () {
-    var url = state.currentUrl || ((el('fmUrlInput') || {}).value) || 'https://www.mediatrack.cn/';
-    var title = '分秒帧' + (state.projectName ? ' - ' + state.projectName : '');
+  window.fmRemoveLink = async function (name) {
+    if (!confirm('确认移除「' + name + '」的分秒帧链接？')) return;
+    try {
+      var r = await api('DELETE', '/api/fenmiaozhen/link/' + encodeURIComponent(name));
+      if (r && r.ok) { toast('已移除', 'success'); window.fmLoadList(); }
+      else toast('移除失败', 'error');
+    } catch (e) { toast('移除失败: ' + e.message, 'error'); }
+  };
+
+  // 打开软件内独立窗口（桌面版）；浏览器访问时直接新标签页
+  window.fmOpenWindow = function (url, project) {
+    var target = url || state.currentUrl || 'https://app.mediatrack.cn/';
+    var proj = project || state.projectName || '';
+    var title = '分秒帧' + (proj ? ' - ' + proj : '');
+    if (!isFmUrl(target)) target = 'https://app.mediatrack.cn/';
+
     if (!window.__IS_DESKTOP__) {
-      window.open(url, '_blank');
+      window.open(target, '_blank');
       return;
     }
     fetch('/api/_self/fenmiaozhen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: url, title: title, project: state.projectName || '' })
+      body: JSON.stringify({ url: target, title: title, project: proj })
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (d && d.ok) {
-        toast(d.path_copied ? '✅ 已打开独立窗口，成片目录路径已复制' : '✅ 已在软件内打开独立窗口', 'success', 4000);
+        toast(d.path_copied
+          ? '✅ 已打开分秒帧窗口，成片目录路径已复制（上传时 Ctrl+V 定位）'
+          : '✅ 已打开分秒帧窗口（未找到成片目录，路径未复制）',
+          'success', 5000);
       } else {
         toast((d && d.message) || '打开失败', 'error');
       }
@@ -142,20 +153,16 @@
   };
 
   window.fmOpenInBrowser = function () {
-    var url = state.currentUrl || ((el('fmUrlInput') || {}).value) || 'https://www.mediatrack.cn/';
-    window.open(url, '_blank');
+    var u = state.currentUrl || 'https://app.mediatrack.cn/';
+    window.open(u, '_blank');
   };
 
-  // 切到分秒帧 tab 时调用
+  // 切到本 tab 时刷新清单
   window.fmTabEnter = function () {
-    if (!state.loaded) {
-      setStatus('未加载', '');
-      return;
-    }
-    setStatus('已加载', 'on');
+    window.fmLoadList();
   };
 
-  // 从项目卡片进来：查该项目链接，切 tab 并加载
+  // 从项目卡片进来：确保有链接后直接开独立窗口
   window.fmOpenForProject = async function (name) {
     var enc = encodeURIComponent(name);
     var url = '';
@@ -165,9 +172,10 @@
     } catch (e) {}
 
     if (!url) {
-      // 没有链接 → 让用户填（与卡片按钮行为一致）
-      var entered = prompt('🔗 请输入该项目在分秒帧的审核链接：', 'https://www.mediatrack.cn/');
+      var entered = prompt('🔗 请输入该项目在分秒帧的审核链接：', 'https://app.mediatrack.cn/');
       if (!entered) return false;
+      entered = entered.trim();
+      if (!isFmUrl(entered)) { toast('只允许分秒帧网址', 'error'); return false; }
       try {
         var saved = await api('POST', '/api/fenmiaozhen/link/' + enc, { url: entered });
         if (!(saved && saved.ok)) {
@@ -181,18 +189,11 @@
       }
     }
 
+    state.currentUrl = url;
+    state.projectName = name;
     if (typeof switchTab === 'function') switchTab('fenmiaozhen');
-    window.fmLoad(url, name);
-    toast('✅ 已定位到分秒帧（成片目录路径已复制，上传时可直接粘贴）', 'success', 4000);
-
-    // 顺手把该项目成片目录复制到剪贴板，方便上传时定位
-    try {
-      fetch('/api/_self/fenmiaozhen', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url, title: '分秒帧 - ' + name, project: name, _no_window: true })
-      });
-    } catch (e) {}
+    window.fmOpenWindow(url, name);
+    if (typeof window.fmLoadList === 'function') setTimeout(window.fmLoadList, 600);
     return true;
   };
 })();

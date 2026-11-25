@@ -53,10 +53,15 @@ a{color:var(--blue);text-decoration:none}
 .fm-input{width:340px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-family:inherit;background:#fafbfc}
 .fm-input:focus{outline:none;border-color:var(--blue)}
 .fm-tip{background:#fff8e1;border:1px solid #ffe0a3;color:#8a6d3b;font-size:12.5px;line-height:1.65;padding:9px 14px;border-radius:10px;margin-bottom:12px}
-.fm-frame-wrap{position:relative;background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;height:calc(100vh - 232px);min-height:520px}
-.fm-frame-wrap iframe{width:100%;height:100%;border:0;display:block;background:#fff}
-.fm-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--text-sec)}
-@media(max-width:900px){.fm-input{width:100%}.fm-bar-right{width:100%;margin-left:0}.fm-frame-wrap{height:calc(100vh - 300px);min-height:420px}}
+.fm-list-wrap{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;min-height:420px}
+.fm-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f0f2f5}
+.fm-row:last-child{border-bottom:none}
+.fm-row:hover{background:#fafbfc}
+.fm-row-name{flex:1;min-width:0;font-size:13.5px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fm-row-url{flex:0 0 34%;font-size:11.5px;color:var(--text-sec);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.8}
+.fm-row-acts{display:flex;gap:8px;flex:0 0 auto}
+.fm-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 24px;color:var(--text-sec);font-size:13px;line-height:1.8;min-height:420px}
+@media(max-width:900px){.fm-input{width:100%}.fm-bar-right{width:100%;margin-left:0}.fm-row-url{display:none}}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
 .stat-card{background:var(--card);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow);display:flex;align-items:center;gap:14px}
@@ -1556,34 +1561,23 @@ a{color:var(--blue);text-decoration:none}
   <div class="tab-panel" id="tab-fenmiaozhen">
   <div class="fm-bar">
     <div class="fm-bar-left">
-      <span class="fm-dot" id="fmDot"></span>
-      <span class="fm-status" id="fmStatus">未加载</span>
+      <span class="fm-dot on"></span>
+      <span class="fm-status" id="fmStatus">分秒帧项目清单</span>
       <span class="fm-proj" id="fmProjName"></span>
     </div>
     <div class="fm-bar-right">
-      <input id="fmUrlInput" class="fm-input" placeholder="分秒帧网址（https://www.mediatrack.cn/）">
-      <button class="btn btn-sm" onclick="fmLoadFromInput()">加载</button>
-      <button class="btn btn-sm" onclick="fmReload()">🔄 刷新</button>
-      <button class="btn btn-sm" onclick="fmOpenWindow()" title="在软件内开独立窗口，可与工作台并排看">⧉ 独立窗口</button>
+      <input id="fmSearch" class="fm-input" placeholder="搜索项目名…" oninput="fmFilterList()">
+      <button class="btn btn-sm btn-primary" onclick="fmOpenWindow()">⧉ 打开分秒帧窗口</button>
+      <button class="btn btn-sm" onclick="fmLoadList()">🔄 刷新</button>
       <button class="btn btn-sm" onclick="fmOpenInBrowser()">🌐 浏览器</button>
     </div>
   </div>
-  <div class="fm-tip" id="fmTip" style="display:none"></div>
-  <div class="fm-frame-wrap">
-    <div class="fm-empty" id="fmEmpty">
-      <div style="font-size:34px;margin-bottom:12px">🔗</div>
-      <div style="font-weight:600;margin-bottom:6px">分秒帧还没加载</div>
-      <div style="color:var(--text-sec);font-size:13px;line-height:1.7">
-        点任意项目卡片上的「🔗 分秒帧」会自动定位到该项目的审片页<br>
-        也可以直接点下面的按钮打开首页，登录一次后长期记住
-      </div>
-      <button class="btn btn-primary" style="margin-top:16px" onclick="fmLoad('https://www.mediatrack.cn/')">打开分秒帧首页</button>
-      <div style="margin-top:14px;font-size:12px;color:var(--text-sec);opacity:.75">
-        如果这里登录不上，点右上角「⧉ 独立窗口」用独立窗口打开（登录态更稳）
-      </div>
-    </div>
-    <iframe id="fmFrame" src="about:blank" style="display:none"
-            allow="clipboard-read; clipboard-write; fullscreen; microphone; camera"></iframe>
+  <div class="fm-tip">
+    登录和上传都用 <b>⧉ 打开分秒帧窗口</b>（软件内的独立窗口，登录态长期保存）。<br>
+    打开时会自动把该项目的成片目录路径复制到剪贴板，在分秒帧上传对话框里按 <b>Ctrl+V</b> 可直接定位到目录。
+  </div>
+  <div class="fm-list-wrap" id="fmListWrap">
+    <div class="fm-empty">正在加载…</div>
   </div>
 </div>
 

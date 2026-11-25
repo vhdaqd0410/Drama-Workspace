@@ -1072,11 +1072,27 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             web_url=fm.get('web_url', 'https://www.mediatrack.cn/project/new'),
         )
 
+    @app.route('/api/fenmiaozhen/links', methods=['GET'])
+    def fenmiaozhen_all_links():
+        """一次返回全部项目的分秒帧链接（板块清单用，避免 N 次请求）。"""
+        links = _fm_load_links()
+        items = [{"name": k, "url": v} for k, v in links.items() if v]
+        items.sort(key=lambda x: x["name"])
+        return jsonify(ok=True, count=len(items), items=items)
+
     @app.route('/api/fenmiaozhen/link/<path:name>', methods=['GET'])
     def fenmiaozhen_get_link(name):
         links = _fm_load_links()
         url = links.get(name, '')
         return jsonify(ok=True, url=url, has_link=bool(url))
+
+    @app.route('/api/fenmiaozhen/link/<path:name>', methods=['DELETE'])
+    def fenmiaozhen_delete_link(name):
+        links = _fm_load_links()
+        if name in links:
+            links.pop(name, None)
+            _fm_save_links(links)
+        return jsonify(ok=True)
 
     @app.route('/api/fenmiaozhen/link/<path:name>', methods=['POST'])
     def fenmiaozhen_save_link(name):
