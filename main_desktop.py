@@ -162,6 +162,30 @@ def _fm_url_allowed(url):
         return False
 
 
+def _fm_window_alive(win):
+    """判断分秒帧窗口是否还活着。
+
+    重要：用户点 × 关闭窗口后，_fm_window_ref 仍会拿着已销毁的对象。
+    以前只看“ref 非空”就当成还在，结果 load_url 在死窗口上空转 ——
+    接口返回成功、界面提示已打开，实际什么也没出现。
+    """
+    if win is None:
+        return False
+    try:
+        # 触碰一下 native 侧，已销毁会报错
+        win.get_current_url()
+        return True
+    except Exception:
+        return False
+
+
+def _on_fm_closed(*_args, **_kwargs):
+    """窗口被关闭（用户点 ×）时立即释放引用，下次点按钮才会重建。"""
+    if _fm_window_ref[0] is not None:
+        print("[fm] 分秒帧窗口已关闭，释放引用")
+    _fm_window_ref[0] = None
+
+
 def _show_fm_window():
     """把分秒帧窗口唤到前台。"""
     w = _fm_window_ref[0]
@@ -188,6 +212,13 @@ def _open_fm_window(url, title="分秒帧"):
         return False, "只允许打开分秒帧网址"
 
     w = _fm_window_ref[0]
+    # 关键：先校验窗口真活着，否则用户关窗后再点会“提示已打开但没窗口”
+    if not _fm_window_alive(w):
+        if w is not None:
+            print("[fm] 记录的窗口已失效，准备重建")
+        _fm_window_ref[0] = None
+        w = None
+
     if w is not None:
         try:
             w.load_url(url)
@@ -211,6 +242,11 @@ def _open_fm_window(url, title="分秒帧"):
         )
         if new_win is None:
             return False, "窗口创建被取消"
+        # 绑定关闭事件：用户点 × 后自动释放，避免后续误判为“窗口仍在”
+        try:
+            new_win.events.closed += _on_fm_closed
+        except Exception as _be:
+            print(f"[fm] 绑定关闭事件失败: {_be}")
         _fm_window_ref[0] = new_win
         print(f"[fm] 已新建分秒帧窗口 → {url}")
         return True, ""
@@ -1067,6 +1103,12 @@ def _register_quit_api(flask_app):
                     copied = True
             except Exception as _ce:
                 print(f"[fm] 复制路径失败: {_ce}")
+
+        # 仅复制路径、不开窗口（卡片点分秒帧时先跳 tab，只把上传目录准备好）
+        if body.get("_no_window"):
+            return jsonify({"ok": True, "no_window": True,
+                            "path_copied": copied,
+                            "copy_path": copy_path if copied else ""})
 
         # 创建/切换窗口必须在非主线程（Flask 请求线程满足条件）
         ok, msg = _open_fm_window(url, title)

@@ -477,6 +477,7 @@ function jumpToProject(name){
     }catch(_){}
   }
   if(name==='nameplate' && typeof loadNameplateTab==='function'){ loadNameplateTab(); }
+  if(name==='fenmiaozhen' && typeof fmTabEnter==='function'){ fmTabEnter(); }
   if(name==='risk' && typeof loadRiskCenter==='function'){ loadRiskCenter(); }
   if(name==='settings')loadConfig();
 }

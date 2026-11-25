@@ -302,6 +302,10 @@ function openFenmiaozhenWindow(url, title, project){
 }
 
 async function openFenmiaozhen(name){
+  // 桌面版：直接切到「分秒帧」板块并定位到该项目（板块内可再开独立窗口）
+  if(window.__IS_DESKTOP__ && typeof fmOpenForProject === 'function'){
+    try{ await fmOpenForProject(name); return; }catch(_){}
+  }
   const enc = encodeURIComponent(name);
   const setBtn = (txt, disabled) => {
     const b = document.querySelector(`button[data-fm-proj="${CSS.escape(name)}"]`);
