@@ -91,26 +91,32 @@
     window.fmRenderList();
   };
 
-  function rowHtml(it, isMissing) {
+  // emphasizeMissing=true 时给未填链接的行加橙色底色（仅“进行中”区用，提醒优先补）
+  function rowHtml(it, emphasizeMissing) {
+    var miss = !it.has_link;
+    var cls = 'fm-row' + (miss && emphasizeMissing ? ' fm-row-missing' : '');
     var nameArg = esc(JSON.stringify(it.name));
-    var cls = isMissing ? 'fm-row fm-row-missing' : 'fm-row';
-    var badge = isMissing
+    var badge = miss
       ? '<span class="fm-badge miss">未填链接</span>'
       : '<span class="fm-badge ok">已配置</span>';
     var ep = (it.total_episodes ? (it.current_episodes + '/' + it.total_episodes) : '');
+    var acts;
+    if (miss) {
+      acts = '<button class="btn btn-sm btn-primary" onclick="fmSetLink(' + nameArg + ')">填写链接</button>';
+    } else {
+      acts = '<button class="btn btn-sm btn-primary" onclick="fmOpenFor(' + nameArg + ')">⧉ 打开</button>'
+           + '<button class="btn btn-sm" onclick="fmSetLink(' + nameArg + ')">改</button>';
+    }
+    if (it.has_link) {
+      acts += '<button class="btn btn-sm" onclick="fmRemoveLink(' + nameArg + ')">移除</button>';
+    }
     return '<div class="' + cls + '">'
       +   '<div class="fm-row-name" title="' + esc(it.name) + '">' + esc(it.name) + '</div>'
       +   '<div class="fm-row-dept">' + esc((it.department || '').replace('AI漫剧', '')) + '</div>'
       +   '<div class="fm-row-status">' + esc(it.custom_status || '') + '</div>'
       +   '<div class="fm-row-ep">' + esc(ep) + '</div>'
       +   badge
-      +   '<div class="fm-row-acts">'
-      +     (isMissing
-              ? '<button class="btn btn-sm btn-primary" onclick="fmSetLink(' + nameArg + ')">填写链接</button>'
-              : '<button class="btn btn-sm btn-primary" onclick="fmOpenFor(' + nameArg + ')">⧉ 打开</button>'
-                + '<button class="btn btn-sm" onclick="fmSetLink(' + nameArg + ')">改</button>')
-      +     '<button class="btn btn-sm" onclick="fmRemoveLink(' + nameArg + ')">移除</button>'
-      +   '</div>'
+      +   '<div class="fm-row-acts">' + acts + '</div>'
       + '</div>';
   }
 
@@ -154,7 +160,7 @@
         + (state.active.length ? '没有匹配的项目' : '当前没有进行中的项目')
         + '</div>';
     } else {
-      act.forEach(function (it) { html += rowHtml(it, !it.has_link); });
+      act.forEach(function (it) { html += rowHtml(it, true); });
     }
 
     // 已完成（折叠）
@@ -167,6 +173,7 @@
       if (!done.length) {
         html += '<div class="fm-empty-sm">没有已完成项目</div>';
       } else {
+        html += '<div class="fm-sec-note">已完成的项目的未填链接属于历史记录，一般不需要补。</div>';
         done.forEach(function (it) { html += rowHtml(it, false); });
       }
     }
