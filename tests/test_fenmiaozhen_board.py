@@ -68,6 +68,37 @@ class BoardApiTests(unittest.TestCase):
         seg = src[i:i + 2400]
         self.assertIn("source_root", seg)
 
+    def test_stale_check_uses_os_alias(self):
+        """本模块 import os as _os。写成裸 os 会抛 NameError，
+        而异常被 except 吞掉后会静默判为“路径正常”，僵尸项目就漏不掉。
+        （2026-11 实际踩过：H0168-10492 因此一直留在清单里）"""
+        src = read("backend/enhanced_routes.py")
+        self.assertIn("import os as _os", src, "模块导入别名变了，请同步修改")
+        i = src.find("def fenmiaozhen_board")
+        j = src.find("def fenmiaozhen_all_links")
+        seg = src[i:j]
+        self.assertIn("_os.path.isdir", seg, "未用 _os 别名")
+        # 不能出现裸 os.path
+        import re
+        bare = [m for m in re.findall(r"(?<![_\w])os\.path", seg)]
+        self.assertEqual(bare, [], "出现裸 os.path，会 NameError")
+
+    def test_stale_check_not_silent(self):
+        """路径检查异常必须落日志，不能静默吞掉。"""
+        src = read("backend/enhanced_routes.py")
+        i = src.find("def fenmiaozhen_board")
+        j = src.find("def fenmiaozhen_all_links")
+        seg = src[i:j]
+        self.assertIn("_logger.warning", seg, "异常未记录日志")
+
+    def test_stale_excluded_from_active(self):
+        """目录失效的项目要从 active 里剔除，单独返回。"""
+        src = read("backend/enhanced_routes.py")
+        i = src.find("def fenmiaozhen_board")
+        seg = src[i:src.find("def fenmiaozhen_all_links")]
+        self.assertIn("stale_items", seg)
+        self.assertIn("not x.get('stale')", seg)
+
 
 class BoardUiTests(unittest.TestCase):
     def test_fold_completed(self):
@@ -82,19 +113,62 @@ class BoardUiTests(unittest.TestCase):
 
     def test_missing_row_highlight(self):
         src = read("static/js/fenmiaozhen.js")
-        self.assertIn("fm-row-missing", src, "未填链接行没有高亮")
-        self.assertIn("未填链接", src, "缺少未填链接标记")
+        self.assertIn("is-miss", src, "未填链接行没有左侧色条")
+        self.assertIn("未填", src, "缺少未填链接标记")
         self.assertIn("填写链接", src, "缺少补填入口")
 
-    def test_board_api_used(self):
+    def test_rows_use_left_color_bar(self):
+        """已配置/未配置用左侧色条 + 胶囊区分，比只靠小徒标明显。"""
         src = read("static/js/fenmiaozhen.js")
-        self.assertIn("/api/fenmiaozhen/board", src, "清单未用待办接口")
+        self.assertIn("is-ok", src, "缺少已配置行样式")
+        self.assertIn("fm-flag ok", src.replace("'", "").replace('"', "") or "fm-flag", "缺少已配标记")
+        html = read("templates/index.html")
+        self.assertIn(".fm-row.is-ok", html, "缺少绿色色条样式")
+        self.assertIn(".fm-row.is-miss", html, "缺少红色色条样式")
+
+    def test_dept_and_status_are_tags(self):
+        """部门与状态做成标签，状态颜色复用主页 badge 配色。"""
+        src = read("static/js/fenmiaozhen.js")
+        self.assertIn("function deptTag", src, "部门未做标签")
+        self.assertIn("function statusTag", src, "状态未做标签")
+        seg = src[src.find("function statusTag"):][:700]
+        self.assertIn("getBadge", seg, "状态颜色未复用主页配色")
+
+    def test_name_clickable_jump(self):
+        """项目名可点击回首页定位并高亮。"""
+        src = read("static/js/fenmiaozhen.js")
+        self.assertIn("fmJumpTo", src, "缺少跳转函数")
+        seg = src[src.find("window.fmJumpTo"):][:400]
+        self.assertIn("jumpToProject", seg, "未调用现成的定位+高亮函数")
+
+    def test_grid_alignment(self):
+        """部门/状态列用 grid 固定列宽对齐，不用 flex 自适应。"""
+        html = read("templates/index.html")
+        i = html.find(".fm-row{")
+        self.assertGreater(i, 0)
+        seg = html[i:i + 260]
+        self.assertIn("grid-template-columns", seg, "未用 grid 对齐列")
+
+    def test_no_episode_count_column(self):
+        """去掉集数列（用户反馈无用）。"""
+        src = read("static/js/fenmiaozhen.js")
+        i = src.find("function rowHtml")
+        seg = src[i:i + 1600]
+        self.assertNotIn("fm-row-ep", seg, "集数列没删")
+
+    def test_stale_section(self):
+        """僵尸记录（目录失效）单独折叠，不污染主清单。"""
+        src = read("static/js/fenmiaozhen.js")
+        self.assertIn("目录失效", src, "缺少目录失效区")
+        self.assertIn("fmToggleStale", src, "缺少失效区折叠")
+        back = read("backend/enhanced_routes.py")
+        self.assertIn("stale_items", back, "后端未区分僵尸记录")
 
     def test_css_for_fold_and_missing(self):
         html = read("templates/index.html")
         self.assertIn(".fm-sec-fold", html, "缺少折叠样式")
-        self.assertIn(".fm-row-missing", html, "缺少缺链接高亮样式")
-        self.assertIn(".fm-badge.miss", html, "缺少缺链接徽标样式")
+        self.assertIn(".fm-row.is-miss", html, "缺少缺链接高亮样式")
+        self.assertIn(".fm-flag.miss", html, "缺少缺链接徽标样式")
 
 
 class StatusChangePromptTests(unittest.TestCase):

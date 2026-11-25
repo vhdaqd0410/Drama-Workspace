@@ -1119,6 +1119,7 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
 
         active, completed = [], []
         missing = 0
+        _path_map = {}   # name -> [production_path, group_path]（僵尸检测用）
         for p in all_projects:
             # 只要制作部项目（有 source_root）
             if not (p.get('source_root') or '').strip():
@@ -1129,6 +1130,8 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
             status = (p.get('custom_status') or '').strip()
             name = p.get('name') or ''
             url = links.get(name, '') or ''
+            _path_map[name] = [x for x in ((p.get('production_path') or '').strip(),
+                                           (p.get('group_path') or '').strip()) if x]
             item = {
                 'name': name,
                 'department': dept,
@@ -1153,11 +1156,38 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
                                    x['custom_status'] or '', x['name']))
         completed.sort(key=lambda x: x['name'])
 
+        # 僵尸记录检测：只查「进行中」的项目（已完成是历史项目，不查，省 NAS 往返）。
+        # 背景：DB 里会残留已删/改名目录的记录（如 H0168-10492），状态还卡在剪辑中，
+        # 会伪造成“待传分秒帧”的项目。这里把目录失效的单拎出来，不污染主清单。
+        for item in active:
+            _cands = _path_map.get(item['name']) or []
+            if not _cands:
+                # 无任何路径记录，无法判定，按正常项目处理
+                item['stale'] = False
+                continue
+            try:
+                # 注意：本模块 import os as _os，不能写成 os
+                # （曾因此抛 NameError 被 except 吞掉，导致僵尸检测静默失效）
+                item['stale'] = not any(_os.path.isdir(_c) for _c in _cands)
+            except OSError as _oe:
+                # 网络盘偶发错误：宁可当正常项目，也不要把真实项目藏起来
+                item['stale'] = False
+                _logger.warning('分秒帧清单路径检查失败(OSError) %s: %s', item['name'], _oe)
+            except Exception as _e2:
+                item['stale'] = False
+                _logger.warning('分秒帧清单路径检查异常 %s: %s', item['name'], _e2)
+
+        stale_items = [x for x in active if x.get('stale')]
+        active = [x for x in active if not x.get('stale')]
+        missing = sum(1 for x in active if not x['has_link'])
+
         return jsonify(ok=True,
                        active=active,
+                       stale=stale_items,
                        completed=completed,
                        stats={'active': len(active),
                               'missing': missing,
+                              'stale': len(stale_items),
                               'completed': len(completed),
                               'exclude_keywords': excl,
                               'active_statuses': active_statuses})

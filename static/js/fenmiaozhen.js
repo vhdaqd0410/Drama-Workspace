@@ -10,11 +10,13 @@
 (function () {
   var state = {
     active: [],
+    stale: [],
     completed: [],
     stats: {},
     keyword: '',
     onlyMissing: false,
     showCompleted: false,
+    showStale: false,
     currentUrl: '',
     projectName: ''
   };
@@ -66,6 +68,7 @@
       var d = await api('GET', '/api/fenmiaozhen/board');
       if (!d || !d.ok) throw new Error((d && d.msg) || '接口返回失败');
       state.active = d.active || [];
+      state.stale = d.stale || [];
       state.completed = d.completed || [];
       state.stats = d.stats || {};
     } catch (e) {
@@ -91,34 +94,76 @@
     window.fmRenderList();
   };
 
-  // emphasizeMissing=true 时给未填链接的行加橙色底色（仅“进行中”区用，提醒优先补）
-  function rowHtml(it, emphasizeMissing) {
+  window.fmToggleStale = function () {
+    state.showStale = !state.showStale;
+    window.fmRenderList();
+  };
+
+  // 状态标签：颜色直接复用主页 badge 配色（.badge.xxx），保证两边一致
+  function statusTag(status) {
+    var s = String(status || '').trim();
+    if (!s) return '<span class="fm-tag">未设置</span>';
+    var cls = 'default';
+    try {
+      if (typeof getBadge === 'function') {
+        var b = getBadge(s);
+        if (b && b.cls) cls = b.cls;
+      }
+    } catch (e) {}
+    return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
+  }
+
+  // 部门标签
+  function deptTag(dept) {
+    var d = String(dept || '').replace(/^AI漫剧/, '');
+    if (!d) return '<span class="fm-tag dept">—</span>';
+    return '<span class="fm-tag dept" title="' + esc(dept) + '">' + esc(d) + '</span>';
+  }
+
+  function rowHtml(it, mode) {
     var miss = !it.has_link;
-    var cls = 'fm-row' + (miss && emphasizeMissing ? ' fm-row-missing' : '');
+    var cls = 'fm-row' + (mode === 'stale' ? ' is-stale' : (miss ? ' is-miss' : ' is-ok'));
     var nameArg = esc(JSON.stringify(it.name));
-    var badge = miss
-      ? '<span class="fm-badge miss">未填链接</span>'
-      : '<span class="fm-badge ok">已配置</span>';
-    var ep = (it.total_episodes ? (it.current_episodes + '/' + it.total_episodes) : '');
-    var acts;
-    if (miss) {
-      acts = '<button class="btn btn-sm btn-primary" onclick="fmSetLink(' + nameArg + ')">填写链接</button>';
+
+    var flag;
+    if (mode === 'stale') {
+      flag = '<span class="fm-flag stale">目录失效</span>';
+    } else if (miss) {
+      flag = '<span class="fm-flag miss">✕ 未填</span>';
     } else {
-      acts = '<button class="btn btn-sm btn-primary" onclick="fmOpenFor(' + nameArg + ')">⧉ 打开</button>'
-           + '<button class="btn btn-sm" onclick="fmSetLink(' + nameArg + ')">改</button>';
+      flag = '<span class="fm-flag ok">✓ 已配</span>';
     }
-    if (it.has_link) {
-      acts += '<button class="btn btn-sm" onclick="fmRemoveLink(' + nameArg + ')">移除</button>';
+
+    var acts = '';
+    if (mode !== 'stale') {
+      if (miss) {
+        acts = '<button class="btn btn-sm btn-primary" onclick="fmSetLink(' + nameArg + ')">填写链接</button>';
+      } else {
+        acts = '<button class="btn btn-sm btn-primary" onclick="fmOpenFor(' + nameArg + ')">⧉ 打开</button>'
+             + '<button class="btn btn-sm" onclick="fmSetLink(' + nameArg + ')">改</button>'
+             + '<button class="btn btn-sm" onclick="fmRemoveLink(' + nameArg + ')">移除</button>';
+      }
     }
+
+    // 项目名可点击 → 回首页定位并高亮
     return '<div class="' + cls + '">'
-      +   '<div class="fm-row-name" title="' + esc(it.name) + '">' + esc(it.name) + '</div>'
-      +   '<div class="fm-row-dept">' + esc((it.department || '').replace('AI漫剧', '')) + '</div>'
-      +   '<div class="fm-row-status">' + esc(it.custom_status || '') + '</div>'
-      +   '<div class="fm-row-ep">' + esc(ep) + '</div>'
-      +   badge
+      +   '<a class="fm-row-name" title="' + esc(it.name) + '（点击回到首页定位）" '
+      +      'onclick="fmJumpTo(' + nameArg + ')">' + esc(it.name) + '</a>'
+      +   '<div>' + deptTag(it.department) + '</div>'
+      +   '<div>' + statusTag(it.custom_status) + '</div>'
+      +   '<div>' + flag + '</div>'
       +   '<div class="fm-row-acts">' + acts + '</div>'
       + '</div>';
   }
+
+  // 点击项目名 → 主页定位 + 高亮
+  window.fmJumpTo = function (name) {
+    if (typeof jumpToProject === 'function') {
+      jumpToProject(name);
+    } else if (typeof switchTab === 'function') {
+      switchTab('dashboard');
+    }
+  };
 
   window.fmRenderList = function () {
     var wrap = el('fmListWrap');
@@ -140,6 +185,7 @@
     if (st) {
       st.textContent = '进行中 ' + (s.active || 0) + ' 个'
         + (s.missing ? '（未填链接 ' + s.missing + ' 个）' : '')
+        + (s.stale ? ' · 目录失效 ' + s.stale + ' 个' : '')
         + ' · 已完成 ' + (s.completed || 0) + ' 个';
     }
 
@@ -160,7 +206,23 @@
         + (state.active.length ? '没有匹配的项目' : '当前没有进行中的项目')
         + '</div>';
     } else {
-      act.forEach(function (it) { html += rowHtml(it, true); });
+      act.forEach(function (it) { html += rowHtml(it, 'active'); });
+    }
+
+    // 目录失效（僵尸记录）：单独折叠，不进主清单
+    var stale = (state.stale || []).filter(match);
+    var staleTotal = (state.stale || []).length;
+    if (staleTotal) {
+      html += '<div class="fm-sec-head fm-sec-fold" onclick="fmToggleStale()">'
+        + '<span class="fm-fold-arrow">' + (state.showStale ? '▼' : '▶') + '</span>'
+        + '⚠️ 目录失效<span class="fm-sec-count">' + staleTotal + '</span>'
+        + '<span class="fm-sec-hint">点击' + (state.showStale ? '收起' : '展开') + '</span>'
+        + '</div>';
+      if (state.showStale) {
+        html += '<div class="fm-sec-note">这些项目在数据库里还有记录（状态停在审核环节），但在磁盘上已经找不到目录，'
+          + '可能是已删除或改过名。不计入待传清单；确认废弃后可到首页把它们改成「已完成」。</div>';
+        stale.forEach(function (it) { html += rowHtml(it, 'stale'); });
+      }
     }
 
     // 已完成（折叠）
@@ -173,8 +235,7 @@
       if (!done.length) {
         html += '<div class="fm-empty-sm">没有已完成项目</div>';
       } else {
-        html += '<div class="fm-sec-note">已完成的项目的未填链接属于历史记录，一般不需要补。</div>';
-        done.forEach(function (it) { html += rowHtml(it, false); });
+        done.forEach(function (it) { html += rowHtml(it, 'done'); });
       }
     }
 
@@ -183,7 +244,8 @@
 
   // 打开某个项目的分秒帧（独立窗口 + 复制成片目录）
   window.fmOpenFor = function (name) {
-    var it = state.active.concat(state.completed).filter(function (x) { return x.name === name; })[0];
+    var it = (state.active || []).concat(state.completed || [], state.stale || [])
+      .filter(function (x) { return x.name === name; })[0];
     if (!it || !it.url) { window.fmSetLink(name); return; }
     state.currentUrl = it.url;
     state.projectName = name;
@@ -193,7 +255,7 @@
   };
 
   window.fmSetLink = async function (name) {
-    var all = state.active.concat(state.completed);
+    var all = (state.active || []).concat(state.completed || [], state.stale || []);
     var cur = (all.filter(function (x) { return x.name === name; })[0] || {}).url || '';
     var u = prompt('请输入「' + name + '」在分秒帧的审核链接：\n（打开分秒帧项目页后，复制地址栏网址）',
                    cur || 'https://app.mediatrack.cn/');
