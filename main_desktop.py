@@ -180,10 +180,26 @@ def _fm_window_alive(win):
 
 
 def _on_fm_closed(*_args, **_kwargs):
-    """窗口被关闭（用户点 ×）时立即释放引用，下次点按钮才会重建。"""
+    """窗口被关闭（用户点 ×）时立即释放引用，并清空上传状态。"""
     if _fm_window_ref[0] is not None:
         print("[fm] 分秒帧窗口已关闭，释放引用")
     _fm_window_ref[0] = None
+    try:
+        _fmup.reset()
+    except Exception:
+        pass
+
+
+# 上传状态统一走 backend/fm_upload.py
+
+
+def _fm_uploading():
+    """当前是否有上传在进行（供关闭保护判断）。"""
+    try:
+        return _fmup.is_uploading()
+    except Exception:
+        return False
+
 
 
 def _show_fm_window():
@@ -209,6 +225,345 @@ def _show_fm_window():
 #     - iframe 里的登录无法靠注入解决：跨域 iframe 的 window.open 会冒泡到顶层 WebView，
 #       是否外跳由 pywebview 全局设置决定，而全局关掉会把主窗口 14 处 window.open 一起带走。
 #   所以：登录与上传统一走独立窗口，板块里不再做 iframe 登录。
+
+
+def _set_clipboard(text):
+    """把文本写入 Windows 剪贴板。成功返回 True。"""
+    try:
+        import ctypes as _ct
+        s = str(text or "")
+        if not s:
+            return False
+        _ct.windll.user32.OpenClipboard(0)
+        try:
+            _ct.windll.user32.EmptyClipboard()
+            _data = s.encode("utf-16-le") + b"\x00\x00"
+            _ct.windll.kernel32.GlobalAlloc.restype = _ct.c_void_p
+            _h = _ct.windll.kernel32.GlobalAlloc(0x0042, len(_data))
+            _ct.windll.kernel32.GlobalLock.restype = _ct.c_void_p
+            _p = _ct.windll.kernel32.GlobalLock(_h)
+            _ct.windll.kernel32.RtlMoveMemory(_ct.c_void_p(_p), _data, len(_data))
+            _ct.windll.kernel32.GlobalUnlock(_h)
+            _ct.windll.user32.SetClipboardData(13, _ct.c_void_p(_h))
+        finally:
+            _ct.windll.user32.CloseClipboard()
+        return True
+    except Exception as e:
+        print(f"[fm] 写剪贴板失败: {e}")
+        return False
+
+
+# 分秒帧上传监控状态：上传发生在网页内部（腾讯云 COS 分片上传），
+# Python 看不到网络流，只能由页面内注入的脚本 hook XHR.upload.onprogress 后回传。
+# 状态与防抖逻辑放在 backend/fm_upload.py（可独立单测）。
+try:
+    import fm_upload as _fmup
+except Exception:
+    from backend import fm_upload as _fmup
+
+
+def _fm_notify_upload_done(summary):
+    """上传完成提醒：优先托盘气泡，退到日志。"""
+    try:
+        tray = _tray_ref[0]
+    except Exception:
+        tray = None
+    if tray is not None:
+        try:
+            with _tray_lock:
+                tray.notify("分秒帧上传完成", summary)
+            print(f"[fm] 已推送上传完成提醒: {summary}")
+            return True
+        except Exception as e:
+            print(f"[fm] 托盘提醒失败: {e}")
+    print(f"[fm] 上传完成: {summary}")
+    return False
+
+
+# 分秒帧上传状态（逻辑在 backend/fm_upload.py，可单测）
+try:
+    import fm_upload as _fmup
+except Exception:
+    from backend import fm_upload as _fmup
+
+
+def _fm_notify_upload_done(summary):
+    """上传完成提醒：优先托盘气泡，退到日志。"""
+    try:
+        tray = _tray_ref[0]
+    except Exception:
+        tray = None
+    if tray is not None:
+        try:
+            with _tray_lock:
+                tray.notify("分秒帧上传完成", summary)
+            print(f"[fm] 已推送上传完成提醒: {summary}")
+            return True
+        except Exception as e:
+            print(f"[fm] 托盘提醒失败: {e}")
+    print(f"[fm] 上传完成: {summary}")
+    return False
+
+
+class _FmBridge:
+    """分秒帧窗口的 JS 桥（只提供给该窗口，不影响主窗口）。"""
+
+    def copy_clipboard(self, text):
+        """页面里点「复制链接」时调用：由 Python 写剪贴板，绕开浏览器权限限制。"""
+        ok = _set_clipboard(text)
+        return {"ok": bool(ok)}
+
+    def upload_report(self, payload):
+        """页面内上传进度回传（已节流）。用于进度展示、完成提醒、关闭保护。"""
+        import json as _json
+        try:
+            d = _json.loads(payload) if isinstance(payload, str) else (payload or {})
+        except Exception:
+            return {"ok": False}
+        return _fmup.report(d.get("active"), d.get("loaded"), d.get("total"))
+
+
+def _fm_toolbar_js():
+    """生成分秒帧页面内的浮动工具条（右下角，两个小按钮）。
+
+    为什么需要：独立窗口里没有地址栏，用户想复制当前页链接、或跳到另一个分秒帧页
+    只能切回工作台。这里在页面内加两个不抢眼的按钮解决。
+    风险控制：只用内联样式 + 最高 z-index + 纯图标胶囊，不敢碰页面布局；
+    每次页面加载（events.loaded）重新注入，避免整页刷新后工具条消失。
+    """
+    return r"""
+(function(){
+  try{
+    if (document.getElementById('__fm_bar')) { return; }
+    var css = 'position:fixed;right:14px;bottom:14px;z-index:2147483647;'
+      + 'display:flex;flex-direction:column;gap:8px;align-items:flex-end;'
+      + 'font:12px/1.4 -apple-system,"Segoe UI",sans-serif;'
+      + 'opacity:.55;transition:opacity .18s';
+    var btnCss = 'display:flex;align-items:center;gap:5px;padding:7px 11px;'
+      + 'border-radius:18px;border:1px solid rgba(255,255,255,.18);'
+      + 'background:rgba(28,28,32,.88);color:#fff;cursor:pointer;'
+      + 'box-shadow:0 2px 10px rgba(0,0,0,.22);white-space:nowrap;'
+      + 'font:12px/1.4 -apple-system,"Segoe UI",sans-serif';
+    var wrap = document.createElement('div');
+    wrap.id = '__fm_bar';
+    wrap.style.cssText = css;
+    wrap.onmouseenter = function(){ wrap.style.opacity = '1'; };
+    wrap.onmouseleave = function(){ wrap.style.opacity = '.55'; };
+
+    function mk(text, title, fn){
+      var b = document.createElement('button');
+      b.textContent = text;
+      b.title = title;
+      b.style.cssText = btnCss;
+      b.onclick = fn;
+      return b;
+    }
+
+    // 复制当前页链接：优先走 Python 桥（最稳），再退到浏览器 API
+    wrap.appendChild(mk('🔗 复制链接', '复制当前页面链接（存回工作台用）', function(){
+      var u = location.href;
+      function done(ok){
+        var el = this;
+      }
+      try{
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_clipboard){
+          window.pywebview.api.copy_clipboard(u).then(function(r){
+            __fmToast(r && r.ok ? '已复制：' + u : '复制失败，请手动选中地址');
+          }).catch(function(){ __fmFallbackCopy(); });
+          return;
+        }
+      }catch(e){}
+      __fmFallbackCopy();
+
+      function __fmFallbackCopy(){
+        try{
+          if (navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(u).then(function(){ __fmToast('已复制：' + u); },
+              function(){ __fmManualCopy(u); });
+          } else { __fmManualCopy(u); }
+        }catch(e){ __fmManualCopy(u); }
+      }
+      function __fmManualCopy(txt){
+        var ta = document.createElement('textarea');
+        ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta); ta.select();
+        var ok = false;
+        try{ ok = document.execCommand('copy'); }catch(e){}
+        document.body.removeChild(ta);
+        __fmToast(ok ? '已复制：' + txt : '复制失败，请手动复制');
+      }
+    }));
+
+    // 打开另一个分秒帧链接（在当前窗口内跳转）
+    wrap.appendChild(mk('🧭 打开链接', '粘贴一个分秒帧链接并跳转', function(){
+      var cur = location.href || 'https://app.mediatrack.cn/';
+      var u = window.prompt('输入要打开的分秒帧链接（当前窗口内跳转）：', cur);
+      if (!u) return;
+      u = String(u).trim();
+      if (!u) return;
+      // 只接受分秒帧域名，避免被当成任意网址跳板
+      var ok = /^https?:\/\/([\w.-]+\.)?mediatrack\.cn(\/|$)/i.test(u);
+      if (!ok) { __fmToast('只支持 mediatrack.cn 的链接'); return; }
+      location.href = u;
+    }));
+
+    // 轻量提示（不依赖页面自己的 toast）
+    var tip = document.createElement('div');
+    tip.id = '__fm_tip';
+    tip.style.cssText = 'display:none;position:fixed;right:14px;bottom:96px;'
+      + 'z-index:2147483647;max-width:78vw;padding:9px 13px;border-radius:10px;'
+      + 'background:rgba(28,28,32,.93);color:#fff;font:12.5px/1.5 -apple-system,"Segoe UI",sans-serif;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,.28);word-break:break-all';
+    document.body.appendChild(wrap);
+    document.body.appendChild(tip);
+
+    window.__fmToast = function(msg){
+      try{
+        tip.textContent = msg;
+        tip.style.display = 'block';
+        clearTimeout(window.__fmTipTimer);
+        window.__fmTipTimer = setTimeout(function(){ tip.style.display = 'none'; }, 3200);
+      }catch(e){}
+    };
+  }catch(e){}
+})();
+"""
+
+
+def _fm_upload_hook_js():
+    """注入上传监控：hook XHR.upload.onprogress，把进度回传给 Python 并显示在工具条上。
+
+    为什么这么干：上传是分秒帧网页里的腾讯云 COS 分片上传，发生在 WebView2 内部，
+    宿主拿不到网络流。只能从页面 JS 侧 hook XMLHttpRequest。
+    过滤：只看 total > 1MB 的上传，避开保存评论/小 API 请求的干扰。
+    """
+    return r"""
+(function(){
+  try{
+    if (window.__fmUploadHook) { return; }
+    window.__fmUploadHook = true;
+
+    var active = {};       // id -> {loaded,total}
+    var grandLoaded = 0;   // 累计已传（用于完成后报总量）
+    var lastSent = 0;
+
+    function summary(){
+      var n = 0, loaded = 0, total = 0;
+      for (var k in active){
+        var a = active[k]; n++; loaded += a.loaded || 0; total += a.total || 0;
+      }
+      return { active: n, loaded: loaded, total: total };
+    }
+
+    function paint(){
+      var s = summary();
+      var el = document.getElementById('__fm_up');
+      if (!el) return;
+      if (s.active > 0){
+        var pct = s.total > 0 ? Math.floor(s.loaded * 100 / s.total) : 0;
+        el.style.display = 'block';
+        el.textContent = '⬆ 上传中 ' + (s.total > 0 ? pct + '%' : (s.loaded/1048576).toFixed(1)+'MB')
+          + '（' + s.active + ' 个任务）';
+      } else {
+        el.style.display = 'none';
+      }
+    }
+
+    function report(force){
+      var now = Date.now();
+      if (!force && now - lastSent < 400) return;   // 节流 400ms
+      lastSent = now;
+      var s = summary();
+      if (s.active > 0) grandLoaded = s.loaded;
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.upload_report){
+        try{
+          window.pywebview.api.upload_report(JSON.stringify(s)).then(function(){}).catch(function(){});
+        }catch(e){}
+      }
+      paint();
+    }
+
+    var XO = XMLHttpRequest.prototype.open;
+    var XS = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function(method, url){
+      this.__fmUrl = String(url || '');
+      this.__fmId = 'u' + Math.random().toString(36).slice(2);
+      return XO.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function(){
+      var xhr = this;
+      var id = xhr.__fmId;
+      try{
+        if (xhr.upload){
+          xhr.upload.addEventListener('progress', function(e){
+            // 只统计真实文件上传（>1MB），避开普通小接口
+            if (e && e.total && e.total > 1048576){
+              active[id] = { loaded: e.loaded || 0, total: e.total || 0 };
+              report(false);
+            }
+          });
+          xhr.upload.addEventListener('load', function(){
+            if (active[id]) { report(true); }
+          });
+        }
+        xhr.addEventListener('loadend', function(){
+          if (active[id]){ delete active[id]; report(true); }
+        });
+      }catch(e){}
+      return XS.apply(this, arguments);
+    };
+  }catch(e){}
+})();
+"""
+
+
+def _fm_progress_ui_js():
+    """工具条里的上传进度行（由 paint() 更新）。独立于 hook 注入，
+    这样即使 hook 已存在、重新加载后也能补上 UI 节点。"""
+    return r"""
+(function(){
+  try{
+    var bar = document.getElementById('__fm_bar');
+    if (!bar || document.getElementById('__fm_up')) { return; }
+    var up = document.createElement('div');
+    up.id = '__fm_up';
+    up.style.cssText = 'display:none;padding:6px 11px;border-radius:14px;'
+      + 'background:rgba(0,113,227,.92);color:#fff;font:12px/1.4 -apple-system,"Segoe UI",sans-serif;'
+      + 'box-shadow:0 2px 10px rgba(0,0,0,.22);white-space:nowrap;text-align:right';
+    bar.insertBefore(up, bar.firstChild);
+    if (window.__fmUploadHook) {
+      // 重新触发一次汇总（状态保留在 hook 内部）
+      try{ document.dispatchEvent(new Event('__fm_repaint')); }catch(e){}
+    }
+  }catch(e){}
+})();
+"""
+
+
+def _inject_fm_toolbar(win):
+    """给分秒帧窗口注入浮动工具条 + 上传监控（每次页面加载都重新注入）。"""
+    def _on_loaded(*_a, **_k):
+        try:
+            win.evaluate_js(_fm_toolbar_js())
+        except Exception as _e:
+            print(f"[fm] 注入工具条失败: {_e}")
+        try:
+            win.evaluate_js(_fm_progress_ui_js())
+        except Exception:
+            pass
+        try:
+            win.evaluate_js(_fm_upload_hook_js())
+        except Exception as _e:
+            print(f"[fm] 注入上传监控失败: {_e}")
+
+    try:
+        win.events.loaded += _on_loaded
+        return True
+    except Exception as _e:
+        print(f"[fm] 绑定 loaded 失败: {_e}")
+        return False
 
 
 def _open_fm_window(url, title="分秒帧"):
@@ -249,6 +604,7 @@ def _open_fm_window(url, title="分秒帧"):
             title=title, url=url,
             width=1280, height=860, min_size=(900, 600),
             resizable=True, text_select=True,
+            js_api=_FmBridge(),   # 页面里的「复制链接」按钮走这个桥
         )
         if new_win is None:
             return False, "窗口创建被取消"
@@ -257,6 +613,35 @@ def _open_fm_window(url, title="分秒帧"):
             new_win.events.closed += _on_fm_closed
         except Exception as _be:
             print(f"[fm] 绑定关闭事件失败: {_be}")
+
+        # 上传中关闭保护：避免误点 × 把上传中断了
+        def _on_fm_closing(*_a, **_k):
+            try:
+                if not _fm_uploading():
+                    return True
+            except Exception:
+                return True
+            try:
+                res = new_win.create_confirmation_dialog(
+                    "还有文件正在上传",
+                    "关闭窗口会中断上传，已传的部分可能不完整。\n\n确定要关闭吗？")
+                if res:
+                    print("[fm] 用户确认在传输中关闭窗口")
+                    return True
+                print("[fm] 已取消关闭（上传进行中）")
+                return False
+            except Exception as _ce:
+                # 弹框失败时宁可不关，避免真的把传输掐断
+                print(f"[fm] 关闭确认弹框失败，已阻止关闭: {_ce}")
+                return False
+
+        try:
+            new_win.events.closing += _on_fm_closing
+        except Exception as _ce2:
+            print(f"[fm] 绑定关闭保护失败: {_ce2}")
+
+        # 页面内浮动工具条（复制当前链接 / 打开链接）
+        _inject_fm_toolbar(new_win)
         _fm_window_ref[0] = new_win
         print(f"[fm] 已新建分秒帧窗口 → {url}")
         return True, ""
@@ -1231,6 +1616,13 @@ def _main():
         resizable=True,
     )
     _window_ref[0] = window
+
+    # 注册分秒帧上传完成后的提醒回调（托盘气泡）
+    try:
+        _fmup.set_done_callback(_fm_notify_upload_done)
+        print("[fm] 上传完成提醒已就绪")
+    except Exception as e:
+        print(f"[fm] 上传完成提醒注册失败: {e}")
 
     # 应用启动设置（最小化到托盘 / 自动扫描）
     try:
