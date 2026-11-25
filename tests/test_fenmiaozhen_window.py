@@ -88,12 +88,18 @@ class PathProtectionTests(unittest.TestCase):
         self.assertIn("isdir", seg, "未校验目录存在")
 
     def test_clipboard_write_guarded(self):
+        """剪贴板写入要有异常兜底，且必须复用统一实现。
+        （内联版曾因 64 位句柄未声明 argtypes 而失败，已改为复用 _set_clipboard）"""
         src = read("main_desktop.py")
-        i = src.find("_api_self_fenmiaozhen")
-        seg = src[i:i + 2600]
-        self.assertIn("OpenClipboard", seg)
-        self.assertIn("CloseClipboard", seg)
-        self.assertIn("except", seg, "剪贴板异常未兜底")
+        i = src.find("def _api_self_fenmiaozhen")
+        j = src.find("def _api_self_fm_probe")
+        seg = src[i:j]
+        self.assertIn("_set_clipboard", seg, "未复用统一剪贴板实现")
+        # _set_clipboard 本身必须有兜底
+        k = src.find("def _set_clipboard")
+        body = src[k:src.find("class _FmBridge")]
+        self.assertIn("except Exception", body, "剪贴板写入无异常兜底")
+        self.assertIn("CloseClipboard", body)
 
 
 class FrontendTests(unittest.TestCase):

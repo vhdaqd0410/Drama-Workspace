@@ -228,28 +228,75 @@ def _show_fm_window():
 
 
 def _set_clipboard(text):
-    """把文本写入 Windows 剪贴板。成功返回 True。"""
+    """把文本写入 Windows 剪贴板。成功返回 True。
+
+    坑（已踩）：64 位下 HGLOBAL 是 8 字节句柄。如果不显式声明 argtypes，
+    ctypes 会按 32 位 int 传递 → GlobalLock 抛
+    “OverflowError: int too long to convert” → 被 except 吞掉 → 返回 False，
+    表现为页面里点“复制链接”总是失败。所以下面逐个声明签名。
+    """
     try:
         import ctypes as _ct
         s = str(text or "")
         if not s:
             return False
-        _ct.windll.user32.OpenClipboard(0)
+
+        k32 = _ct.windll.kernel32
+        u32 = _ct.windll.user32
+
+        k32.GlobalAlloc.restype = _ct.c_void_p
+        k32.GlobalAlloc.argtypes = [_ct.c_uint, _ct.c_size_t]
+        k32.GlobalLock.restype = _ct.c_void_p
+        k32.GlobalLock.argtypes = [_ct.c_void_p]
+        k32.GlobalUnlock.restype = _ct.c_bool
+        k32.GlobalUnlock.argtypes = [_ct.c_void_p]
+        k32.GlobalFree.restype = _ct.c_void_p
+        k32.GlobalFree.argtypes = [_ct.c_void_p]
+        k32.RtlMoveMemory.restype = None
+        k32.RtlMoveMemory.argtypes = [_ct.c_void_p, _ct.c_char_p, _ct.c_size_t]
+        u32.OpenClipboard.restype = _ct.c_bool
+        u32.OpenClipboard.argtypes = [_ct.c_void_p]
+        u32.CloseClipboard.restype = _ct.c_bool
+        u32.EmptyClipboard.restype = _ct.c_bool
+        u32.SetClipboardData.restype = _ct.c_void_p
+        u32.SetClipboardData.argtypes = [_ct.c_uint, _ct.c_void_p]
+
+        data = s.encode("utf-16-le") + b"\x00\x00"
+
+        # 剪贴板可能被其他程序短暂占用，重试几次
+        opened = False
+        for _ in range(5):
+            if u32.OpenClipboard(None):
+                opened = True
+                break
+            time.sleep(0.06)
+        if not opened:
+            print("[fm] 写剪贴板失败: OpenClipboard 一直被占用")
+            return False
+
         try:
-            _ct.windll.user32.EmptyClipboard()
-            _data = s.encode("utf-16-le") + b"\x00\x00"
-            _ct.windll.kernel32.GlobalAlloc.restype = _ct.c_void_p
-            _h = _ct.windll.kernel32.GlobalAlloc(0x0042, len(_data))
-            _ct.windll.kernel32.GlobalLock.restype = _ct.c_void_p
-            _p = _ct.windll.kernel32.GlobalLock(_h)
-            _ct.windll.kernel32.RtlMoveMemory(_ct.c_void_p(_p), _data, len(_data))
-            _ct.windll.kernel32.GlobalUnlock(_h)
-            _ct.windll.user32.SetClipboardData(13, _ct.c_void_p(_h))
+            u32.EmptyClipboard()
+            h = k32.GlobalAlloc(0x0042, len(data))   # GMEM_MOVEABLE|GMEM_ZEROINIT
+            if not h:
+                print("[fm] 写剪贴板失败: GlobalAlloc 返回空")
+                return False
+            p = k32.GlobalLock(h)
+            if not p:
+                print("[fm] 写剪贴板失败: GlobalLock 返回空")
+                k32.GlobalFree(h)
+                return False
+            k32.RtlMoveMemory(_ct.c_void_p(p), data, len(data))
+            k32.GlobalUnlock(h)
+            if not u32.SetClipboardData(13, _ct.c_void_p(h)):   # CF_UNICODETEXT
+                print("[fm] 写剪贴板失败: SetClipboardData 返回空")
+                k32.GlobalFree(h)
+                return False
+            # 成功后内存归系统所有，不能再 GlobalFree
         finally:
-            _ct.windll.user32.CloseClipboard()
+            u32.CloseClipboard()
         return True
     except Exception as e:
-        print(f"[fm] 写剪贴板失败: {e}")
+        print(f"[fm] 写剪贴板失败: {type(e).__name__} {e}")
         return False
 
 
@@ -362,18 +409,6 @@ def _fm_toolbar_js():
     // 复制当前页链接：优先走 Python 桥（最稳），再退到浏览器 API
     wrap.appendChild(mk('🔗 复制链接', '复制当前页面链接（存回工作台用）', function(){
       var u = location.href;
-      function done(ok){
-        var el = this;
-      }
-      try{
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_clipboard){
-          window.pywebview.api.copy_clipboard(u).then(function(r){
-            __fmToast(r && r.ok ? '已复制：' + u : '复制失败，请手动选中地址');
-          }).catch(function(){ __fmFallbackCopy(); });
-          return;
-        }
-      }catch(e){}
-      __fmFallbackCopy();
 
       function __fmFallbackCopy(){
         try{
@@ -390,8 +425,39 @@ def _fm_toolbar_js():
         var ok = false;
         try{ ok = document.execCommand('copy'); }catch(e){}
         document.body.removeChild(ta);
-        __fmToast(ok ? '已复制：' + txt : '复制失败，请手动复制');
+        __fmToast(ok ? '已复制：' + txt : '复制失败，请手动选中地址');
       }
+
+      // 桥调用要加超时：pywebview 的 Promise 偶尔不 resolve，不能一直卡着不兜底
+      var called = false;
+      var timer = setTimeout(function(){
+        if (called) return;
+        called = true;
+        __fmFallbackCopy();
+      }, 1500);
+
+      try{
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_clipboard){
+          window.pywebview.api.copy_clipboard(u).then(function(r){
+            if (called) return;
+            called = true;
+            clearTimeout(timer);
+            if (r && r.ok) { __fmToast('已复制：' + u); }
+            else {
+              // 桥明确报失败 → 换浏览器 API 试一次，别再静默
+              __fmFallbackCopy();
+            }
+          }).catch(function(){
+            if (called) return;
+            called = true;
+            clearTimeout(timer);
+            __fmFallbackCopy();
+          });
+          return;
+        }
+      }catch(e){}
+      if (!called) { called = true; clearTimeout(timer); }
+      __fmFallbackCopy();
     }));
 
     // 打开另一个分秒帧链接（在当前窗口内跳转）
@@ -1480,24 +1546,9 @@ def _register_quit_api(flask_app):
 
         copied = False
         if copy_path:
-            try:
-                import ctypes as _ct
-                # 仅当目录真实存在才复制，避免把无效路径塞进剪贴板
-                if os.path.isdir(copy_path):
-                    _ct.windll.user32.OpenClipboard(0)
-                    _ct.windll.user32.EmptyClipboard()
-                    _data = copy_path.encode("utf-16-le") + b"\x00\x00"
-                    _ct.windll.kernel32.GlobalAlloc.restype = _ct.c_void_p
-                    _h = _ct.windll.kernel32.GlobalAlloc(0x0042, len(_data))
-                    _ct.windll.kernel32.GlobalLock.restype = _ct.c_void_p
-                    _p = _ct.windll.kernel32.GlobalLock(_h)
-                    _ct.windll.kernel32.RtlMoveMemory(_ct.c_void_p(_p), _data, len(_data))
-                    _ct.windll.kernel32.GlobalUnlock(_h)
-                    _ct.windll.user32.SetClipboardData(13, _ct.c_void_p(_h))
-                    _ct.windll.user32.CloseClipboard()
-                    copied = True
-            except Exception as _ce:
-                print(f"[fm] 复制路径失败: {_ce}")
+            # 复用已修好的 _set_clipboard（内联版在 64 位下有句柄截断问题）
+            if os.path.isdir(copy_path):
+                copied = _set_clipboard(copy_path)
 
         # 仅复制路径、不开窗口（卡片点分秒帧时先跳 tab，只把上传目录准备好）
         if body.get("_no_window"):
@@ -1527,6 +1578,8 @@ def _register_quit_api(flask_app):
             "up: !!document.getElementById('__fm_up'),"
             "hook: !!window.__fmUploadHook,"
             "bridge: !!(window.pywebview && window.pywebview.api),"
+            "apiKeys: Object.keys((window.pywebview && window.pywebview.api) || {}),"
+            "hasCopy: !!(window.pywebview && window.pywebview.api && window.pywebview.api.copy_clipboard),"
             "url: location.href"
             "});})()"
         )
@@ -1543,6 +1596,42 @@ def _register_quit_api(flask_app):
                 sim_out = w.evaluate_js(sim_js)
             except Exception as _se:
                 sim_out = "ERR " + str(_se)
+        elif action == "sim_copy":
+            sim_js = (
+                "window.pywebview.api.copy_clipboard("
+                "'https://app.mediatrack.cn/from-page-test'"
+                ").then(function(r){return JSON.stringify(r);})"
+            )
+            try:
+                sim_out = w.evaluate_js(sim_js)
+            except Exception as _se:
+                sim_out = "ERR " + str(_se)
+            # 桥调用是异步的：必须等一会儿再读剪贴板，否则读到的是上一次的旧值
+            time.sleep(0.9)
+            # 直接读回剪贴板，确认页面请求真的写进去了
+            try:
+                import ctypes as _c
+                _u = _c.windll.user32
+                _k = _c.windll.kernel32
+                _k.GlobalLock.restype = _c.c_void_p
+                _k.GlobalLock.argtypes = [_c.c_void_p]
+                _u.OpenClipboard.argtypes = [_c.c_void_p]
+                _u.GetClipboardData.restype = _c.c_void_p
+                _u.GetClipboardData.argtypes = [_c.c_uint]
+                clip = ""
+                if _u.OpenClipboard(None):
+                    try:
+                        _h = _u.GetClipboardData(13)
+                        if _h:
+                            _p = _k.GlobalLock(_c.c_void_p(_h))
+                            if _p:
+                                clip = _c.wstring_at(_p)
+                                _k.GlobalUnlock(_c.c_void_p(_h))
+                    finally:
+                        _u.CloseClipboard()
+                sim_out = {"bridge": sim_out, "clipboard": clip.rstrip("\x00")}
+            except Exception as _ce:
+                sim_out = {"bridge": sim_out, "clipboard_err": str(_ce)}
 
         try:
             raw = w.evaluate_js(script)
