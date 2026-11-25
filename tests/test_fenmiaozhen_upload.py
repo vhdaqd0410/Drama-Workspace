@@ -156,6 +156,39 @@ class ClosingGuardTests(unittest.TestCase):
         self.assertIn("fm_upload", src, "未使用上传状态模块")
         self.assertIn("set_done_callback", src, "未注册完成回调")
 
+    def test_reset_on_close(self):
+        """关窗要清上传状态，否则残留 in_flight 会让下次关闭一直被拦。"""
+        src = read("main_desktop.py")
+        i = src.find("def _on_fm_closed")
+        seg = src[i:i + 500]
+        self.assertIn("_fmup.reset", seg, "关窗后未清理上传状态")
+
+
+class ProbeApiTests(unittest.TestCase):
+    def test_probe_route(self):
+        src = read("main_desktop.py")
+        self.assertIn("/api/_self/fenmiaozhen/probe", src, "缺少自检接口")
+
+    def test_probe_imports_request(self):
+        """probe 里会用 request 取 action，只 import jsonify 会 NameError 500。"""
+        src = read("main_desktop.py")
+        i = src.find("def _api_self_fm_probe")
+        seg = src[i:i + 400]
+        self.assertIn("request as _rq", seg, "未导入 request")
+
+    def test_sim_route(self):
+        src = read("main_desktop.py")
+        self.assertIn("/api/_self/fenmiaozhen/upload_sim", src)
+
+    def test_probe_executes_fixed_script_only(self):
+        """自检接口只能跑服务端写死的脚本，不接受外部传 JS。"""
+        src = read("main_desktop.py")
+        i = src.find("def _api_self_fm_probe")
+        seg = src[i:i + 2600]
+        self.assertNotIn("get('js')", seg, "不应接受外部 js 参数")
+        self.assertNotIn('"js"', seg.split("script =")[0] if "script =" in seg else seg,
+                         "参数里不应有 js 字段")
+
 
 if __name__ == "__main__":
     unittest.main()

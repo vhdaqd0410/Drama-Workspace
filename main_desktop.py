@@ -1510,6 +1510,59 @@ def _register_quit_api(flask_app):
         return jsonify({"ok": bool(ok), "message": msg,
                         "path_copied": copied, "copy_path": copy_path if copied else ""})
 
+    # 分秒帧窗口自检（只读）：确认工具条/上传监控/JS 桥是否已注入。
+    # 安全：只执行服务端写死的检查脚本，不接受外部传入任意 JS。
+    @flask_app.route("/api/_self/fenmiaozhen/probe", methods=["POST"])
+    def _api_self_fm_probe():
+        try:
+            from flask import jsonify, request as _rq
+        except ImportError:
+            return '{"ok":false}', 500
+        w = _fm_window_ref[0]
+        if w is None:
+            return jsonify({"ok": False, "message": "窗口不存在"})
+        script = (
+            "(function(){return JSON.stringify({"
+            "bar: !!document.getElementById('__fm_bar'),"
+            "up: !!document.getElementById('__fm_up'),"
+            "hook: !!window.__fmUploadHook,"
+            "bridge: !!(window.pywebview && window.pywebview.api),"
+            "url: location.href"
+            "});})()"
+        )
+        # 可选：从可见页面侧真实发起一次进度回传（验证页面→Python 链路）
+        action = (_rq.get_json(silent=True) or {}).get("action")
+        sim_out = None
+        if action == "sim_report":
+            sim_js = (
+                "window.pywebview.api.upload_report("
+                "'{\"active\":1,\"loaded\":5242880,\"total\":20971520}'"
+                ").then(function(r){return JSON.stringify(r);})"
+            )
+            try:
+                sim_out = w.evaluate_js(sim_js)
+            except Exception as _se:
+                sim_out = "ERR " + str(_se)
+
+        try:
+            raw = w.evaluate_js(script)
+            return jsonify({"ok": True, "result": raw,
+                            "sim": sim_out,
+                            "upload_state": _fmup.snapshot(),
+                            "uploading": _fmup.is_uploading()})
+        except Exception as e:
+            return jsonify({"ok": False, "message": str(e)})
+
+    # 上传状态模拟（仅自检用：不写业务数据，只翻转瞬态状态机）
+    @flask_app.route("/api/_self/fenmiaozhen/upload_sim", methods=["POST"])
+    def _api_self_fm_upload_sim():
+        try:
+            from flask import jsonify, request as _rq
+        except ImportError:
+            return '{"ok":false}', 500
+        b = _rq.get_json(silent=True) or {}
+        return jsonify(_fmup.report(b.get("active"), b.get("loaded"), b.get("total")))
+
     # 关闭分秒帧窗口（不销毁主窗口）
     @flask_app.route("/api/_self/fenmiaozhen/close", methods=["POST"])
     def _api_self_fenmiaozhen_close():
