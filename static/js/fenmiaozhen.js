@@ -1,17 +1,20 @@
-// ===== 分秒帧板块（项目清单）=====
-// 为什么不用 iframe 内嵌：
-//   实测 iframe 里点登录必定跳系统浏览器 —— 跨域 iframe 的 window.open 会冒泡到顶层 WebView，
-//   而 pywebview 的处理是把新窗口交给系统浏览器。全局关掉该行为又会把主窗口 14 处
-//   window.open（质检报告下载等）一起带走。所以登录/上传统一走软件内的独立窗口
-//   （实测可正常登录，登录态持久化在 data/webview_profile）。
+// ===== 分秒帧板块（待办清单）=====
+// 业务口径（用户确定）：除二部以外的项目全部要传分秒帧。
+//   进行中（active_statuses）→ 列在最上面，未填链接的高亮提示补填。
+//   已完成 → 折叠区，默认收起。
 //
-// 本板块的职责：把「哪个项目对应哪个分秒帧链接」列成清单，
-// 一键打开独立窗口，并自动把成片目录复制到剪贴板，减少上传时的找路径成本。
+// 为什么不用 iframe：实测 iframe 里点登录必定跳系统浏览器（跨域 iframe 的 window.open
+// 冒泡到顶层 WebView，pywebview 把它交给 webbrowser.open）。全局改掉又会把主窗口 14 处
+// window.open 一起带走。所以登录/上传统一走软件内独立窗口（实测可正常登录，cookie 持久）。
 
 (function () {
   var state = {
-    items: [],        // [{name, url}]
+    active: [],
+    completed: [],
+    stats: {},
     keyword: '',
+    onlyMissing: false,
+    showCompleted: false,
     currentUrl: '',
     projectName: ''
   };
@@ -25,7 +28,6 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  // 只允许分秒帧域名
   function isFmUrl(url) {
     try {
       var u = new URL(url);
@@ -33,14 +35,40 @@
     } catch (e) { return false; }
   }
 
-  window.fmLoadList = async function () {
-    var wrap = el('fmListWrap');
-    if (wrap && !state.items.length) wrap.innerHTML = '<div class="fm-empty">正在加载…</div>';
+  // 部门是否被排除（与后端 exclude_dept_keywords 一致）
+  function deptExcluded(dept) {
+    var kw = (window._fmCfg && window._fmCfg.exclude_dept_keywords) || ['二部'];
+    var d = String(dept || '');
+    if (!d.trim()) return false;
+    for (var i = 0; i < kw.length; i++) {
+      if (kw[i] && d.indexOf(kw[i]) >= 0) return true;
+    }
+    return false;
+  }
+  window.fmDeptExcluded = deptExcluded;
+
+  async function ensureCfg() {
+    if (window._fmCfg) return window._fmCfg;
     try {
-      var d = await api('GET', '/api/fenmiaozhen/links');
-      state.items = (d && d.items) || [];
+      var d = await api('GET', '/api/fenmiaozhen/config');
+      if (d && d.ok) window._fmCfg = d;
+    } catch (e) {}
+    return window._fmCfg || {};
+  }
+
+  window.fmLoadList = async function () {
+    await ensureCfg();
+    var wrap = el('fmListWrap');
+    if (wrap && !state.active.length && !state.completed.length) {
+      wrap.innerHTML = '<div class="fm-empty">正在加载…</div>';
+    }
+    try {
+      var d = await api('GET', '/api/fenmiaozhen/board');
+      if (!d || !d.ok) throw new Error((d && d.msg) || '接口返回失败');
+      state.active = d.active || [];
+      state.completed = d.completed || [];
+      state.stats = d.stats || {};
     } catch (e) {
-      state.items = [];
       if (wrap) wrap.innerHTML = '<div class="fm-empty">加载失败: ' + esc(e.message) + '</div>';
       return;
     }
@@ -53,48 +81,103 @@
     window.fmRenderList();
   };
 
+  window.fmToggleOnlyMissing = function (chk) {
+    state.onlyMissing = !!(chk && chk.checked);
+    window.fmRenderList();
+  };
+
+  window.fmToggleCompleted = function () {
+    state.showCompleted = !state.showCompleted;
+    window.fmRenderList();
+  };
+
+  function rowHtml(it, isMissing) {
+    var nameArg = esc(JSON.stringify(it.name));
+    var cls = isMissing ? 'fm-row fm-row-missing' : 'fm-row';
+    var badge = isMissing
+      ? '<span class="fm-badge miss">未填链接</span>'
+      : '<span class="fm-badge ok">已配置</span>';
+    var ep = (it.total_episodes ? (it.current_episodes + '/' + it.total_episodes) : '');
+    return '<div class="' + cls + '">'
+      +   '<div class="fm-row-name" title="' + esc(it.name) + '">' + esc(it.name) + '</div>'
+      +   '<div class="fm-row-dept">' + esc((it.department || '').replace('AI漫剧', '')) + '</div>'
+      +   '<div class="fm-row-status">' + esc(it.custom_status || '') + '</div>'
+      +   '<div class="fm-row-ep">' + esc(ep) + '</div>'
+      +   badge
+      +   '<div class="fm-row-acts">'
+      +     (isMissing
+              ? '<button class="btn btn-sm btn-primary" onclick="fmSetLink(' + nameArg + ')">填写链接</button>'
+              : '<button class="btn btn-sm btn-primary" onclick="fmOpenFor(' + nameArg + ')">⧉ 打开</button>'
+                + '<button class="btn btn-sm" onclick="fmSetLink(' + nameArg + ')">改</button>')
+      +     '<button class="btn btn-sm" onclick="fmRemoveLink(' + nameArg + ')">移除</button>'
+      +   '</div>'
+      + '</div>';
+  }
+
   window.fmRenderList = function () {
     var wrap = el('fmListWrap');
     if (!wrap) return;
 
     var kw = state.keyword;
-    var list = state.items.filter(function (x) {
-      return !kw || String(x.name).toLowerCase().indexOf(kw) >= 0;
-    });
+    function match(x) {
+      if (!kw) return true;
+      return String(x.name).toLowerCase().indexOf(kw) >= 0
+          || String(x.department || '').toLowerCase().indexOf(kw) >= 0;
+    }
+
+    var act = state.active.filter(match);
+    if (state.onlyMissing) act = act.filter(function (x) { return !x.has_link; });
+    var done = state.completed.filter(match);
 
     var st = el('fmStatus');
-    if (st) st.textContent = '已配置 ' + state.items.length + ' 个项目' + (kw ? '（筛选 ' + list.length + '）' : '');
-
-    if (!list.length) {
-      wrap.innerHTML = '<div class="fm-empty">'
-        + '<div style="font-size:32px;margin-bottom:10px">🔗</div>'
-        + (state.items.length ? '没有匹配的项目' :
-           '还没有项目配置分秒帧链接<br><span style="opacity:.75">在项目卡片上点「🔗 分秒帧」即可设置</span>')
-        + '</div>';
-      return;
+    var s = state.stats || {};
+    if (st) {
+      st.textContent = '进行中 ' + (s.active || 0) + ' 个'
+        + (s.missing ? '（未填链接 ' + s.missing + ' 个）' : '')
+        + ' · 已完成 ' + (s.completed || 0) + ' 个';
     }
 
     var html = '';
-    list.forEach(function (it) {
-      var nameEsc = esc(it.name);
-      var nameArg = esc(JSON.stringify(it.name));
-      html += '<div class="fm-row">'
-        +   '<div class="fm-row-name" title="' + nameEsc + '">' + nameEsc + '</div>'
-        +   '<div class="fm-row-url" title="' + esc(it.url) + '">' + esc(it.url) + '</div>'
-        +   '<div class="fm-row-acts">'
-        +     '<button class="btn btn-sm btn-primary" onclick="fmOpenFor(' + nameArg + ')">⧉ 打开</button>'
-        +     '<button class="btn btn-sm" onclick="fmSetLink(' + nameArg + ')">改链接</button>'
-        +     '<button class="btn btn-sm" onclick="fmRemoveLink(' + nameArg + ')">移除</button>'
-        +   '</div>'
+
+    // 顶部工具条
+    html += '<div class="fm-tools">'
+      + '<label class="fm-chk"><input type="checkbox" id="fmOnlyMissing" '
+      + (state.onlyMissing ? 'checked' : '')
+      + ' onchange="fmToggleOnlyMissing(this)"> 只看未填链接</label>'
+      + '<span class="fm-tools-tip">除二部以外的项目都要传分秒帧</span>'
+      + '</div>';
+
+    // 进行中
+    html += '<div class="fm-sec-head">🟢 进行中（需传分秒帧）<span class="fm-sec-count">' + act.length + '</span></div>';
+    if (!act.length) {
+      html += '<div class="fm-empty-sm">'
+        + (state.active.length ? '没有匹配的项目' : '当前没有进行中的项目')
         + '</div>';
-    });
+    } else {
+      act.forEach(function (it) { html += rowHtml(it, !it.has_link); });
+    }
+
+    // 已完成（折叠）
+    html += '<div class="fm-sec-head fm-sec-fold" onclick="fmToggleCompleted()">'
+      + '<span class="fm-fold-arrow">' + (state.showCompleted ? '▼' : '▶') + '</span>'
+      + '✅ 已完成<span class="fm-sec-count">' + done.length + '</span>'
+      + '<span class="fm-sec-hint">点击' + (state.showCompleted ? '收起' : '展开') + '</span>'
+      + '</div>';
+    if (state.showCompleted) {
+      if (!done.length) {
+        html += '<div class="fm-empty-sm">没有已完成项目</div>';
+      } else {
+        done.forEach(function (it) { html += rowHtml(it, false); });
+      }
+    }
+
     wrap.innerHTML = html;
   };
 
   // 打开某个项目的分秒帧（独立窗口 + 复制成片目录）
   window.fmOpenFor = function (name) {
-    var it = state.items.filter(function (x) { return x.name === name; })[0];
-    if (!it) { toast('没有该项目的分秒帧链接', 'error'); return; }
+    var it = state.active.concat(state.completed).filter(function (x) { return x.name === name; })[0];
+    if (!it || !it.url) { window.fmSetLink(name); return; }
     state.currentUrl = it.url;
     state.projectName = name;
     var pn = el('fmProjName');
@@ -103,16 +186,21 @@
   };
 
   window.fmSetLink = async function (name) {
-    var it = state.items.filter(function (x) { return x.name === name; })[0];
-    var cur = it ? it.url : '';
-    var u = prompt('分秒帧链接（' + name + '）：', cur || 'https://app.mediatrack.cn/');
+    var all = state.active.concat(state.completed);
+    var cur = (all.filter(function (x) { return x.name === name; })[0] || {}).url || '';
+    var u = prompt('请输入「' + name + '」在分秒帧的审核链接：\n（打开分秒帧项目页后，复制地址栏网址）',
+                   cur || 'https://app.mediatrack.cn/');
     if (!u) return;
     u = u.trim();
-    if (!isFmUrl(u)) { toast('只允许分秒帧网址', 'error'); return; }
+    if (!isFmUrl(u)) { toast('只允许分秒帧网址（mediatrack.cn）', 'error'); return; }
     try {
       var r = await api('POST', '/api/fenmiaozhen/link/' + encodeURIComponent(name), { url: u });
-      if (r && r.ok) { toast('✅ 链接已保存', 'success'); window.fmLoadList(); }
-      else toast((r && r.msg) || '保存失败', 'error');
+      if (r && r.ok) {
+        toast('✅ 链接已保存', 'success');
+        window.fmLoadList();
+      } else {
+        toast((r && r.msg) || '保存失败', 'error');
+      }
     } catch (e) { toast('保存失败: ' + e.message, 'error'); }
   };
 
@@ -125,7 +213,7 @@
     } catch (e) { toast('移除失败: ' + e.message, 'error'); }
   };
 
-  // 打开软件内独立窗口（桌面版）；浏览器访问时直接新标签页
+  // 打开软件内独立窗口（桌面版）；浏览器访问时新标签页
   window.fmOpenWindow = function (url, project) {
     var target = url || state.currentUrl || 'https://app.mediatrack.cn/';
     var proj = project || state.projectName || '';
@@ -153,14 +241,10 @@
   };
 
   window.fmOpenInBrowser = function () {
-    var u = state.currentUrl || 'https://app.mediatrack.cn/';
-    window.open(u, '_blank');
+    window.open(state.currentUrl || 'https://app.mediatrack.cn/', '_blank');
   };
 
-  // 切到本 tab 时刷新清单
-  window.fmTabEnter = function () {
-    window.fmLoadList();
-  };
+  window.fmTabEnter = function () { window.fmLoadList(); };
 
   // 从项目卡片进来：确保有链接后直接开独立窗口
   window.fmOpenForProject = async function (name) {
@@ -172,7 +256,7 @@
     } catch (e) {}
 
     if (!url) {
-      var entered = prompt('🔗 请输入该项目在分秒帧的审核链接：', 'https://app.mediatrack.cn/');
+      var entered = prompt('🔗 请输入「' + name + '」在分秒帧的审核链接：', 'https://app.mediatrack.cn/');
       if (!entered) return false;
       entered = entered.trim();
       if (!isFmUrl(entered)) { toast('只允许分秒帧网址', 'error'); return false; }
@@ -193,7 +277,34 @@
     state.projectName = name;
     if (typeof switchTab === 'function') switchTab('fenmiaozhen');
     window.fmOpenWindow(url, name);
-    if (typeof window.fmLoadList === 'function') setTimeout(window.fmLoadList, 600);
+    setTimeout(window.fmLoadList, 800);
     return true;
+  };
+
+  // 给其他模块用：确保某项目有分秒帧链接（状态改「审核中」时调用）
+  // 返回 true=已有链接，false=用户取消
+  window.fmEnsureLink = async function (name) {
+    await ensureCfg();
+    try {
+      var d = await api('GET', '/api/fenmiaozhen/link/' + encodeURIComponent(name));
+      if (d && d.ok && d.has_link) return true;
+    } catch (e) {}
+    var entered = prompt('⚠️ 该项目要传分秒帧，但还没有分秒帧链接。\n\n'
+      + '请粘贴「' + name + '」在分秒帧的项目页网址：', 'https://app.mediatrack.cn/');
+    if (!entered) return false;
+    entered = entered.trim();
+    if (!isFmUrl(entered)) {
+      toast('只允许分秒帧网址（mediatrack.cn），链接未保存', 'error');
+      return false;
+    }
+    try {
+      var r = await api('POST', '/api/fenmiaozhen/link/' + encodeURIComponent(name), { url: entered });
+      if (r && r.ok) {
+        toast('✅ 分秒帧链接已保存', 'success');
+        return true;
+      }
+      toast((r && r.msg) || '保存失败', 'error');
+    } catch (e) { toast('保存失败: ' + e.message, 'error'); }
+    return false;
   };
 })();

@@ -137,6 +137,24 @@ async function onStatusChange(pname, sel){
       if(newStatus === '待提交审核' && typeof submitReview === 'function'){
         setTimeout(function(){ submitReview(pname); }, 300);
       }
+      // 状态进入审核环节（审核中/二审中/三审中…）：除二部外的项目都要传分秒帧，
+      // 没填链接就提示补填。"待提交审核"走上面的 submitReview 流程，不重复提示。
+      if(newStatus.indexOf('审') >= 0 && newStatus !== '待提交审核'){
+        var _p = (projects||[]).find(function(x){ return x.name === pname; });
+        var _dept = _p ? (_p.department || '') : '';
+        var _excluded = (typeof fmDeptExcluded === 'function')
+          ? fmDeptExcluded(_dept)
+          : (_dept.indexOf('二部') >= 0);   // 回退：与默认配置一致
+        if(!_excluded && typeof fmEnsureLink === 'function'){
+          setTimeout(function(){
+            fmEnsureLink(pname).then(function(had){
+              if(!had){
+                toast('⚠️ 该项目还没填分秒帧链接，可以稍后在「🔗 分秒帧」板块里补', 'warning', 6000);
+              }
+            });
+          }, 350);
+        }
+      }
     }else{
       toast('❌ 更新失败: ' + (r.message||''), 'error');
       // 失败回滚

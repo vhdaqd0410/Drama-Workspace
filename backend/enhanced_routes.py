@@ -1066,11 +1066,101 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         with open(_cp, 'r', encoding='utf-8') as _f:
             _cfg = _y.safe_load(_f) or {}
         fm = _cfg.get('fenmiaozhen', {}) or {}
+        excl, active_statuses = _fm_policy()
         return jsonify(
             ok=True,
             enabled_departments=fm.get('enabled_departments', []),
-            web_url=fm.get('web_url', 'https://www.mediatrack.cn/project/new'),
+            web_url=fm.get('web_url', 'https://app.mediatrack.cn/'),
+            exclude_dept_keywords=excl,
+            active_statuses=active_statuses,
         )
+
+    def _fm_policy():
+        """读分秒帧传送规则（部门排除关键词 + 进行中状态）。配置缺失用内置默认值。"""
+        try:
+            _cp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'config.yaml')
+            with open(_cp, 'r', encoding='utf-8') as _f:
+                _cfg = _y.safe_load(_f) or {}
+            fm = _cfg.get('fenmiaozhen', {}) or {}
+        except Exception:
+            fm = {}
+        excl = fm.get('exclude_dept_keywords')
+        if not isinstance(excl, list) or not excl:
+            excl = ['二部']
+        active = fm.get('active_statuses')
+        if not isinstance(active, list) or not active:
+            active = ['分集中', '剪辑中', '待提交审核', '审核中', '修改中',
+                      '待交付', '待质检', '质检中']
+        return [str(x) for x in excl], [str(x) for x in active]
+
+    def _fm_dept_excluded(dept):
+        """部门是否被排除（关键词命中即排除，空部门视为不排除）。"""
+        d = str(dept or '')
+        if not d.strip():
+            return False
+        excl, _ = _fm_policy()
+        return any(k and k in d for k in excl)
+
+    @app.route('/api/fenmiaozhen/board', methods=['GET'])
+    def fenmiaozhen_board():
+        """分秒帧待办清单：需传分秒帧的项目（进行中 / 已完成分组）。
+
+        用户口径：除二部以外的项目全部要传分秒帧。
+        默认只看「进行中」的项目（按 active_statuses 判定），已完成单独放折叠区。
+        """
+        links = _fm_load_links()
+        excl, active_statuses = _fm_policy()
+
+        try:
+            from backend.app import sync_engine as _se
+            all_projects = _se.db.get_all_projects() or []
+        except Exception as _e:
+            return jsonify(ok=False, msg='读取项目失败: %s' % _e), 500
+
+        active, completed = [], []
+        missing = 0
+        for p in all_projects:
+            # 只要制作部项目（有 source_root）
+            if not (p.get('source_root') or '').strip():
+                continue
+            dept = p.get('department') or ''
+            if any(k and k in dept for k in excl):
+                continue
+            status = (p.get('custom_status') or '').strip()
+            name = p.get('name') or ''
+            url = links.get(name, '') or ''
+            item = {
+                'name': name,
+                'department': dept,
+                'custom_status': status,
+                'has_link': bool(url),
+                'url': url,
+                'current_episodes': p.get('current_episodes') or 0,
+                'total_episodes': p.get('total_episodes') or 0,
+                'project_month': p.get('project_month') or '',
+            }
+            if status == '已完成':
+                completed.append(item)
+            elif (status in active_statuses) or ('审' in status):
+                # '审' 包含判定用于盖住二审中/三审中/四审中等动态状态，
+                # 否则那些项目会被漏出清单，造成漏传分秒帧。
+                active.append(item)
+                if not url:
+                    missing += 1
+
+        # 排序：未填链接优先，再按状态/项目名
+        active.sort(key=lambda x: (0 if not x['has_link'] else 1,
+                                   x['custom_status'] or '', x['name']))
+        completed.sort(key=lambda x: x['name'])
+
+        return jsonify(ok=True,
+                       active=active,
+                       completed=completed,
+                       stats={'active': len(active),
+                              'missing': missing,
+                              'completed': len(completed),
+                              'exclude_keywords': excl,
+                              'active_statuses': active_statuses})
 
     @app.route('/api/fenmiaozhen/links', methods=['GET'])
     def fenmiaozhen_all_links():
