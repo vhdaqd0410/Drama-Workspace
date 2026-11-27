@@ -90,38 +90,46 @@ class EpisodePanelTests(unittest.TestCase):
         self.assertIn("_open_fm_window(url, title, project)", seg, "路由未把项目传给窗口")
 
     def test_panel_button_injected(self):
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 9000]
+        seg = read("static/js/fm-inject.js")
         self.assertIn("📋 分集", seg, "工具条缺分集按钮")
-        self.assertIn("__fmToggleEpPanel", seg, "缺面板开关")
+        self.assertIn("__fm_btn_eps", seg, "缺分集按钮元素")
+        self.assertIn("togglePanel", seg, "缺面板开关")
 
     def test_panel_has_search(self):
         """要能按集号查询。"""
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 9000]
-        self.assertIn("__fm_ep_q", seg, "缺集号输入框")
-        self.assertIn("__fmRenderEp", seg, "缺渲染逻辑")
+        seg = read("static/js/fm-inject.js")
+        self.assertIn("__fm_q", seg, "缺查询输入框")
+        self.assertIn("render", seg, "缺渲染逻辑")
         self.assertIn("没有匹配的集号", seg, "查询无结果无提示")
 
     def test_panel_shows_editor(self):
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 9000]
+        seg = read("static/js/fm-inject.js")
         self.assertIn("editor", seg, "未展示剪辑师")
         self.assertIn("未分配", seg, "未处理未分配集")
 
     def test_panel_closable(self):
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 9000]
-        self.assertIn("__fm_ep_close", seg, "面板缺关闭按钮")
+        seg = read("static/js/fm-inject.js")
+        self.assertIn("__fm_close", seg, "面板缺关闭按钮")
 
     def test_probe_reports_eps(self):
         src = read("main_desktop.py")
         self.assertIn("hasEps", src, "自检未检查分集桥")
-        self.assertIn("epButton", src, "自检未检查分集按钮")
+        self.assertIn("barBtns", src, "自检未检查工具条按钮")
+
+    def test_probe_script_is_string(self):
+        """自检脚本必须是字符串；拼接里混入逗号会变 tuple，evaluate_js 直接报错。"""
+        import ast
+        src = read("main_desktop.py")
+        tree = ast.parse(src)
+        node = None
+        for f in ast.walk(tree):
+            if isinstance(f, ast.FunctionDef) and f.name == "_api_self_fm_probe":
+                for sub in ast.walk(f):
+                    if isinstance(sub, ast.Assign) and getattr(sub.targets[0], "id", "") == "script":
+                        node = sub.value
+                        break
+        self.assertIsNotNone(node, "未找到 script 赋值")
+        self.assertNotIsInstance(node, ast.Tuple, "script 被拼成了 tuple")
 
 
 if __name__ == "__main__":

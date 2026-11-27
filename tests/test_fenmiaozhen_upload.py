@@ -91,38 +91,41 @@ class UploadStateTests(unittest.TestCase):
 
 
 class InjectionTests(unittest.TestCase):
-    def test_hook_injected(self):
+    """注入脚本已抽到 static/js/fm-inject.js（便于校验与维护）。"""
+
+    def _inject(self):
+        return read("static/js/fm-inject.js")
+
+    def test_inject_file_used(self):
         src = read("main_desktop.py")
-        self.assertIn("_fm_upload_hook_js", src, "缺少上传监控注入")
-        self.assertIn("XMLHttpRequest.prototype.send", src, "未 hook XHR.send")
-        self.assertIn("upload.addEventListener('progress'", src, "未监听上传进度")
+        self.assertIn("fm-inject.js", src, "注入改为读文件")
+        self.assertIn("def _fm_inject_js", src)
+
+    def test_hook_injected(self):
+        seg = self._inject()
+        self.assertIn("XMLHttpRequest.prototype.send", seg, "未 hook XHR.send")
+        self.assertIn("upload.addEventListener('progress'", seg, "未监听上传进度")
 
     def test_threshold_filters_small_requests(self):
         """只统计 >1MB 的上传，避免保存评论等小接口干扰。"""
-        src = read("main_desktop.py")
-        i = src.find("_fm_upload_hook_js")
-        seg = src[i:i + 3200]
+        seg = self._inject()
         self.assertIn("1048576", seg, "缺少大小阈值，会把小请求当上传")
 
     def test_progress_ui(self):
-        src = read("main_desktop.py")
-        self.assertIn("_fm_progress_ui_js", src, "缺少进度显示")
-        self.assertIn("上传中", src, "缺少上传中提示文案")
+        seg = self._inject()
+        self.assertIn("__fm_up", seg, "缺少进度显示元素")
+        self.assertIn("⬆", seg, "缺少上传中提示文案")
 
     def test_toolbar_copy_and_open(self):
         """窗口内要有复制当前链接、打开链接两个功能。"""
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 5200]
-        self.assertIn("复制链接", seg, "缺少复制当前链接")
-        self.assertIn("打开链接", seg, "缺少打开链接")
+        seg = self._inject()
+        self.assertIn("__fm_btn_copy", seg, "缺少复制按钮")
+        self.assertIn("__fm_btn_jump", seg, "缺少跳转按钮")
         self.assertIn("copy_clipboard", seg, "复制未走 Python 桥")
 
     def test_open_link_limited_to_host(self):
         """页面内跳转也要限制域名，别被当成任意网址跳板。"""
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 6200]
+        seg = self._inject()
         self.assertIn("mediatrack", seg)
         self.assertIn("只支持", seg)
 

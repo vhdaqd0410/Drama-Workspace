@@ -55,10 +55,15 @@ class ClipboardImplTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "仅 Windows")
     def test_writes_and_reads_back(self):
         """真跑一次：写入 + 读回，验证 64 位句柄路径可用。"""
+        import re
         import time as _t
         src = read("main_desktop.py")
         i = src.find("def _set_clipboard")
-        seg = src[i:src.find("class _FmBridge")]
+        self.assertGreater(i, 0)
+        # 只取该函数本体，到下一个顶层定义为止
+        m = re.search(r"\ndef (?!_set_clipboard)", src[i + 10:])
+        j = (i + 10 + m.start()) if m else len(src)
+        seg = src[i:j]
         ns = {"ctypes": ctypes, "time": _t}
         exec(compile(seg, "setclip", "exec"), ns)
         fn = ns["_set_clipboard"]
@@ -106,18 +111,19 @@ class BridgeChainTests(unittest.TestCase):
 
     def test_frontend_bridge_timeout(self):
         """桥 Promise 偶尔不 resolve，前端要有超时兜底。"""
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 4200]
+        src = read("static/js/fm-inject.js")
+        i = src.find("function copyLink")
+        self.assertGreater(i, 0)
+        seg = src[i:i + 1600]
         self.assertIn("setTimeout", seg, "复制没有超时兜底")
         self.assertIn("1500", seg, "超时时长缺失")
 
     def test_frontend_falls_back_on_bridge_false(self):
         """桥明确返回 ok:false 时要换浏览器 API 再试，不能直接报失败。"""
-        src = read("main_desktop.py")
-        i = src.find("_fm_toolbar_js")
-        seg = src[i:i + 4600]
-        self.assertIn("__fmFallbackCopy", seg)
+        src = read("static/js/fm-inject.js")
+        i = src.find("function copyLink")
+        seg = src[i:i + 1800]
+        self.assertIn("fallbackCopy", seg)
 
 
 if __name__ == "__main__":

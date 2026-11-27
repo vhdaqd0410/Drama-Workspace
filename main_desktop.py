@@ -12,7 +12,7 @@
   • 通知事件（交付完成/失败）通过 SSE → Toast 推送
 """
 
-import os, sys, time, threading, ctypes, traceback
+import os, sys, time, threading, ctypes, traceback, re
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -356,12 +356,55 @@ def _fm_notify_upload_done(summary):
 _fm_project_ref = [""]
 
 
-def _fm_episodes(project_name):
+# 分秒帧链接文件（项目名 -> 审片页 URL），用于把分秒帧项目ID 反查回本地项目
+_FM_LINKS_FILE = os.path.join(BASE_DIR, "data", "fenmiaozhen_links.json")
+
+
+def _fm_links_index():
+    """分秒帧项目ID -> 本地项目名。
+
+    用户在分秒帧里可能跳到别的项目，那时窗口记住的项目名就不对了，
+    所以按当前页 URL 里的 /projects/<id> 反查本地项目更准。
+    """
+    try:
+        with open(_FM_LINKS_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f) or {}
+    except Exception:
+        return {}
+    idx = {}
+    for name, url in d.items():
+        m = re.search(r"/projects/(\d+)", str(url or ""))
+        if m:
+            idx[m.group(1)] = name
+    return idx
+
+
+def _fm_links_rev(project_name):
+    """本地项目名 -> 分秒帧项目ID（反查，用于回显）。"""
+    try:
+        with open(_FM_LINKS_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f) or {}
+    except Exception:
+        return ""
+    url = str(d.get(project_name) or "")
+    m = re.search(r"/projects/(\d+)", url)
+    return m.group(1) if m else ""
+
+
+def _fm_episodes(project_name="", fm_id=""):
     """取项目的分集→剪辑师映射，供分秒帧窗口内查询用。
 
     数据源与主页「查剪辑」一致：DB 的 episode_plan（{集号: 剪辑师}）。
+    fm_id 优先：分秒帧里跳到别的项目时，用当前页项目ID 更准。
     """
     name = (project_name or "").strip()
+    source = "project"
+    fid = (fm_id or "").strip()
+    if fid:
+        mapped = _fm_links_index().get(fid, "")
+        if mapped:
+            name = mapped
+            source = "fm_id"
     if not name:
         return {"ok": False, "message": "窗口未关联项目"}
     try:
@@ -399,6 +442,8 @@ def _fm_episodes(project_name):
     return {
         "ok": True,
         "project": name,
+        "fm_id": fid or _fm_links_rev(name),
+        "source": source,
         "department": proj.get("department") or "",
         "custom_status": proj.get("custom_status") or "",
         "total_episodes": proj.get("total_episodes") or 0,
@@ -411,10 +456,12 @@ def _fm_episodes(project_name):
 class _FmBridge:
     """分秒帧窗口的 JS 桥（只提供给该窗口，不影响主窗口）。"""
 
-    def get_episodes(self, project_name=""):
-        """窗口内「分集」面板调这里拿数据。不传项目名时用窗口当前关联的项目。"""
-        name = (project_name or _fm_project_ref[0] or "").strip()
-        return _fm_episodes(name)
+    def get_episodes(self, project_name="", fm_id=""):
+        """窗口内「分集」面板调这里拿数据。
+
+        project_name 不传时用窗口当前关联的项目；fm_id 优先（防跳项目后错位）。
+        """
+        return _fm_episodes(project_name or _fm_project_ref[0], fm_id)
 
     def copy_clipboard(self, text):
         """页面里点「复制链接」时调用：由 Python 写剪贴板，绕开浏览器权限限制。"""
@@ -431,360 +478,37 @@ class _FmBridge:
         return _fmup.report(d.get("active"), d.get("loaded"), d.get("total"))
 
 
-def _fm_toolbar_js():
-    """生成分秒帧页面内的浮动工具条（右下角，两个小按钮）。
+_FM_INJECT_PATH = os.path.join(BASE_DIR, "static", "js", "fm-inject.js")
 
-    为什么需要：独立窗口里没有地址栏，用户想复制当前页链接、或跳到另一个分秒帧页
-    只能切回工作台。这里在页面内加两个不抢眼的按钮解决。
-    风险控制：只用内联样式 + 最高 z-index + 纯图标胶囊，不敢碰页面布局；
-    每次页面加载（events.loaded）重新注入，避免整页刷新后工具条消失。
+
+def _fm_inject_js():
+    """读取分秒帧窗口的注入脚本（界面 + 上传监控）。
+
+    背景：这套代码原本是三引号字符串内嵌在本文件里的，界面长起来后
+    几乎没法维护，也做不了语法校验，所以抽成 static/js/fm-inject.js。
     """
-    return r"""
-(function(){
-  try{
-    if (document.getElementById('__fm_bar')) { return; }
-    var css = 'position:fixed;right:14px;bottom:14px;z-index:2147483647;'
-      + 'display:flex;flex-direction:column;gap:8px;align-items:flex-end;'
-      + 'font:12px/1.4 -apple-system,"Segoe UI",sans-serif;'
-      + 'opacity:.55;transition:opacity .18s';
-    var btnCss = 'display:flex;align-items:center;gap:5px;padding:7px 11px;'
-      + 'border-radius:18px;border:1px solid rgba(255,255,255,.18);'
-      + 'background:rgba(28,28,32,.88);color:#fff;cursor:pointer;'
-      + 'box-shadow:0 2px 10px rgba(0,0,0,.22);white-space:nowrap;'
-      + 'font:12px/1.4 -apple-system,"Segoe UI",sans-serif';
-    var wrap = document.createElement('div');
-    wrap.id = '__fm_bar';
-    wrap.style.cssText = css;
-    wrap.onmouseenter = function(){ wrap.style.opacity = '1'; };
-    wrap.onmouseleave = function(){ wrap.style.opacity = '.55'; };
-
-    function mk(text, title, fn){
-      var b = document.createElement('button');
-      b.textContent = text;
-      b.title = title;
-      b.style.cssText = btnCss;
-      b.onclick = fn;
-      return b;
-    }
-
-    // 复制当前页链接：优先走 Python 桥（最稳），再退到浏览器 API
-    wrap.appendChild(mk('🔗 复制链接', '复制当前页面链接（存回工作台用）', function(){
-      var u = location.href;
-
-      function __fmFallbackCopy(){
-        try{
-          if (navigator.clipboard && navigator.clipboard.writeText){
-            navigator.clipboard.writeText(u).then(function(){ __fmToast('已复制：' + u); },
-              function(){ __fmManualCopy(u); });
-          } else { __fmManualCopy(u); }
-        }catch(e){ __fmManualCopy(u); }
-      }
-      function __fmManualCopy(txt){
-        var ta = document.createElement('textarea');
-        ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
-        document.body.appendChild(ta); ta.select();
-        var ok = false;
-        try{ ok = document.execCommand('copy'); }catch(e){}
-        document.body.removeChild(ta);
-        __fmToast(ok ? '已复制：' + txt : '复制失败，请手动选中地址');
-      }
-
-      // 桥调用要加超时：pywebview 的 Promise 偶尔不 resolve，不能一直卡着不兜底
-      var called = false;
-      var timer = setTimeout(function(){
-        if (called) return;
-        called = true;
-        __fmFallbackCopy();
-      }, 1500);
-
-      try{
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_clipboard){
-          window.pywebview.api.copy_clipboard(u).then(function(r){
-            if (called) return;
-            called = true;
-            clearTimeout(timer);
-            if (r && r.ok) { __fmToast('已复制：' + u); }
-            else {
-              // 桥明确报失败 → 换浏览器 API 试一次，别再静默
-              __fmFallbackCopy();
-            }
-          }).catch(function(){
-            if (called) return;
-            called = true;
-            clearTimeout(timer);
-            __fmFallbackCopy();
-          });
-          return;
-        }
-      }catch(e){}
-      if (!called) { called = true; clearTimeout(timer); }
-      __fmFallbackCopy();
-    }));
-
-    // 打开分集面板：查看每集对应哪个剪辑师，方便核对要修改的集数
-    wrap.appendChild(mk('📋 分集', '查看该项目每集对应的剪辑师', function(){
-      __fmToggleEpPanel();
-    }));
-
-    // 打开另一个分秒帧链接（在当前窗口内跳转）
-    wrap.appendChild(mk('🧭 打开链接', '粘贴一个分秒帧链接并跳转', function(){
-      var cur = location.href || 'https://app.mediatrack.cn/';
-      var u = window.prompt('输入要打开的分秒帧链接（当前窗口内跳转）：', cur);
-      if (!u) return;
-      u = String(u).trim();
-      if (!u) return;
-      // 只接受分秒帧域名，避免被当成任意网址跳板
-      var ok = /^https?:\/\/([\w.-]+\.)?mediatrack\.cn(\/|$)/i.test(u);
-      if (!ok) { __fmToast('只支持 mediatrack.cn 的链接'); return; }
-      location.href = u;
-    }));
-
-    // 轻量提示（不依赖页面自己的 toast）
-    var tip = document.createElement('div');
-    tip.id = '__fm_tip';
-    tip.style.cssText = 'display:none;position:fixed;right:14px;bottom:96px;'
-      + 'z-index:2147483647;max-width:78vw;padding:9px 13px;border-radius:10px;'
-      + 'background:rgba(28,28,32,.93);color:#fff;font:12.5px/1.5 -apple-system,"Segoe UI",sans-serif;'
-      + 'box-shadow:0 4px 16px rgba(0,0,0,.28);word-break:break-all';
-    document.body.appendChild(wrap);
-    document.body.appendChild(tip);
-
-    window.__fmToast = function(msg){
-      try{
-        tip.textContent = msg;
-        tip.style.display = 'block';
-        clearTimeout(window.__fmTipTimer);
-        window.__fmTipTimer = setTimeout(function(){ tip.style.display = 'none'; }, 3200);
-      }catch(e){}
-    };
-
-    // ===== 分集面板：看每集是谁的，方便核对要修改的集数 =====
-    function __fmRenderEp(d, q){
-      var list = document.getElementById('__fm_ep_list');
-      if (!list) return;
-      var items = (d && d.items) || [];
-      var k = String(q || '').trim();
-      if (k) {
-        items = items.filter(function(x){ return String(x.ep).indexOf(k) >= 0; });
-      }
-      if (!items.length) {
-        list.innerHTML = '<div style="padding:16px;text-align:center;color:#999;font-size:12px">'
-          + (k ? '没有匹配的集号' : '该项目还没有分集分配记录') + '</div>';
-        return;
-      }
-      var rowCss = 'display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid #f7f7f7';
-      var html = '';
-      items.forEach(function(x){
-        var ed = x.editor || '';
-        var miss = !ed;
-        var hl = (k && String(x.ep).indexOf(k) === 0) ? ';background:#fff8e1' : '';
-        html += '<div style="' + rowCss + hl + '">'
-          +   '<span style="min-width:58px;color:#888;font-size:12px">第 ' + x.ep + ' 集</span>'
-          +   '<span style="flex:1;font-weight:' + (miss ? '400' : '600') + ';color:' + (miss ? '#bbb' : '#222') + '">'
-          +     (miss ? '未分配' : ed) + '</span>'
-          + '</div>';
-      });
-      list.innerHTML = html;
-    }
-
-    function __fmLoadEpisodes(){
-      var list = document.getElementById('__fm_ep_list');
-      var api = window.pywebview && window.pywebview.api;
-      if (!api || !api.get_episodes) {
-        if (list) list.innerHTML = '<div style="padding:16px;text-align:center;color:#999;font-size:12px">'
-          + '桥未就绪，请重试</div>';
-        return;
-      }
-      api.get_episodes('').then(function(d){
-        if (!d || !d.ok) {
-          var t0 = document.getElementById('__fm_ep_title');
-          if (t0) t0.textContent = '📋 分集';
-          if (list) list.innerHTML = '<div style="padding:16px;text-align:center;color:#999;font-size:12px">'
-            + ((d && d.message) || '未关联项目，从工作台点项目卡片打开分秒帧才会有分集') + '</div>';
-          return;
-        }
-        window.__fmEpData = d;
-        var t = document.getElementById('__fm_ep_title');
-        if (t) {
-          t.textContent = '📋 ' + (d.project || '') + ' · ' + (d.count || 0) + ' 集';
-          t.title = (d.project || '');
-        }
-        __fmRenderEp(d, '');
-        var q = document.getElementById('__fm_ep_q');
-        if (q && q.value) __fmRenderEp(d, q.value);
-      }).catch(function(e){
-        if (list) list.innerHTML = '<div style="padding:16px;text-align:center;color:#c00;font-size:12px">'
-          + '加载失败: ' + (e && e.message ? e.message : e) + '</div>';
-      });
-    }
-
-    window.__fmToggleEpPanel = function(){
-      var p = document.getElementById('__fm_ep_panel');
-      if (p) {
-        var showing = p.style.display !== 'none';
-        p.style.display = showing ? 'none' : 'flex';
-        if (!showing) { __fmLoadEpisodes(); }
-        return;
-      }
-      var panel = document.createElement('div');
-      panel.id = '__fm_ep_panel';
-      panel.style.cssText = 'position:fixed;right:14px;top:60px;bottom:112px;width:340px;'
-        + 'z-index:2147483647;background:#fff;border-radius:12px;'
-        + 'box-shadow:0 8px 32px rgba(0,0,0,.22);display:flex;flex-direction:column;'
-        + 'font:13px/1.5 -apple-system,"Segoe UI",sans-serif;overflow:hidden';
-      panel.innerHTML =
-          '<div style="padding:10px 12px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px">'
-        +   '<span id="__fm_ep_title" style="font-weight:600;flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📋 分集</span>'
-        +   '<button id="__fm_ep_close" style="border:0;background:transparent;cursor:pointer;font-size:15px;color:#999">✕</button>'
-        + '</div>'
-        + '<div style="padding:8px 12px;border-bottom:1px solid #f2f2f2">'
-        +   '<input id="__fm_ep_q" placeholder="输入集号查询，如 12" '
-        +   'style="width:100%;box-sizing:border-box;padding:6px 9px;border:1px solid #ddd;border-radius:8px;font:12.5px inherit;outline:none">'
-        + '</div>'
-        + '<div id="__fm_ep_list" style="flex:1;overflow:auto;padding:4px 0">'
-        +   '<div style="padding:16px;text-align:center;color:#999;font-size:12px">加载中…</div>'
-        + '</div>';
-      document.body.appendChild(panel);
-
-      panel.querySelector('#__fm_ep_close').onclick = function(){
-        panel.style.display = 'none';
-      };
-      var input = panel.querySelector('#__fm_ep_q');
-      input.oninput = function(){ __fmRenderEp(window.__fmEpData, this.value); };
-      __fmLoadEpisodes();
-    };
-  }catch(e){}
-})();
-"""
-
-
-def _fm_upload_hook_js():
-    """注入上传监控：hook XHR.upload.onprogress，把进度回传给 Python 并显示在工具条上。
-
-    为什么这么干：上传是分秒帧网页里的腾讯云 COS 分片上传，发生在 WebView2 内部，
-    宿主拿不到网络流。只能从页面 JS 侧 hook XMLHttpRequest。
-    过滤：只看 total > 1MB 的上传，避开保存评论/小 API 请求的干扰。
-    """
-    return r"""
-(function(){
-  try{
-    if (window.__fmUploadHook) { return; }
-    window.__fmUploadHook = true;
-
-    var active = {};       // id -> {loaded,total}
-    var grandLoaded = 0;   // 累计已传（用于完成后报总量）
-    var lastSent = 0;
-
-    function summary(){
-      var n = 0, loaded = 0, total = 0;
-      for (var k in active){
-        var a = active[k]; n++; loaded += a.loaded || 0; total += a.total || 0;
-      }
-      return { active: n, loaded: loaded, total: total };
-    }
-
-    function paint(){
-      var s = summary();
-      var el = document.getElementById('__fm_up');
-      if (!el) return;
-      if (s.active > 0){
-        var pct = s.total > 0 ? Math.floor(s.loaded * 100 / s.total) : 0;
-        el.style.display = 'block';
-        el.textContent = '⬆ 上传中 ' + (s.total > 0 ? pct + '%' : (s.loaded/1048576).toFixed(1)+'MB')
-          + '（' + s.active + ' 个任务）';
-      } else {
-        el.style.display = 'none';
-      }
-    }
-
-    function report(force){
-      var now = Date.now();
-      if (!force && now - lastSent < 400) return;   // 节流 400ms
-      lastSent = now;
-      var s = summary();
-      if (s.active > 0) grandLoaded = s.loaded;
-      if (window.pywebview && window.pywebview.api && window.pywebview.api.upload_report){
-        try{
-          window.pywebview.api.upload_report(JSON.stringify(s)).then(function(){}).catch(function(){});
-        }catch(e){}
-      }
-      paint();
-    }
-
-    var XO = XMLHttpRequest.prototype.open;
-    var XS = XMLHttpRequest.prototype.send;
-
-    XMLHttpRequest.prototype.open = function(method, url){
-      this.__fmUrl = String(url || '');
-      this.__fmId = 'u' + Math.random().toString(36).slice(2);
-      return XO.apply(this, arguments);
-    };
-
-    XMLHttpRequest.prototype.send = function(){
-      var xhr = this;
-      var id = xhr.__fmId;
-      try{
-        if (xhr.upload){
-          xhr.upload.addEventListener('progress', function(e){
-            // 只统计真实文件上传（>1MB），避开普通小接口
-            if (e && e.total && e.total > 1048576){
-              active[id] = { loaded: e.loaded || 0, total: e.total || 0 };
-              report(false);
-            }
-          });
-          xhr.upload.addEventListener('load', function(){
-            if (active[id]) { report(true); }
-          });
-        }
-        xhr.addEventListener('loadend', function(){
-          if (active[id]){ delete active[id]; report(true); }
-        });
-      }catch(e){}
-      return XS.apply(this, arguments);
-    };
-  }catch(e){}
-})();
-"""
-
-
-def _fm_progress_ui_js():
-    """工具条里的上传进度行（由 paint() 更新）。独立于 hook 注入，
-    这样即使 hook 已存在、重新加载后也能补上 UI 节点。"""
-    return r"""
-(function(){
-  try{
-    var bar = document.getElementById('__fm_bar');
-    if (!bar || document.getElementById('__fm_up')) { return; }
-    var up = document.createElement('div');
-    up.id = '__fm_up';
-    up.style.cssText = 'display:none;padding:6px 11px;border-radius:14px;'
-      + 'background:rgba(0,113,227,.92);color:#fff;font:12px/1.4 -apple-system,"Segoe UI",sans-serif;'
-      + 'box-shadow:0 2px 10px rgba(0,0,0,.22);white-space:nowrap;text-align:right';
-    bar.insertBefore(up, bar.firstChild);
-    if (window.__fmUploadHook) {
-      // 重新触发一次汇总（状态保留在 hook 内部）
-      try{ document.dispatchEvent(new Event('__fm_repaint')); }catch(e){}
-    }
-  }catch(e){}
-})();
-"""
+    try:
+        with open(_FM_INJECT_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        print(f"[fm] 读取注入脚本失败: {e}")
+        return ""
 
 
 def _inject_fm_toolbar(win):
-    """给分秒帧窗口注入浮动工具条 + 上传监控（每次页面加载都重新注入）。"""
+    """给分秒帧窗口注入界面脚本（每次页面加载都重新注入）。
+
+    整页刷新会重建 DOM，工具条和面板都会消失，所以绑 loaded 事件重注入；
+    SPA 内部路由不刷新，注入一次就长期有效。
+    """
     def _on_loaded(*_a, **_k):
+        js = _fm_inject_js()
+        if not js:
+            return
         try:
-            win.evaluate_js(_fm_toolbar_js())
+            win.evaluate_js(js)
         except Exception as _e:
-            print(f"[fm] 注入工具条失败: {_e}")
-        try:
-            win.evaluate_js(_fm_progress_ui_js())
-        except Exception:
-            pass
-        try:
-            win.evaluate_js(_fm_upload_hook_js())
-        except Exception as _e:
-            print(f"[fm] 注入上传监控失败: {_e}")
+            print(f"[fm] 注入界面脚本失败: {_e}")
 
     try:
         win.events.loaded += _on_loaded
@@ -792,6 +516,7 @@ def _inject_fm_toolbar(win):
     except Exception as _e:
         print(f"[fm] 绑定 loaded 失败: {_e}")
         return False
+
 
 
 def _open_fm_window(url, title="分秒帧", project=""):
@@ -1756,14 +1481,16 @@ def _register_quit_api(flask_app):
             return jsonify({"ok": False, "message": "窗口不存在"})
         script = (
             "(function(){return JSON.stringify({"
-            "bar: !!document.getElementById('__fm_bar'),"
+            "bars: !!document.getElementById('__fm_bar'),"
+            "barBtns: ['__fm_btn_eps','__fm_btn_copy','__fm_btn_jump'].map(function(i){return !!document.getElementById(i);}),"
+            "glassy: (function(){var b=document.getElementById('__fm_bar');"
+            "if(!b)return null;var cs=getComputedStyle(b);return cs.backdropFilter||cs.webkitBackdropFilter||'';})(),"
             "up: !!document.getElementById('__fm_up'),"
             "hook: !!window.__fmUploadHook,"
             "bridge: !!(window.pywebview && window.pywebview.api),"
             "apiKeys: Object.keys((window.pywebview && window.pywebview.api) || {}),"
             "hasCopy: !!(window.pywebview && window.pywebview.api && window.pywebview.api.copy_clipboard),"
             "hasEps: !!(window.pywebview && window.pywebview.api && window.pywebview.api.get_episodes),"
-            "epButton: typeof window.__fmToggleEpPanel === 'function',"
             "url: location.href"
             "});})()"
         )
@@ -1783,14 +1510,21 @@ def _register_quit_api(flask_app):
         elif action == "toggle_eps":
             # 模拟页面上点「分集」按钮，看面板是否真的渲染出数据
             try:
-                w.evaluate_js("window.__fmToggleEpPanel && window.__fmToggleEpPanel();")
-                time.sleep(1.4)
+                w.evaluate_js(
+                    "(function(){var b=document.getElementById('__fm_btn_eps');"
+                    "if(b){b.click();}else if(window.__FM_UI_READY__){}" 
+                    "if(!document.getElementById('__fm_panel')){"
+                    "var e=document.getElementById('__fm_btn_eps');if(e)e.click();}})()"
+                )
+                time.sleep(1.6)
                 sim_out = w.evaluate_js(
-                    "(function(){var p=document.getElementById('__fm_ep_panel');"
-                    "var l=document.getElementById('__fm_ep_list');"
-                    "var t=document.getElementById('__fm_ep_title');"
-                    "return JSON.stringify({panel:!!p,title:t?t.textContent:null,"
-                    "rows:l?l.children.length:0,text:l?l.textContent.slice(0,100):null});})()"
+                    "(function(){var p=document.getElementById('__fm_panel');"
+                    "var l=document.getElementById('__fm_list');"
+                    "var t=document.getElementById('__fm_title');"
+                    "var s=document.getElementById('__fm_sub');"
+                    "return JSON.stringify({panel:!!p,open:p?p.classList.contains('on'):false,"
+                    "title:t?t.textContent:null,sub:s?s.textContent:null,"
+                    "rows:l?l.children.length:0,text:l?l.textContent.slice(0,160):null});})()"
                 )
             except Exception as _se:
                 sim_out = "ERR " + str(_se)
