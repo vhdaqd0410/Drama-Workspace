@@ -125,6 +125,12 @@ async function onStatusChange(pname, sel){
       if(newStatus === '已完成'){
         window._lastStatusChanged = pname;   // 重排后高亮该项目
         await loadProjects();
+        // 已完成项目也要刷一次（确认最终集数），但仍静默，不与状态提示抢戏
+        if(typeof refreshProjectStatus === 'function'){
+          setTimeout(function(){
+            try{ refreshProjectStatus(pname, null, true); }catch(_){}
+          }, 260);
+        }
         return;
       }
       // 其它状态：同步更新内存中的状态值，然后重渲染（自动排序）
@@ -133,6 +139,12 @@ async function onStatusChange(pname, sel){
       if(target) target.custom_status = newStatus;
       (allSections||[]).forEach(sec => (sec.projects||[]).forEach(p => { if(p.name===pname) p.custom_status=newStatus; }));
       renderDashboard();
+      // 手动改完状态：自动跑一次“一键刷新进度”，让卡片上的进度/缺集立即反映新阶段
+      if(typeof refreshProjectStatus === 'function'){
+        setTimeout(function(){
+          try{ refreshProjectStatus(pname, null, true); }catch(_){}
+        }, 260);   // 等卡片重绘完再扫，否则更新不到新 DOM
+      }
       // 状态变为"待提交审核"：自动进入审核流程（二部批量回传 / 其他部门打开成片目录+分秒帧）
       if(newStatus === '待提交审核' && typeof submitReview === 'function'){
         setTimeout(function(){ submitReview(pname); }, 300);

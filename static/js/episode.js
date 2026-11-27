@@ -961,13 +961,14 @@ async function loadAllEpisodeSummary(){
 }
 
 // === 手动刷新单个项目 ===
-function refreshProjectStatus(name, btn){
+function refreshProjectStatus(name, btn, silent){
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 扫描中...'; }
-  fetchEpisodeStatus(name).then(function(data){
+  return fetchEpisodeStatus(name).then(function(data){
     updateCardEpisodeSummary(name, data);
-    toast('✅ ' + name + ' 进度已刷新', 'success');
+    if (!silent) toast('✅ ' + name + ' 进度已刷新', 'success');
+    return data;
   }).catch(function(err){
-    toast('❌ 刷新失败: ' + err.message, 'error');
+    if (!silent) toast('❌ 刷新失败: ' + err.message, 'error');
   }).finally(function(){
     if (btn) { btn.disabled = false; btn.textContent = '🔄 刷新'; }
   });
