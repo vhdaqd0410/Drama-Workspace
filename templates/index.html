@@ -41,6 +41,28 @@ a{color:var(--blue);text-decoration:none}
 .tab svg{width:16px;height:16px}
 .main{padding:24px 28px;min-height:calc(100vh - 110px)}
 .tab-panel{display:none;animation:fadeIn .2s ease}.tab-panel.active{display:block}
+/* === 状态右键菜单（按状态定位文件） === */
+.st-menu{position:fixed;z-index:var(--z-modal,9999);min-width:340px;max-width:520px;max-height:70vh;overflow:auto;background:#fff;border:1px solid var(--border,#e5e5ea);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18);padding:6px;font-size:13px;animation:stMenuIn .12s ease}
+@keyframes stMenuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.st-menu-head{padding:8px 10px 9px;border-bottom:1px solid #f0f2f5;margin-bottom:5px}
+.st-menu-title{font-size:12.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-menu-sub{font-size:11.5px;color:var(--text-sec);margin-top:3px}
+.st-menu-act{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--text)}
+.st-menu-act:hover{background:#eef5ff;color:var(--blue)}
+.st-menu-sec{display:flex;align-items:center;gap:6px;padding:9px 10px 5px;font-size:11px;font-weight:600;color:var(--text-sec);letter-spacing:.3px}
+.st-menu-item{padding:7px 10px 9px;border-radius:8px}
+.st-menu-item:hover{background:#fafbfc}
+.st-mi-top{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.st-mi-label{font-size:12.5px;font-weight:500;color:var(--text);white-space:nowrap}
+.st-mi-flag{font-size:10px;padding:1px 6px;border-radius:8px;white-space:nowrap}
+.st-mi-flag.ok{background:#e8f5e9;color:#2e7d32}
+.st-mi-flag.miss{background:#fdecea;color:#c5221f}
+.st-mi-path{font-size:11px;color:var(--text-sec);word-break:break-all;line-height:1.5;margin-bottom:6px;opacity:.9}
+.st-mi-btns{display:flex;gap:6px}
+.st-mi-btns button{font-size:11.5px;padding:3px 10px;border-radius:7px;border:1px solid var(--border,#dfe3e8);background:#fff;color:var(--text);cursor:pointer;font-family:inherit}
+.st-mi-btns button:hover{background:#eef5ff;border-color:#b9d6ff;color:var(--blue)}
+.st-menu-empty{padding:14px 10px;font-size:12px;color:var(--text-sec);text-align:center}
+
 /* === 分秒帧板块 === */
 .fm-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:12px}
 .fm-bar-left{display:flex;align-items:center;gap:8px}
@@ -1962,6 +1984,7 @@ window.onerror = function(msg, url, line, col, err){
 <script src="/static/js/preview.js?v=20260815m"></script>
 <script src="/static/js/nameplate.js?v=20260816"></script>
 <script src="/static/js/fenmiaozhen.js?v=20261124fm"></script>
+<script src="/static/js/status-menu.js?v=20261125sm"></script>
 <script src="/static/js/command-palette.js?v=20260816"></script>
 <script src="/static/js/backup.js?v=20260816"></script>
 <script src="/static/js/thumbnail.js?v=20260816"></script>

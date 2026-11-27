@@ -1228,6 +1228,123 @@ def _register_enhanced_routes(app, db, qa_engine=None, sync_engine=None):
         _fm_save_links(links)
         return jsonify(ok=True, url=url)
 
+    # ===========================
+    # 状态右键菜单：按状态定位文件
+    # ===========================
+    @app.route('/api/project/<path:name>/state_paths', methods=['POST'])
+    def project_state_paths(name):
+        """返回该项目在指定状态下最相关的目录清单（供状态按钮右键菜单用）。
+
+        body: { status }
+        返回 { ok, status, sections: [{title, items: [{label, path, exists}]}] }
+        目的：不同状态关心的目录不同，不能只给一个“项目根”。
+        """
+        body = request.get_json(silent=True) or {}
+        status = (body.get('status') or '').strip()
+        try:
+            from backend.app import sync_engine as _se
+        except Exception as _e:
+            return jsonify(ok=False, msg='引擎不可用: %s' % _e), 500
+
+        proj = _se.db.get_project(name) or {}
+        gp = (proj.get('group_path') or '').strip()
+        pp = (proj.get('production_path') or '').strip()
+
+        sections = []
+
+        def _item(label, path):
+            p = (path or '').strip()
+            return {'label': label, 'path': p,
+                    'exists': bool(p and _os.path.isdir(p))}
+
+        def _add(title, items):
+            items = [x for x in items if x.get('path')]
+            if items:
+                sections.append({'title': title, 'items': items})
+
+        # 交付目录名（如 000交付）
+        deliv_name = ''
+        try:
+            deliv_name = _se.get_delivery_folder_name(name) or ''
+        except Exception:
+            deliv_name = ''
+
+        # 组内NAS 成片目录（01上映单集版 等）
+        outs = []
+        if gp and _os.path.isdir(gp):
+            try:
+                outs = _se._find_output_dirs(gp, name) or []
+            except Exception:
+                outs = []
+        # 制作部成片目录（不能把组盘的路径当制作部用，否则标签与内容不符）
+        outs_prod = []
+        if pp and _os.path.isdir(pp):
+            try:
+                outs_prod = _se._find_output_dirs(pp, name) or []
+            except Exception:
+                outs_prod = []
+
+        group_deliv = _os.path.join(gp, deliv_name) if (gp and deliv_name) else ''
+        prod_deliv = _os.path.join(pp, deliv_name) if (pp and deliv_name) else ''
+
+        # ---- 按状态组织 ----
+        if status == '待交付':
+            _add('组内NAS 交付目录', [_item(deliv_name or '000交付', group_deliv)])
+            _add('组内NAS 成片目录', [_item(_os.path.basename(d), d) for d in outs])
+            _add('制作部交付目录', [_item(deliv_name or '000交付', prod_deliv)])
+            _add('组内NAS 项目根', [_item('项目根', gp)])
+
+        elif status == '修改中':
+            revs = []
+            try:
+                revs = _se.list_all_revision_folders(name) or []
+            except Exception:
+                revs = []
+            _add('组内NAS 修改目录',
+                 [_item(r.get('name') or '修改目录', r.get('path')) for r in revs])
+            try:
+                revs_d = _se.list_all_revision_folders_on_destination(name) or []
+            except Exception:
+                revs_d = []
+            _add('制作部修改目录',
+                 [_item(r.get('name') or '修改目录', r.get('path')) for r in revs_d])
+            _add('组内NAS 成片目录', [_item(_os.path.basename(d), d) for d in outs])
+            _add('组内NAS 项目根', [_item('项目根', gp)])
+
+        elif status and '审' in status:
+            # 审核中 / 二审中 / 三审中……：审的是成片，另外会用到分秒帧
+            _add('组内NAS 成片目录', [_item(_os.path.basename(d), d) for d in outs])
+            _add('制作部成片目录', [_item(_os.path.basename(d), d) for d in outs_prod])
+            _add('制作部项目根', [_item('制作部项目根', pp)])
+            _add('组内NAS 项目根', [_item('项目根', gp)])
+
+        elif status in ('剪辑中', '分集中'):
+            _add('制作部项目根', [_item('制作部项目根', pp)])
+            _add('制作部成片目录', [_item(_os.path.basename(d), d) for d in outs_prod])
+            _add('组内NAS 成片目录', [_item(_os.path.basename(d), d) for d in outs])
+            _add('组内NAS 项目根', [_item('项目根', gp)])
+
+        elif status == '已完成':
+            _add('组内NAS 交付目录', [_item(deliv_name or '000交付', group_deliv)])
+            _add('制作部交付目录', [_item(deliv_name or '000交付', prod_deliv)])
+            _add('组内NAS 项目根', [_item('项目根', gp)])
+
+        elif status in ('待质检', '质检中'):
+            _add('组内NAS 成片目录', [_item(_os.path.basename(d), d) for d in outs])
+            _add('组内NAS 交付目录', [_item(deliv_name or '000交付', group_deliv)])
+            _add('组内NAS 项目根', [_item('项目根', gp)])
+
+        else:
+            # 未设置状态等：给最基础的几个入口
+            _add('组内NAS 项目根', [_item('项目根', gp)])
+            _add('制作部项目根', [_item('制作部项目根', pp)])
+
+        if not sections:
+            return jsonify(ok=True, status=status, sections=[],
+                           msg='该项目没有可用的目录记录')
+
+        return jsonify(ok=True, status=status, sections=sections)
+
     # ============================================================
     # 分集导出到 Excel 模板（从独立分集程序搬过来）
     # ============================================================

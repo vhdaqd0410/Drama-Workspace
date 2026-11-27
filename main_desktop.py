@@ -1561,6 +1561,22 @@ def _register_quit_api(flask_app):
         return jsonify({"ok": bool(ok), "message": msg,
                         "path_copied": copied, "copy_path": copy_path if copied else ""})
 
+    # 通用剪贴板接口（桌面端专用）：前端 navigator.clipboard 在 WebView2 里不一定可用，
+    # 统一走后端写剪贴板，保证复制路径一定成功。
+    @flask_app.route("/api/_self/clipboard", methods=["POST"])
+    def _api_self_clipboard():
+        try:
+            from flask import jsonify, request as _rq
+        except ImportError:
+            return '{"ok":false}', 500
+        # 只允许本机调用（服务监听 0.0.0.0，避免局域网其他机器往这台机器塞剪贴板）
+        rip = (_rq.remote_addr or "").strip()
+        if rip not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify({"ok": False, "message": "仅限本机调用"}), 403
+        text = ((_rq.get_json(silent=True) or {}).get("text") or "")
+        ok = _set_clipboard(text)
+        return jsonify({"ok": bool(ok), "length": len(str(text))})
+
     # 分秒帧窗口自检（只读）：确认工具条/上传监控/JS 桥是否已注入。
     # 安全：只执行服务端写死的检查脚本，不接受外部传入任意 JS。
     @flask_app.route("/api/_self/fenmiaozhen/probe", methods=["POST"])

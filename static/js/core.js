@@ -1343,7 +1343,7 @@ function projectCardHTML(p){
   const optsHtml = WF_STATUS_OPTIONS.map(o =>
     `<option value="${o.v}" ${o.v===cur?'selected':''}>${o.label}</option>`
   ).join('');
-  return `<select class="badge editable-badge ${badge.cls}" onchange="onStatusChange('${jsq(p.name)}', this)" title="点击修改项目状态">${optsHtml}</select>`;
+  return `<select class="badge editable-badge ${badge.cls}" onchange="onStatusChange('${jsq(p.name)}', this)" oncontextmenu="return statusContextMenu(event, this, '${jsq(p.name)}')" title="左键改状态；右键按当前状态定位文件">${optsHtml}</select>`;
 })()}</div>
     </div>
     ${workflowHTML(p.custom_status)}
