@@ -463,6 +463,54 @@ class _FmBridge:
         """
         return _fm_episodes(project_name or _fm_project_ref[0], fm_id)
 
+    def search_projects(self, keyword="", limit=30):
+        """按项目名模糊搜索，供窗口内「换项目」用。
+
+        用户不需要知道分秒帧项目ID，直接搜项目名就行。
+        排序：制作中的排前面（状态非空且非已完成），已完成排后面。
+        """
+        try:
+            from backend.app import sync_engine as _se
+            rows = _se.db.get_all_projects() or []
+        except Exception as e:
+            return {"ok": False, "message": "读取项目失败: %s" % e}
+
+        k = (keyword or "").strip().lower()
+        try:
+            limit = max(1, min(int(limit or 30), 100))
+        except Exception:
+            limit = 30
+
+        def _rank(p):
+            st = (p.get("custom_status") or "").strip()
+            if st and st != "已完成":
+                return 0          # 制作中
+            if not st:
+                return 1          # 未设状态
+            return 2              # 已完成
+
+        out = []
+        for p in rows:
+            name = p.get("name") or ""
+            if not name:
+                continue
+            if k and k not in name.lower():
+                continue
+            out.append({
+                "name": name,
+                "department": p.get("department") or "",
+                "custom_status": (p.get("custom_status") or "").strip(),
+                "total_episodes": p.get("total_episodes") or 0,
+                "current_episodes": p.get("current_episodes") or 0,
+                "_rank": _rank(p),
+            })
+
+        out.sort(key=lambda x: (x["_rank"], x["name"]))
+        for x in out:
+            x.pop("_rank", None)
+        return {"ok": True, "count": len(out), "items": out[:limit],
+                "truncated": len(out) > limit}
+
     def copy_clipboard(self, text):
         """页面里点「复制链接」时调用：由 Python 写剪贴板，绕开浏览器权限限制。"""
         ok = _set_clipboard(text)
@@ -1187,6 +1235,7 @@ def _run_global_hotkey():
         # 热键 ID
         HOTKEY_ID_WAKE = 0x5E11
         HOTKEY_ID_SEARCH = 0x5E12
+        HOTKEY_ID_FM = 0x5E13
 
         # 全局唤醒热键（配置 wakeup_shortcut，否则默认候选）
         wake = _register_one_hotkey(user32, HOTKEY_ID_WAKE, 'wakeup_shortcut',
@@ -1211,6 +1260,20 @@ def _run_global_hotkey():
         else:
             print("[hotkey] 全局搜索热键注册失败（可能被占用）")
 
+        # 分秒帧窗口热键（配置 fenmiaozhen_shortcut，否则默认候选）
+        fm_candidates = [
+            ("Ctrl+Alt+F", _MOD_ALT | _MOD_CTRL, 0x46),   # F
+            ("Ctrl+Shift+F", _MOD_CTRL | _MOD_SHIFT, 0x46),
+            ("Ctrl+Alt+M", _MOD_ALT | _MOD_CTRL, 0x4D),   # M
+            ("Alt+F2", _MOD_ALT, 0x71),                    # F2
+        ]
+        fmhk = _register_one_hotkey(user32, HOTKEY_ID_FM, 'fenmiaozhen_shortcut',
+                                    fm_candidates, '分秒帧窗口')
+        if fmhk:
+            print(f"[hotkey] 分秒帧窗口热键已注册: {fmhk[0]}")
+        else:
+            print("[hotkey] 分秒帧窗口热键注册失败（可能被占用）")
+
         # 最小消息循环，等待 WM_HOTKEY
         msg = wintypes.MSG()
         WM_HOTKEY = 0x0312
@@ -1232,10 +1295,36 @@ def _run_global_hotkey():
                         _trigger_global_search()
                     except Exception:
                         pass
+                elif wparam == HOTKEY_ID_FM and fmhk:
+                    print(f"[hotkey] {fmhk[0]} 按下，打开分秒帧窗口")
+                    try:
+                        _trigger_fm_window()
+                    except Exception:
+                        pass
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
     except Exception as e:
         print(f"[hotkey] 全局热键线程异常: {e}")
+
+
+def _trigger_fm_window():
+    """全局快捷键：打开/唤回分秒帧窗口。
+
+    已开着就只唤回，不重新 load_url —— 否则会把用户正在看的项目页跳回首页。
+    """
+    try:
+        w = _fm_window_ref[0]
+        if _fm_window_alive(w):
+            _show_fm_window()
+            print("[fm] 快捷键唤回已有分秒帧窗口")
+            return
+        ok, msg = _open_fm_window("https://app.mediatrack.cn/", "分秒帧")
+        if ok:
+            print("[fm] 快捷键已打开分秒帧窗口")
+        else:
+            print(f"[fm] 快捷键打开失败: {msg}")
+    except Exception as e:
+        print(f"[fm] 快捷键异常: {e}")
 
 
 def _trigger_global_search():
@@ -1496,8 +1585,15 @@ def _register_quit_api(flask_app):
         )
         # 可选：从可见页面侧真实发起一次进度回传（验证页面→Python 链路）
         action = (_rq.get_json(silent=True) or {}).get("action")
+        _body = _rq.get_json(silent=True) or {}
         sim_out = None
-        if action == "sim_report":
+        if action == "proj_search":
+            # 验证项目模糊搜索（制作中优先）
+            try:
+                sim_out = _FmBridge().search_projects(_body.get("kw") or "", 12)
+            except Exception as _se:
+                sim_out = {"ok": False, "message": str(_se)}
+        elif action == "sim_report":
             sim_js = (
                 "window.pywebview.api.upload_report("
                 "'{\"active\":1,\"loaded\":5242880,\"total\":20971520}'"

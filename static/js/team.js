@@ -275,10 +275,14 @@ function _saveRecordedShortcut(type, shortcut){
 
 function clearKeyRecord(type){
   var inputId = type === 'global' ? 'cfgGlobalSearchShortcut'
-    : type === 'wakeup' ? 'cfgWakeupShortcut' : 'cfgSearchShortcut';
+    : type === 'wakeup' ? 'cfgWakeupShortcut'
+    : type === 'fm' ? 'cfgFmShortcut' : 'cfgSearchShortcut';
   var settingKey = type === 'global' ? 'global_search_shortcut'
-    : type === 'wakeup' ? 'wakeup_shortcut' : 'search_shortcut';
-  var label = type === 'global' ? '全局搜索' : type === 'wakeup' ? '全局唤醒' : '页面内搜索';
+    : type === 'wakeup' ? 'wakeup_shortcut'
+    : type === 'fm' ? 'fenmiaozhen_shortcut' : 'search_shortcut';
+  var label = type === 'global' ? '全局搜索'
+    : type === 'wakeup' ? '全局唤醒'
+    : type === 'fm' ? '分秒帧窗口' : '页面内搜索';
   var input = document.getElementById(inputId);
   if(input) input.value = '';
   var body = {}; body[settingKey] = '';

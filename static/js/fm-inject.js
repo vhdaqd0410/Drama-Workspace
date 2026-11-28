@@ -8,7 +8,7 @@
 // 设计要点：
 //   - 毛玻璃浮层，右下角常驻，默认半透明、hover 变实，尽量不挡分秒帧自己的控件
 //   - 分集按「剪辑师 + 集号区间」聚合展示（第 3-6 集），不是一集一行
-//   - 搜索框一个输入口，自动识别：集号 / 人名 / 分秒帧项目ID
+//   - 搜索框一个输入口，自动识别：集号 / 人名；另可切到「换项目」按项目名模糊搜
 //   - 复制链接与跳转都是自建浮层，不用 window.prompt（WebView2 里样式与可用性都不稳）
 
 (function () {
@@ -30,11 +30,14 @@
   // ============ 状态 ============
   var S = {
     data: null,          // 后端返回的分集数据
-    q: '',               // 当前搜索词
+    q: '',               // 当前搜索词（分集视图）
     loading: false,
     panelOpen: false,
     jumpOpen: false,
-    lastFmId: ''         // 上次按项目ID查询的ID（防重复请求）
+    view: 'eps',         // 'eps' 分集视图 | 'proj' 项目搜索视图
+    projItems: [],       // 项目搜索结果
+    projQ: '',
+    lastUrlId: ''        // 上一次看到的 URL 里的项目ID（用于自动跟随）
   };
 
   // ============ 工具 ============
@@ -100,6 +103,19 @@
       '.__fm_x{border:0;background:transparent;cursor:pointer;font-size:15px;color:#9ca3af;',
       'padding:2px 4px;border-radius:8px;line-height:1}',
       '.__fm_x:hover{background:rgba(0,0,0,.06);color:#374151}',
+      '.__fm_mini{border:0;background:rgba(0,113,227,.1);color:#0071e3;cursor:pointer;',
+      'font:11.5px/1 inherit;padding:5px 9px;border-radius:8px;white-space:nowrap;font-weight:600}',
+      '.__fm_mini:hover{background:rgba(0,113,227,.18)}',
+      '.__fm_view{display:flex;flex-direction:column;flex:1;min-height:0}',
+
+      '.__fm_prow{padding:9px 14px;border-bottom:1px solid rgba(0,0,0,.045);cursor:pointer;transition:background .12s}',
+      '.__fm_prow:hover{background:rgba(0,113,227,.08)}',
+      '.__fm_pname{font-size:12.5px;font-weight:600;color:#111827;overflow:hidden;',
+      'text-overflow:ellipsis;white-space:nowrap}',
+      '.__fm_pmeta{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}',
+      '.__fm_ptag{font-size:10.5px;padding:1px 7px;border-radius:8px;',
+      'background:rgba(255,149,0,.14);color:#c2410c;white-space:nowrap}',
+      '.__fm_ptag.ghost{background:rgba(0,0,0,.05);color:#6b7280}',
 
       '.__fm_search{padding:9px 12px;border-bottom:1px solid rgba(0,0,0,.06)}',
       '.__fm_input{width:100%;box-sizing:border-box;padding:8px 11px;border-radius:10px;',
@@ -261,7 +277,6 @@
       if (d.count) { bits.push(d.count + ' 集有分配'); }
       if (d.department) { bits.push(d.department.replace('AI漫剧', '')); }
       if (d.custom_status) { bits.push(d.custom_status); }
-      if (d.fm_id) { bits.push('ID ' + d.fm_id); }
       if (s) { s.textContent = bits.join(' · '); }
     } else {
       t.textContent = '分集';
@@ -270,7 +285,7 @@
   }
 
   // ============ 数据 ============
-  function loadEpisodes(fmId) {
+  function loadEpisodes(fmId, projectName) {
     var api = window.pywebview && window.pywebview.api;
     var list = el('__fm_list');
     if (!api || !api.get_episodes) {
@@ -281,10 +296,11 @@
     S.loading = true;
     if (list) { list.innerHTML = '<div class="__fm_empty">加载中…</div>'; }
 
-    // 优先用当前页面 URL 里的项目ID，用户跳到别的项目也能对上
-    var id = fmId !== undefined ? fmId : currentFmId();
+    // 不传 projectName 时优先后台用当前页面 URL 的项目ID 反查（用户无需知道 ID）
+    var id = (fmId !== undefined) ? fmId : currentFmId();
+    var pname = projectName || '';
 
-    api.get_episodes('', id || '').then(function (d) {
+    api.get_episodes(pname, id || '').then(function (d) {
       S.loading = false;
       S.data = d;
       setHead(d);
@@ -295,6 +311,116 @@
       setHead(null);
       render();
     });
+  }
+
+  // 项目搜索
+  function searchProjects(kw) {
+    var api = window.pywebview && window.pywebview.api;
+    var box = el('__fm_projlist');
+    if (!api || !api.search_projects) {
+      if (box) { box.innerHTML = '<div class="__fm_empty">桥未就绪</div>'; }
+      return;
+    }
+    if (box) { box.innerHTML = '<div class="__fm_empty">搜索中…</div>'; }
+    api.search_projects(kw || '', 40).then(function (d) {
+      S.projItems = (d && d.items) || [];
+      renderProjects(d);
+    }).catch(function (e) {
+      if (box) { box.innerHTML = '<div class="__fm_empty">搜索失败: ' + (e && e.message ? e.message : e) + '</div>'; }
+    });
+  }
+
+  function renderProjects(d) {
+    var box = el('__fm_projlist');
+    if (!box) { return; }
+    var items = S.projItems || [];
+    if (!items.length) {
+      box.innerHTML = '<div class="__fm_empty">没有匹配的项目</div>';
+      return;
+    }
+    var html = '';
+    items.forEach(function (p, idx) {
+      var st = p.custom_status || '未设置';
+      var ep = p.total_episodes ? (p.current_episodes + '/' + p.total_episodes + ' 集') : '';
+      html += '<div class="__fm_prow" data-idx="' + idx + '">'
+        +   '<div class="__fm_pname">' + esc(p.name) + '</div>'
+        +   '<div class="__fm_pmeta">'
+        +     '<span class="__fm_ptag">' + esc(st) + '</span>'
+        +     (p.department ? '<span class="__fm_ptag ghost">' + esc(String(p.department).replace('AI漫剧', '')) + '</span>' : '')
+        +     (ep ? '<span class="__fm_ptag ghost">' + esc(ep) + '</span>' : '')
+        +   '</div>'
+        + '</div>';
+    });
+    box.innerHTML = html;
+    // 事件绑定（避免拼 onclick 时的转义风险）
+    var rows = box.querySelectorAll('.__fm_prow');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].onclick = function () {
+        var idx = parseInt(this.getAttribute('data-idx'), 10);
+        var p = S.projItems[idx];
+        if (!p) { return; }
+        setView('eps');
+        loadEpisodes('', p.name);   // 直接按项目名查，不依赖分秒帧ID
+        toast('已切到：' + p.name);
+      };
+    }
+  }
+
+  // 视图切换：分集 / 项目搜索
+  function setView(v) {
+    S.view = v;
+    var epsBox = el('__fm_view_eps');
+    var projBox = el('__fm_view_proj');
+    var btn = el('__fm_switch');
+    if (epsBox) { epsBox.style.display = (v === 'eps') ? '' : 'none'; }
+    if (projBox) { projBox.style.display = (v === 'proj') ? '' : 'none'; }
+    if (btn) { btn.textContent = (v === 'proj') ? '↩ 返回' : '⇄ 换项目'; }
+    var q = el('__fm_q');
+    if (q) {
+      q.value = '';
+      q.placeholder = (v === 'proj') ? '输入项目名模糊搜索' : '集号 / 人名';
+      try { q.focus(); } catch (e) {}
+    }
+    var hint = el('__fm_hint');
+    if (hint) {
+      hint.textContent = (v === 'proj')
+        ? '搜项目名（制作中的排前面），点一行就看它的分集'
+        : '输入 12 查集号；输入姓名查该人所有集；在分秒帧里切项目会自动跟随';
+    }
+    S.q = '';
+    S.projQ = '';
+    if (v === 'proj') {
+      searchProjects('');
+    }
+  }
+
+  // 自动跟随：分秒帧内切项目（Next.js 走 history API）也要换数据
+  function hookLocation() {
+    if (window.__fmLocHooked) { return; }
+    window.__fmLocHooked = true;
+
+    function onChange() {
+      var id = currentFmId();
+      if (id === S.lastUrlId) { return; }
+      S.lastUrlId = id;
+      if (S.panelOpen && S.view === 'eps') {
+        loadEpisodes();   // 传 undefined → 内部重新读当前页项目ID
+      }
+    }
+
+    ['pushState', 'replaceState'].forEach(function (m) {
+      var orig = history[m];
+      if (typeof orig !== 'function') { return; }
+      history[m] = function () {
+        var r = orig.apply(this, arguments);
+        setTimeout(onChange, 80);
+        return r;
+      };
+    });
+    window.addEventListener('popstate', function () { setTimeout(onChange, 80); });
+    window.addEventListener('hashchange', function () { setTimeout(onChange, 80); });
+    // 兜底：有些框架不走 history API，低频轮询
+    setInterval(onChange, 1500);
   }
 
   // ============ 分集面板 ============
@@ -308,40 +434,44 @@
       +     '<div class="__fm_title" id="__fm_title">分集</div>'
       +     '<div class="__fm_sub" id="__fm_sub"></div>'
       +   '</div>'
+      +   '<button class="__fm_mini" id="__fm_switch">⇄ 换项目</button>'
       +   '<button class="__fm_x" id="__fm_close">✕</button>'
       + '</div>'
       + '<div class="__fm_search">'
-      +   '<input class="__fm_input" id="__fm_q" placeholder="集号 / 人名 / 分秒帧项目ID">'
-      +   '<div class="__fm_hint">输入 12 查集号；输入姓名查该人所有集；输入项目ID（长数字）切换项目</div>'
+      +   '<input class="__fm_input" id="__fm_q" placeholder="集号 / 人名">'
+      +   '<div class="__fm_hint" id="__fm_hint">输入 12 查集号；输入姓名查该人所有集</div>'
       + '</div>'
-      + '<div class="__fm_list" id="__fm_list"></div>';
+      + '<div class="__fm_view" id="__fm_view_eps">'
+      +   '<div class="__fm_list" id="__fm_list"></div>'
+      + '</div>'
+      + '<div class="__fm_view" id="__fm_view_proj" style="display:none;flex:1;min-height:0">'
+      +   '<div class="__fm_list" id="__fm_projlist"></div>'
+      + '</div>';
     document.body.appendChild(p);
 
     p.querySelector('#__fm_close').onclick = function () { togglePanel(false); };
+    p.querySelector('#__fm_switch').onclick = function () {
+      setView(S.view === 'proj' ? 'eps' : 'proj');
+    };
 
     var input = p.querySelector('#__fm_q');
     var timer = null;
     input.oninput = function () {
       var v = this.value;
-      S.q = v;
-      // 长数字视为分秒帧项目ID：防抖后切换数据源
-      if (/^\d{7,}$/.test(String(v).trim())) {
+      if (S.view === 'proj') {
+        S.projQ = v;
         clearTimeout(timer);
-        var id = String(v).trim();
-        timer = setTimeout(function () {
-          if (S.lastFmId === id) { return; }
-          S.lastFmId = id;
-          loadEpisodes(id);
-        }, 420);
+        timer = setTimeout(function () { searchProjects(S.projQ); }, 280);
         return;
       }
+      S.q = v;
       render();
     };
     input.onkeydown = function (e) {
-      if (e.key === 'Enter' && /^\d{7,}$/.test(String(this.value).trim())) {
+      if (e.key !== 'Enter') { return; }
+      if (S.view === 'proj') {
         clearTimeout(timer);
-        S.lastFmId = String(this.value).trim();
-        loadEpisodes(S.lastFmId);
+        searchProjects(this.value);
       }
     };
   }
@@ -357,10 +487,8 @@
       if (btn) { btn.classList.add('on'); }
       S.panelOpen = true;
       // 每次打开都重新取，跟着当前页面项目走
-      S.lastFmId = '';
-      var q = el('__fm_q');
-      if (q) { q.value = ''; }
-      S.q = '';
+      S.lastUrlId = currentFmId();
+      setView('eps');
       loadEpisodes();
     } else {
       p.classList.remove('on');
@@ -566,4 +694,5 @@
   injectStyle();
   buildBar();
   hookUpload();
+  hookLocation();
 })();

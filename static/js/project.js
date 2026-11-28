@@ -107,6 +107,29 @@ async function loadProjects(){
   }finally{ _projectsLoading = false; }
 }
 async function scanProjects(){try{toast('正在扫描...','info');const r=await api('POST','/api/scan');toast((r&&r.message)||'扫描完成','success');await loadProjects()}catch(e){toast('扫描失败: '+e.message,'error')}}
+
+// 模拟点一下卡片上的「刷新进度」按钮（按项目名定位卡片，再找那个按钮）
+// 返回 true 表示真的点到了；找不到时调用方回退到直接调函数。
+function simulateRefreshButton(projectName){
+  try{
+    var cards = document.querySelectorAll('.card');
+    for(var i=0;i<cards.length;i++){
+      var tn = cards[i].querySelector('.card-title-name');
+      if(!tn) continue;
+      var nm = tn.getAttribute('data-project-name') || tn.textContent;
+      if(nm !== projectName) continue;
+      var btns = cards[i].querySelectorAll('button');
+      for(var j=0;j<btns.length;j++){
+        var oc = btns[j].getAttribute('onclick') || '';
+        if(oc.indexOf('refreshProjectStatus') >= 0){
+          btns[j].click();
+          return true;
+        }
+      }
+    }
+  }catch(_){}
+  return false;
+}
 async function onStatusChange(pname, sel){
   const newStatus = sel.value;
   const pnameEsc = pname.replace(/'/g,"\\'");
@@ -125,12 +148,14 @@ async function onStatusChange(pname, sel){
       if(newStatus === '已完成'){
         window._lastStatusChanged = pname;   // 重排后高亮该项目
         await loadProjects();
-        // 已完成项目也要刷一次（确认最终集数），但仍静默，不与状态提示抢戏
-        if(typeof refreshProjectStatus === 'function'){
-          setTimeout(function(){
-            try{ refreshProjectStatus(pname, null, true); }catch(_){}
-          }, 260);
-        }
+        // 已完成项目也刷一次（确认最终集数），同样用模拟点按钮
+        setTimeout(function(){
+          try{
+            if(!simulateRefreshButton(pname)){
+              if(typeof refreshProjectStatus === 'function') refreshProjectStatus(pname, null, true);
+            }
+          }catch(_){}
+        }, 420);
         return;
       }
       // 其它状态：同步更新内存中的状态值，然后重渲染（自动排序）
@@ -139,12 +164,17 @@ async function onStatusChange(pname, sel){
       if(target) target.custom_status = newStatus;
       (allSections||[]).forEach(sec => (sec.projects||[]).forEach(p => { if(p.name===pname) p.custom_status=newStatus; }));
       renderDashboard();
-      // 手动改完状态：自动跑一次“一键刷新进度”，让卡片上的进度/缺集立即反映新阶段
-      if(typeof refreshProjectStatus === 'function'){
-        setTimeout(function(){
-          try{ refreshProjectStatus(pname, null, true); }catch(_){}
-        }, 260);   // 等卡片重绘完再扫，否则更新不到新 DOM
-      }
+      // 手动改完状态：模拟点一下卡片上的「🔄 刷新进度」按钮
+      // 为什么不直接调 refreshProjectStatus：那张卡片的分集摘要重绘依赖按钮点击后的完整链路，
+      // 直接调函数偶尔会出现“修改预览按钮没出来”的情况（用户实际遇到）。
+      // 点真实按钮走完全相同的代码路径，行为最一致。
+      setTimeout(function(){
+        try{
+          if(!simulateRefreshButton(pname)){
+            if(typeof refreshProjectStatus === 'function') refreshProjectStatus(pname, null, true);
+          }
+        }catch(_){}
+      }, 420);
       // 状态变为"待提交审核"：自动进入审核流程（二部批量回传 / 其他部门打开成片目录+分秒帧）
       if(newStatus === '待提交审核' && typeof submitReview === 'function'){
         setTimeout(function(){ submitReview(pname); }, 300);

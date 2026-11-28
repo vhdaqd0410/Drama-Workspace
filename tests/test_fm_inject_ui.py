@@ -139,10 +139,35 @@ class QueryTests(unittest.TestCase):
         self.assertIn("g.editor", seg, "未按剪辑师匹配")
 
     def test_fm_project_id_query(self):
+        """不再让用户手输项目ID，但后台仍用当前页项目ID 自动跟随（用户无感）。"""
         src = read("static/js/fm-inject.js")
         self.assertIn("currentFmId", src, "未读取当前页项目ID")
         self.assertIn("/projects/", src, "未从 URL 解析项目ID")
-        self.assertIn("get_episodes('', id", src, "未按项目ID查询")
+        self.assertIn("api.get_episodes(pname, id", src, "未把项目ID 传给后端反查")
+
+    def test_no_manual_id_input(self):
+        """用户反馈不知道分秒帧ID怎么来的，所以不提供手输ID 的入口。"""
+        src = read("static/js/fm-inject.js")
+        self.assertNotIn("分秒帧项目ID", src, "输入框提示里仍在让用户输ID")
+        self.assertNotIn("lastFmId", src, "还残留按ID 查询的状态")
+
+    def test_auto_follow_on_navigation(self):
+        """分秒帧里切项目（Next.js 走 history API）时，分集要自动换。"""
+        src = read("static/js/fm-inject.js")
+        self.assertIn("hookLocation", src, "缺少 URL 变化监听")
+        self.assertIn("pushState", src, "未 hook pushState")
+        self.assertIn("replaceState", src, "未 hook replaceState")
+        self.assertIn("popstate", src)
+
+    def test_project_name_search(self):
+        """要能按项目名模糊搜（制作中优先），而不是靠 ID。"""
+        src = read("static/js/fm-inject.js")
+        self.assertIn("search_projects", src, "缺少项目名搜索")
+        self.assertIn("setView", src, "缺少分集/项目视图切换")
+        m = read("main_desktop.py")
+        self.assertIn("def search_projects", m, "后端缺项目搜索接口")
+        seg = m[m.find("def search_projects"):][:1600]
+        self.assertIn("_rank", seg, "未按制作中优先排序")
 
     def test_current_url_preferred(self):
         """跳到别的项目后，用当前页 ID 而不是窗口记住的项目。"""

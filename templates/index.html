@@ -1721,6 +1721,15 @@ a{color:var(--blue);text-decoration:none}
         </div>
         <div style="font-size:11px;color:var(--text-sec);margin-top:4px">窗口隐藏到托盘后，从任意程序按此快捷键唤回窗口。⚠️ 重启软件生效。</div>
       </div>
+      <div class="form-group" style="margin-top:12px">
+        <label>🔗 分秒帧窗口</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="cfgFmShortcut" readonly placeholder="点击下方按钮录制，或默认 Ctrl+Alt+F" style="flex:1;padding:8px;border:1px solid var(--bg-border);border-radius:6px;background:#fff;cursor:pointer" onclick="startKeyRecord('fm')">
+          <button class="btn btn-sm" onclick="startKeyRecord('fm')">🎹 录制</button>
+          <button class="btn btn-sm danger" onclick="clearKeyRecord('fm')" title="恢复默认">✕</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-sec);margin-top:4px">从任意程序按此快捷键直接叫出分秒帧窗口（已开着就唤回，不会跳回首页）。⚠️ 重启软件生效。</div>
+      </div>
     </div>
     <div class="panel settings-section" style="grid-column:1/-1"><h3>👤 分集默认</h3>
       <div class="form-group"><label>建议剪辑师名字 (每行一个)</label><textarea id="cfgNames"></textarea></div>
